@@ -1,0 +1,132 @@
+/* Scoped Landing Styles */
+.zt-landing {
+  --primary-glow: radial-gradient(circle, rgba(37, 99, 255, 0.15) 0%, transparent 70%);
+  --border-glow: 0 0 12px rgba(37, 99, 255, 0.1), 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  background-color: #030409;
+}
+
+/* Scroll snap & behaviors */
+.zt-landing {
+  scroll-behavior: smooth;
+}
+
+/* Beautiful custom selections */
+.zt-landing ::selection {
+  background: rgba(37, 99, 255, 0.3);
+  color: #ffffff;
+}
+
+/* Premium Buttons & Interactive elements */
+.zt-landing .zt-btn-primary {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  box-shadow: 0 4px 20px rgba(37, 99, 255, 0.25), 0 1px 0 rgba(255, 255, 255, 0.15) inset;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.zt-landing .zt-btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 100%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.zt-landing .zt-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(37, 99, 255, 0.4), 0 1px 0 rgba(255, 255, 255, 0.25) inset;
+}
+
+.zt-landing .zt-btn-primary:hover::after {
+  opacity: 1;
+}
+
+.zt-landing .zt-btn-primary:active {
+  transform: translateY(0);
+}
+
+/* Glassmorphic cards */
+.zt-landing .zt-card-dark {
+  background: rgba(13, 18, 38, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.zt-landing .zt-card-dark:hover {
+  transform: translateY(-4px);
+  border-color: rgba(37, 99, 255, 0.25);
+  box-shadow: 0 20px 40px rgba(37, 99, 255, 0.15), 0 0 0 1px rgba(37, 99, 255, 0.1) inset;
+}
+
+/* Premium text gradient */
+.zt-landing .zt-grad-text {
+  background: linear-gradient(90deg, #60a5fa 0%, #3b82f6 50%, #2563eb 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 900;
+}
+
+/* Elegant Chips */
+.zt-landing .zt-chip {
+  background: rgba(37, 99, 255, 0.06);
+  border: 1px solid rgba(37, 99, 255, 0.15);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #93c5fd;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.zt-landing .zt-chip:hover {
+  background: rgba(37, 99, 255, 0.12);
+  border-color: rgba(37, 99, 255, 0.35);
+}
+
+/* Modern inputs inside auth modal */
+.zt-landing input,
+.zt-landing select,
+.zt-landing textarea {
+  border-radius: 0.75rem !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  transition: all 0.2s ease !important;
+}
+
+.zt-landing input:focus,
+.zt-landing select:focus,
+.zt-landing textarea:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Section styling refinements */
+.zt-landing section {
+  position: relative;
+}
+
+/* Navigation Link hover effect */
+.zt-landing nav a {
+  position: relative;
+}
+
+.zt-landing nav a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: #3b82f6;
+  transition: width 0.3s ease;
+}
+
+.zt-landing nav a:hover::after {
+  width: 100%;
+}

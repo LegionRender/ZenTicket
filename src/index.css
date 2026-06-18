@@ -1,0 +1,603 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+:root {
+    --zt-bg: #0a0d18;
+    --zt-bg-2: #0d1126;
+    --zt-ink: #0b1020;
+    --zt-blue: #2563ff;
+    --zt-blue-2: #4f7cff;
+    --zt-blue-soft: #6ea0ff;
+    --zt-muted: #b8c0d4;
+    --zt-line: rgba(255, 255, 255, 0.08);
+    --zt-card: rgba(255, 255, 255, 0.04);
+    --zt-card-strong: rgba(255, 255, 255, 0.06);
+}
+
+html,
+body {
+    margin: 0;
+    background: #ffffff;
+    color: #0b1020;
+    font-family:
+        "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0s ease, color 0s ease;
+}
+
+html.dark,
+html.dark body {
+    background-color: #060913;
+    color: #f1f5f9;
+}
+
+:root {
+    --background: 0 0% 100%;
+    --foreground: 224 38% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 38% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 38% 8%;
+    --primary: 224 100% 57%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 224 38% 8%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 10% 45%;
+    --accent: 220 14% 96%;
+    --accent-foreground: 224 38% 8%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 224 100% 57%;
+    --radius: 1rem;
+}
+
+@theme {
+    --color-background: hsl(var(--background));
+    --color-foreground: hsl(var(--foreground));
+    --color-card: hsl(var(--card));
+    --color-card-foreground: hsl(var(--card-foreground));
+    --color-popover: hsl(var(--popover));
+    --color-popover-foreground: hsl(var(--popover-foreground));
+    --color-primary: hsl(var(--primary));
+    --color-primary-foreground: hsl(var(--primary-foreground));
+    --color-secondary: hsl(var(--secondary));
+    --color-secondary-foreground: hsl(var(--secondary-foreground));
+    --color-muted: hsl(var(--muted));
+    --color-muted-foreground: hsl(var(--muted-foreground));
+    --color-accent: hsl(var(--accent));
+    --color-accent-foreground: hsl(var(--accent-foreground));
+    --color-destructive: hsl(var(--destructive));
+    --color-destructive-foreground: hsl(var(--destructive-foreground));
+    --color-border: hsl(var(--border));
+    --color-input: hsl(var(--input));
+    --color-ring: hsl(var(--ring));
+}
+
+* {
+    @apply border-border;
+}
+
+/* ZenTicket utility classes */
+.zt-dark {
+    background: radial-gradient(
+            1200px 600px at 80% 10%,
+            rgba(37, 99, 255, 0.18) 0%,
+            transparent 60%
+        ),
+        linear-gradient(180deg, #070a16 0%, #0a0e22 60%, #0a0e22 100%);
+}
+
+.zt-card-dark {
+    background: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.04) 0%,
+        rgba(255, 255, 255, 0.02) 100%
+    );
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+}
+
+.zt-chip {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(8px);
+}
+
+.zt-grad-text {
+    background: linear-gradient(90deg, #6ea0ff 0%, #4f7cff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.zt-btn-primary {
+    background: linear-gradient(180deg, #3b6dff 0%, #2152ee 100%);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.18) inset,
+        0 12px 30px rgba(37, 99, 255, 0.35);
+    transition:
+        transform 200ms ease,
+        box-shadow 200ms ease,
+        filter 200ms ease;
+}
+.zt-btn-primary:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.2) inset,
+        0 18px 40px rgba(37, 99, 255, 0.45);
+}
+
+.zt-btn-ghost-dark {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    transition:
+        background 200ms ease,
+        border-color 200ms ease,
+        transform 200ms ease;
+}
+.zt-btn-ghost-dark:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.zt-divider-dot {
+    background-image: radial-gradient(
+        rgba(255, 255, 255, 0.18) 1px,
+        transparent 1px
+    );
+    background-size: 10px 10px;
+}
+
+/* Light bg patterns */
+.zt-light-grid {
+    background-image:
+        linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+}
+
+.zt-soft-bg {
+    background:
+        radial-gradient(
+            900px 500px at 15% 30%,
+            rgba(37, 99, 255, 0.08),
+            transparent 60%
+        ),
+        radial-gradient(
+            700px 400px at 90% 70%,
+            rgba(37, 99, 255, 0.06),
+            transparent 60%
+        ),
+        linear-gradient(180deg, #f6f8ff 0%, #eef2fb 100%);
+}
+
+html.dark .zt-soft-bg {
+    background:
+        radial-gradient(
+            900px 500px at 15% 30%,
+            rgba(37, 99, 255, 0.14),
+            transparent 60%
+        ),
+        radial-gradient(
+            700px 400px at 90% 70%,
+            rgba(37, 99, 255, 0.09),
+            transparent 60%
+        ),
+        linear-gradient(180deg, #060913 0%, #030408 100%) !important;
+}
+
+/* Subtle dotted connector for how-it-works */
+.zt-dotline {
+    background-image: radial-gradient(
+        rgba(15, 23, 42, 0.18) 1.5px,
+        transparent 1.5px
+    );
+    background-size: 12px 2px;
+    background-repeat: repeat-x;
+    background-position: center;
+}
+
+/* Marquee */
+@keyframes ztMarquee {
+    from {
+        transform: translateX(0);
+    }
+    to {
+        transform: translateX(-50%);
+    }
+}
+.zt-marquee {
+    animation: ztMarquee 40s linear infinite;
+}
+
+/* Floating mascot */
+@keyframes ztFloat {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-10px);
+    }
+}
+.zt-float {
+    animation: ztFloat 6s ease-in-out infinite;
+}
+
+/* ============================================== */
+/* ZenAura — luxurious ambient background animation */
+/* (used behind the mascot in Assistant & Final CTA) */
+/* ============================================== */
+
+/* Slow wide breathing — outer atmosphere */
+@keyframes ztAuraSlow {
+    0%,
+    100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.85;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.06);
+        opacity: 1;
+    }
+}
+
+/* Bright pulsing bloom — the heart of the glow */
+@keyframes ztAuraPulse {
+    0%,
+    100% {
+        transform: translate(-50%, -50%) scale(0.94);
+        opacity: 0.75;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.08);
+        opacity: 1;
+    }
+}
+
+/* Inner highlight that drifts gently around the centre */
+@keyframes ztAuraDrift {
+    0%,
+    100% {
+        transform: translate(-50%, -50%) translate(0, 0) scale(1);
+        opacity: 0.85;
+    }
+    33% {
+        transform: translate(-50%, -50%) translate(-3%, -2%) scale(1.06);
+        opacity: 1;
+    }
+    66% {
+        transform: translate(-50%, -50%) translate(3%, 2%) scale(0.96);
+        opacity: 0.9;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .zt-float {
+        animation: none !important;
+    }
+}
+
+
+/* Glow ring */
+.zt-glow {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
+        0 30px 80px -20px rgba(37, 99, 255, 0.45);
+}
+
+/* No scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+/* ============================================== */
+/* GORGEOUS HIGH-FIDELITY DARK MODE OVERRIDES */
+/* ============================================== */
+html.dark {
+    color-scheme: dark;
+}
+
+html.dark body {
+    background-color: #05070e;
+    color: #f1f5f9;
+}
+
+/* Background overrides */
+html.dark .bg-white {
+    background-color: #0b0d19 !important;
+}
+
+html.dark .bg-white\/95,
+html.dark .bg-white\/90 {
+    background-color: rgba(11, 13, 25, 0.92) !important;
+}
+
+html.dark .bg-white\/80 {
+    background-color: rgba(9, 11, 21, 0.82) !important;
+}
+
+html.dark .bg-white\/50 {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+}
+
+html.dark .bg-white\/40,
+html.dark .bg-white\/30,
+html.dark .bg-white\/20,
+html.dark .bg-white\/15,
+html.dark .bg-white\/10 {
+    background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+html.dark .bg-slate-50,
+html.dark .bg-slate-100,
+html.dark .bg-slate-150\/50,
+html.dark .bg-\[\#f8fafc\],
+html.dark .bg-\[\#F8FAFC\]\/90,
+html.dark .bg-\[\#F8FAFC\],
+html.dark .bg-\[\#F4F7FF\],
+html.dark .bg-slate-100\/55,
+html.dark .bg-slate-55,
+html.dark .bg-slate-50\/50,
+html.dark .bg-slate-100\/50 {
+    background-color: #080a13 !important;
+}
+
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-slate-100:hover,
+html.dark .hover\:bg-slate-55:hover,
+html.dark .hover\:bg-slate-50\/50:hover {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Text color transformations for perfect legibility */
+html.dark .text-slate-950,
+html.dark .text-slate-900 {
+    color: #f8fafc !important;
+}
+
+html.dark .text-slate-800,
+html.dark .text-slate-850 {
+    color: #f1f5f9 !important;
+}
+
+html.dark .text-slate-700 {
+    color: #e2e8f0 !important;
+}
+
+html.dark .text-slate-600 {
+    color: #cbd5e1 !important;
+}
+
+html.dark .text-slate-500,
+html.dark .text-emerald-800,
+html.dark .text-rose-800,
+html.dark .text-slate-455,
+html.dark .text-slate-450 {
+    color: #94a3b8 !important;
+}
+
+html.dark .text-slate-400 {
+    color: #cbd5e1 !important;
+}
+
+html.dark .text-\[\#0b1020\],
+html.dark .text-\[\#1E293B\],
+html.dark .text-\[\#1a202c\] {
+    color: #f1f5f9 !important;
+}
+
+/* Borders and lines */
+html.dark .border-slate-200,
+html.dark .border-slate-200\/60,
+html.dark .border-slate-200\/50,
+html.dark .border-slate-200\/40,
+html.dark .border-slate-150\/50,
+html.dark .border-slate-100,
+html.dark .border-slate-300,
+html.dark .border-slate-250\/20,
+html.dark .border-slate-202,
+html.dark .border-\[\#cbd5e1\]\/40,
+html.dark .border-indigo-250\/20,
+html.dark .border-\[\#ebf1ff\],
+html.dark .border-\[\#EBF1FF\],
+html.dark .border-amber-250\/20,
+html.dark .border-rose-250\/20,
+html.dark .border-emerald-250\/20,
+html.dark .border-amber-100,
+html.dark .border-amber-200 {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html.dark .divide-slate-200 > *,
+html.dark .divide-slate-100 > *,
+html.dark .divide-y > * {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Inputs, texts & placeholders */
+html.dark input,
+html.dark select,
+html.dark textarea,
+html.dark .bg-white\/90 input,
+html.dark .bg-white\/90 select,
+html.dark .bg-white\/90 textarea {
+    background-color: #0c1024 !important;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+    color: rgba(255, 255, 255, 0.35) !important;
+}
+
+/* In-app action buttons inside cards */
+html.dark .bg-white.hover\:bg-slate-50,
+html.dark .bg-white.hover\:bg-slate-55 {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    color: #f1f5f9 !important;
+}
+html.dark .bg-white.hover\:bg-slate-50:hover,
+html.dark .bg-white.hover\:bg-slate-55:hover {
+    background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Dropdown list boxes under dark theme */
+html.dark .absolute.bg-white {
+    background-color: #0d1022 !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Sidebar support */
+html.dark aside nav button:not(.zt-btn-primary) {
+    color: #cbd5e1 !important;
+}
+html.dark aside nav button:not(.zt-btn-primary):hover {
+    color: #ffffff !important;
+    background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Tag/Status Badge standardisation */
+html.dark .bg-amber-50,
+html.dark .bg-amber-500\/5,
+html.dark .text-amber-800,
+html.dark .text-amber-900 {
+    background-color: rgba(245, 158, 11, 0.1) !important;
+    color: #f59e0b !important;
+    border-color: rgba(245, 158, 11, 0.15) !important;
+}
+html.dark .bg-rose-50,
+html.dark .bg-rose-500\/5,
+html.dark .text-rose-800,
+html.dark .text-rose-900 {
+    background-color: rgba(244, 63, 94, 0.1) !important;
+    color: #f43f5e !important;
+    border-color: rgba(244, 63, 94, 0.15) !important;
+}
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-500\/5,
+html.dark .text-emerald-800,
+html.dark .text-emerald-900 {
+    background-color: rgba(16, 185, 129, 0.1) !important;
+    color: #10b981 !important;
+    border-color: rgba(16, 185, 129, 0.15) !important;
+}
+html.dark .bg-violet-50,
+html.dark .bg-violet-500\/5,
+html.dark .text-violet-800,
+html.dark .text-violet-900 {
+    background-color: rgba(139, 92, 246, 0.1) !important;
+    color: #8b5cf6 !important;
+    border-color: rgba(139, 92, 246, 0.15) !important;
+}
+html.dark .bg-blue-50,
+html.dark .bg-blue-50\/50,
+html.dark .bg-blue-500\/5,
+html.dark .text-blue-800,
+html.dark .text-blue-900 {
+    background-color: rgba(59, 130, 246, 0.12) !important;
+    color: #60a5fa !important;
+    border-color: rgba(59, 130, 246, 0.18) !important;
+}
+
+/* Comparison visual blocks compatibility */
+html.dark .bg-\[\#F4F7FF\] {
+    background-color: #0d1226 !important;
+    border-color: rgba(37, 99, 255, 0.25) !important;
+}
+html.dark .bg-\[\#F8FAFC\]\/90 {
+    background-color: #070914 !important;
+    border-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Toggle Switches */
+html.dark .bg-\[\#EBF1FF\] {
+    background-color: rgba(37, 99, 255, 0.1) !important;
+    color: #4f7cff !important;
+}
+
+/* ======================================================= */
+/* ADDITIONAL EXQUISITE HIGH-FIDELITY DARK OVERRIDES */
+/* ======================================================= */
+
+/* ZendTicket wide brand logo invert with hue-rotate to protect Zen blue tick */
+html.dark img[src*="Zenticket%20logo"],
+html.dark img[src*="23vqzgm3_Zenticket"],
+html.dark a[aria-label="ZenTicket — inicio"] img,
+html.dark aside .cursor-pointer img,
+html.dark header .cursor-pointer img {
+    filter: invert(1) hue-rotate(180deg) brightness(1.2) contrast(1.15) !important;
+}
+
+/* Connectors / admin screen specific background containers mapped to premium dark equivalents */
+html.dark .bg-\[\#EBF1FF\]\/70,
+html.dark .bg-\[\#ebf1ff\]\/70 {
+    background-color: rgba(11, 83, 244, 0.08) !important;
+    color: #cbd5e1 !important;
+}
+html.dark .bg-\[\#E4ECFE\]\/70,
+html.dark .bg-\[\#CBD9FE\]\/10 {
+    background-color: rgba(37, 99, 255, 0.07) !important;
+    border-color: rgba(37, 99, 255, 0.16) !important;
+}
+html.dark .hover\:bg-\[\#E4ECFE\]:hover {
+    background-color: rgba(37, 99, 255, 0.14) !important;
+}
+html.dark .bg-\[\#FAF9FF\] {
+    background-color: #0c0e1a !important;
+    border-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Elegant Dotted connector lines for SaaS layout readability */
+html.dark .zt-dotline {
+    background-image: radial-gradient(
+        rgba(255, 255, 255, 0.22) 1.5px,
+        transparent 1.5px
+    ) !important;
+}
+
+/* Text color contrast enhancements for premium readability */
+html.dark .text-slate-655,
+html.dark .text-slate-650,
+html.dark .text-slate-605,
+html.dark .text-slate-600 {
+    color: #cbd5e1 !important;
+}
+
+/* Handling warning/amber Processing labels */
+html.dark .bg-\[\#FEF3C7\],
+html.dark .bg-amber-100 {
+    background-color: rgba(245, 158, 11, 0.11) !important;
+    border-color: rgba(245, 158, 11, 0.18) !important;
+}
+html.dark .text-\[\#D97706\],
+html.dark .text-amber-700 {
+    color: #f59e0b !important;
+}
+
+/* Ensure form input borders have neon electrical blue focus rings */
+html.dark input:focus,
+html.dark select:focus,
+html.dark textarea:focus {
+    border-color: #0B53F4 !important;
+    box-shadow: 0 0 0 2px rgba(11, 83, 244, 0.2) !important;
+}
+
+/* Custom premium hover glow effect for SaaS / Fintech appearance */
+.zt-hover-glow:hover {
+    box-shadow: 0 0 20px rgba(11, 83, 244, 0.15) !important;
+    border-color: rgba(11, 83, 244, 0.25) !important;
+}

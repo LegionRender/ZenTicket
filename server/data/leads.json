@@ -1,0 +1,20 @@
+[
+  {
+    "id": "lead_1781735855546_we3qfg",
+    "name": "Duplicate Lead",
+    "email": "duplicate@example.com",
+    "plan": "empresa",
+    "status": "new",
+    "source": "lead_modal",
+    "receivedAt": "2026-06-17T22:37:35.546Z"
+  },
+  {
+    "id": "lead_1781719693650_fjvn3g",
+    "name": "Lead Script",
+    "email": "leadscript@example.com",
+    "plan": "personal",
+    "status": "new",
+    "source": "lead_modal",
+    "receivedAt": "2026-06-17T18:08:13.650Z"
+  }
+]

@@ -1,0 +1,111 @@
+export const MOCK_ACTIVE_TICKETS = [
+  {
+    id: "mock-active-1",
+    nombreEmisor: "Starbucks Santa Fe",
+    folio: "88219",
+    fechaCompra: "12 Oct",
+    total: 245.0,
+    status: "processing" as const,
+  },
+  {
+    id: "mock-active-2",
+    nombreEmisor: "Gasolinera Pemex",
+    folio: "11029",
+    fechaCompra: "11 Oct",
+    total: 1200.5,
+    status: "processing" as const,
+  },
+];
+
+export const MOCK_EMITTED_INVOICES = [
+  {
+    id: "mock-inv-oxxo",
+    ticketId: "mock-active-oxxo",
+    nombreEmisor: "Oxxo",
+    rfcEmisor: "OXXO8605231N4",
+    nombreReceptor: "LEONARDO GOMEZ RENDER",
+    rfcReceptor: "GORL940812S1A",
+    folioFiscal: "F4A9D231-15BB-47AD-A12B-DF9E2184B1E5",
+    total: 145.0,
+    createdAt: "15/10/2023",
+    items: [
+      { description: "1x Coca-Cola Sin Azúcar 600ml", amount: 18.5, code: "50202306" },
+      { description: "1x Sándwich de Jamón y Queso", amount: 48.0, code: "50192500" },
+      { description: "1x Papas Sabritas Adobadas 42g", amount: 22.5, code: "50192100" },
+      { description: "1x Café Americano Andatti Med", amount: 56.0, code: "50201708" },
+    ],
+    xmlContent:
+      '<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Version="4.0" Total="145.00" SubTotal="125.00"><cfdi:Emisor Rfc="OXXO8605231N4" Nombre="OXXO S.A. DE C.V."/><cfdi:Receptor Rfc="GORL940812S1A" Nombre="LEONARDO GOMEZ RENDER" UsoCFDI="G03"/></cfdi:Comprobante>',
+  },
+  {
+    id: "mock-inv-walmart",
+    ticketId: "mock-active-walmart",
+    nombreEmisor: "Walmart",
+    rfcEmisor: "WALM9203251A9",
+    nombreReceptor: "LEONARDO GOMEZ RENDER",
+    rfcReceptor: "GORL940812S1A",
+    folioFiscal: "A3B5F691-89CD-4A5D-B27D-5A8FCE46C89A",
+    total: 1112.3,
+    createdAt: "14/10/2023",
+    items: [
+      { description: "1x Detergente Líquido Ariel 4L", amount: 249.0, code: "47131801" },
+      { description: "1x Pañal Huggies All Around G", amount: 389.0, code: "53102305" },
+      { description: "1x Aceite Vegetal Capullo 840ml", amount: 54.5, code: "50151513" },
+      { description: "2x Arroz Súper Extra Morelos 1kg", amount: 68.0, code: "50221101" },
+      { description: "1x Pechuga de Pollo Premium 1.2kg", amount: 168.0, code: "50111515" },
+      { description: "1x Desodorante Rexona Clinical Men", amount: 95.0, code: "53131609" },
+      { description: "1x Sector Frutas y Verduras Frescas", amount: 88.8, code: "50401500" },
+    ],
+    xmlContent:
+      '<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Version="4.0" Total="1112.30" SubTotal="958.88"><cfdi:Emisor Rfc="WALM9203251A9" Nombre="WAL COMPREHENSIVE S. DE R.L."/><cfdi:Receptor Rfc="GORL940812S1A" Nombre="LEONARDO GOMEZ RENDER" UsoCFDI="G03"/></cfdi:Comprobante>',
+  },
+  {
+    id: "mock-inv-farmacia",
+    ticketId: "mock-active-farmacia",
+    nombreEmisor: "Farmacia San Pablo",
+    rfcEmisor: "FSAP9203112A4",
+    nombreReceptor: "LEONARDO GOMEZ RENDER",
+    rfcReceptor: "GORL940812S1A",
+    folioFiscal: "D4E8F1A2-D6FE-437E-9CE1-6A2F1B8A4D2E",
+    total: 450.0,
+    createdAt: "12/10/2023",
+    items: [
+      { description: "1x Tempra Forte 650mg 24 Tabs", amount: 145.0, code: "51101500" },
+      { description: "1x Histiacil Jarabe Adulto 150ml", amount: 185.0, code: "51181503" },
+      { description: "1x Gasa Estéril Caja 10 pzas", amount: 120.0, code: "42141503" },
+    ],
+    xmlContent:
+      '<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Version="4.0" Total="450.00" SubTotal="387.93"><cfdi:Emisor Rfc="FSAP9203112A4" Nombre="FARMACIA SAN PABLO S.A."/><cfdi:Receptor Rfc="GORL940812S1A" Nombre="LEONARDO GOMEZ RENDER" UsoCFDI="G03"/></cfdi:Comprobante>',
+  },
+  {
+    id: "mock-inv-pemex",
+    ticketId: "mock-active-pemex",
+    nombreEmisor: "Gasolinera Pemex",
+    rfcEmisor: "PEME8201249A2",
+    nombreReceptor: "LEONARDO GOMEZ RENDER",
+    rfcReceptor: "GORL940812S1A",
+    folioFiscal: "BE82C10E-5C13-4D90-A8EA-61E627B1390E",
+    total: 1200.5,
+    createdAt: "11/10/2023",
+    items: [{ description: "51.30L Gasolina Magna (Pemex Regular)", amount: 1200.5, code: "15101514" }],
+    xmlContent:
+      '<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Version="4.0" Total="1200.50" SubTotal="1034.91"><cfdi:Emisor Rfc="PEME8201249A2" Nombre="COMBUSTIBLES PEMEX S.A."/><cfdi:Receptor Rfc="GORL940812S1A" Nombre="LEONARDO GOMEZ RENDER" UsoCFDI="G03"/></cfdi:Comprobante>',
+  },
+  {
+    id: "mock-inv-starbucks",
+    ticketId: "mock-active-starbucks",
+    nombreEmisor: "Starbucks",
+    rfcEmisor: "CSI020226MV4",
+    nombreReceptor: "LEONARDO GOMEZ RENDER",
+    rfcReceptor: "GORL940812S1A",
+    folioFiscal: "E5B9...4D22",
+    total: 225.0,
+    createdAt: "24/10/2023 14:22:10",
+    items: [
+      { description: "1x Latte Venti Caliente", amount: 105.0, code: "90101700" },
+      { description: "1x Panini Pavo", amount: 120.0, code: "90101700" },
+    ],
+    xmlContent:
+      '<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Version="4.0" Total="225.00" SubTotal="193.97"><cfdi:Emisor Rfc="CSI020226MV4" Nombre="CAFÉ SIRENA S. DE R.L. DE C.V."/><cfdi:Receptor Rfc="GORL940812S1A" Nombre="LEONARDO GOMEZ RENDER" UsoCFDI="G03"/></cfdi:Comprobante>',
+  },
+];

@@ -1,0 +1,61 @@
+.zt-workspace {
+  --workspace-background: linear-gradient(
+    180deg,
+    #030514 0%,
+    #091230 52%,
+    #0c1b4f 100%
+  );
+  --workspace-header: rgba(3, 5, 20, 0.78);
+  --workspace-surface-primary: #f6f9fc;
+  --workspace-surface-secondary: rgba(255, 255, 255, 0.78);
+  --workspace-surface-elevated: #ffffff;
+  --workspace-surface-dark: #020512;
+  --workspace-text-primary: #0a1128;
+  --workspace-text-secondary: #2a3c64;
+  --workspace-text-muted: #5e739c;
+  --workspace-text-on-gradient: #f6f9fc;
+  --workspace-border-default: rgba(99, 130, 214, 0.18);
+  --workspace-border-subtle: rgba(255, 255, 255, 0.12);
+  --workspace-brand-navy: #030514;
+  --workspace-brand-blue: #0b4df2;
+  --workspace-brand-cyan: #17c6ff;
+  --workspace-success: #10b981;
+  --workspace-warning: #f59e0b;
+  --workspace-danger: #ef4444;
+  --workspace-info: #3b82f6;
+  --shadow-surface: 0 8px 24px rgba(2, 6, 23, 0.04), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+  --shadow-elevated: 0 16px 40px rgba(2, 6, 23, 0.08), 0 1px 0 rgba(255, 255, 255, 0.1) inset;
+  --shadow-floating: 0 20px 50px rgba(11, 83, 244, 0.22);
+  --workspace-glow-primary: 0 0 0 1px rgba(23, 198, 255, 0.18), 0 8px 18px rgba(11, 77, 242, 0.2);
+}
+
+.font-display {
+  font-family: "Manrope", "Inter", sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.font-body {
+  font-family: "Inter", sans-serif;
+}
+
+.zt-workspace::selection,
+.zt-workspace ::selection {
+  background: rgba(37, 99, 255, 0.2);
+  color: #0b1736;
+}
+
+html.dark .zt-workspace {
+  --workspace-surface-primary: #030514;
+  --workspace-surface-secondary: rgba(6, 11, 36, 0.92);
+  --workspace-surface-elevated: #060b24;
+  --workspace-surface-dark: #010207;
+  --workspace-text-primary: #f1f5f9;
+  --workspace-text-secondary: #a3b8cc;
+  --workspace-text-muted: #64748b;
+  --workspace-text-on-gradient: #f1f5f9;
+  --workspace-border-default: rgba(255, 255, 255, 0.05);
+  --workspace-border-subtle: rgba(255, 255, 255, 0.08);
+  --shadow-surface: 0 12px 30px rgba(0, 0, 0, 0.45);
+  --shadow-elevated: 0 24px 60px rgba(0, 0, 0, 0.65);
+  --shadow-floating: 0 30px 70px rgba(11, 83, 244, 0.32);
+}

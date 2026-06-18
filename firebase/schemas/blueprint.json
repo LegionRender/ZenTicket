@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "FiscalProfile": {
+      "title": "FiscalProfile",
+      "description": "User fiscal details required to issue invoices under CFDI v4.0",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The Firebase User ID of the owner" },
+        "rfc": { "type": "string", "description": "Mexican RFC (12 or 13 chars)" },
+        "razonSocial": { "type": "string", "description": "Tax name or legal entity name" },
+        "regimenFiscal": { "type": "string", "description": "Régimen Fiscal (e.g., 601, 605, 625)" },
+        "codigoPostal": { "type": "string", "description": "Tax address postal code (5 digits)" },
+        "usoCFDI": { "type": "string", "description": "Uso de CFDI (e.g., G03, D01)" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "rfc", "razonSocial", "regimenFiscal", "codigoPostal", "usoCFDI"]
+    },
+    "Ticket": {
+      "title": "Ticket",
+      "description": "Represents a purchase ticket uploaded by a user and processed by AI OCR",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "imageUrl": { "type": "string", "description": "Base64 or storage URL of the ticket image" },
+        "status": { "type": "string", "enum": ["extracted", "processing", "completed", "failed"] },
+        "rfcEmisor": { "type": "string" },
+        "nombreEmisor": { "type": "string" },
+        "fechaCompra": { "type": "string" },
+        "folio": { "type": "string" },
+        "total": { "type": "number" },
+        "sucursal": { "type": "string" },
+        "itemsJson": { "type": "string" },
+        "connectorId": { "type": "string" },
+        "invoiceId": { "type": "string" },
+        "errorMsg": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "imageUrl", "status", "createdAt"]
+    },
+    "Connector": {
+      "title": "Connector",
+      "description": "Defines rules, fields, and workflow mapping for a specific invoicing website/portal",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owned by user or 'system' for defaults" },
+        "nombre": { "type": "string", "description": "Business Name e.g. Starbucks, Oxxo" },
+        "rfc": { "type": "string" },
+        "portalUrl": { "type": "string" },
+        "fieldsJson": { "type": "string", "description": "JSON serialized array of fields with selectors" },
+        "flowJson": { "type": "string", "description": "JSON serialized string array of step guides" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "cost": { "type": "number", "description": "Cost of learning this connector in MXN" },
+        "learnedFrom": { "type": "string", "enum": ["automatizacion_ticket", "portal_admin"], "description": "Whether it was learned inline from ticket automation or from the admin portal" }
+      },
+      "required": ["nombre", "rfc", "portalUrl", "fieldsJson", "flowJson", "createdAt"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "A successfully generated visual mock CFDI invoice and associated metadata",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "ticketId": { "type": "string" },
+        "folioFiscal": { "type": "string", "description": "UUID representation of CFDI" },
+        "rfcEmisor": { "type": "string" },
+        "nombreEmisor": { "type": "string" },
+        "rfcReceptor": { "type": "string" },
+        "nombreReceptor": { "type": "string" },
+        "total": { "type": "number" },
+        "xmlContent": { "type": "string" },
+        "pdfHtml": { "type": "string", "description": "Visual PDF schema rendering" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "cost": { "type": "number", "description": "Cost of generating the invoice" },
+        "connectorType": { "type": "string", "enum": ["existente", "nuevo"], "description": "Whether an existing or new connector was used" }
+      },
+      "required": ["userId", "ticketId", "folioFiscal", "rfcEmisor", "nombreEmisor", "rfcReceptor", "nombreReceptor", "total", "xmlContent", "createdAt"]
+    }
+  },
+  "firestore": {
+    "fiscalProfiles/{userId}": {
+      "schema": "FiscalProfile",
+      "description": "User tax fiscal profile details"
+    },
+    "tickets/{ticketId}": {
+      "schema": "Ticket",
+      "description": "Stored purchase tickets"
+    },
+    "connectors/{connectorId}": {
+      "schema": "Connector",
+      "description": "Invoicing portal web connectors and selectors"
+    },
+    "invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Invoices produced"
+    }
+  }
+}
