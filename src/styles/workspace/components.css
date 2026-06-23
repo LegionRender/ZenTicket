@@ -1,0 +1,163 @@
+.zt-card-dark {
+    background: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.04) 0%,
+        rgba(255, 255, 255, 0.02) 100%
+    );
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+}
+
+.zt-chip {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(8px);
+}
+
+.zt-grad-text {
+    background: linear-gradient(90deg, #6ea0ff 0%, #4f7cff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.zt-btn-primary {
+    background: linear-gradient(180deg, #3b6dff 0%, #2152ee 100%);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.18) inset,
+        0 12px 30px rgba(37, 99, 255, 0.35);
+    transition:
+        transform 200ms ease,
+        box-shadow 200ms ease,
+        filter 200ms ease;
+}
+.zt-btn-primary:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.2) inset,
+        0 18px 40px rgba(37, 99, 255, 0.45);
+}
+
+.zt-btn-ghost-dark {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    transition:
+        background 200ms ease,
+        border-color 200ms ease,
+        transform 200ms ease;
+}
+.zt-btn-ghost-dark:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.zt-divider-dot {
+    background-image: radial-gradient(
+        rgba(255, 255, 255, 0.18) 1px,
+        transparent 1px
+    );
+    background-size: 10px 10px;
+}
+
+/* Glow ring */
+.zt-glow {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
+        0 30px 80px -20px rgba(37, 99, 255, 0.45);
+}
+
+/* Custom premium hover glow effect for SaaS / Fintech appearance */
+.zt-hover-glow:hover {
+    box-shadow: 0 0 20px rgba(11, 83, 244, 0.15) !important;
+    border-color: rgba(11, 83, 244, 0.25) !important;
+}
+
+/* Unified Gray Buttons Override to "Ver PDF / Descargar XML" style in Light Mode */
+button.bg-slate-50,
+button.bg-slate-100,
+button.bg-slate-200,
+button.bg-slate-205,
+button.bg-slate-300,
+button.bg-slate-350,
+button[class*="bg-slate-50"],
+button[class*="bg-slate-100"],
+button[class*="bg-slate-200"],
+button[class*="bg-slate-205"],
+button[class*="bg-slate-300"],
+button[class*="bg-slate-350"],
+[class*="bg-slate-50"].cursor-pointer,
+[class*="bg-slate-100"].cursor-pointer,
+[class*="bg-slate-200"].cursor-pointer,
+[class*="bg-slate-205"].cursor-pointer,
+[class*="bg-slate-300"].cursor-pointer,
+[class*="bg-slate-350"].cursor-pointer,
+[class*="bg-slate-50"][class*="cursor-pointer"],
+[class*="bg-slate-100"][class*="cursor-pointer"],
+[class*="bg-slate-200"][class*="cursor-pointer"],
+[class*="bg-slate-205"][class*="cursor-pointer"],
+[class*="bg-slate-300"][class*="cursor-pointer"],
+[class*="bg-slate-350"][class*="cursor-pointer"] {
+    background-color: #ebf1ff !important;
+    color: #0B53F4 !important;
+    border-color: rgba(11, 83, 244, 0.16) !important;
+}
+
+button.bg-slate-50:hover,
+button.bg-slate-100:hover,
+button.bg-slate-200:hover,
+button.bg-slate-205:hover,
+button.bg-slate-300:hover,
+button.bg-slate-350:hover,
+button[class*="bg-slate-50"]:hover,
+button[class*="bg-slate-100"]:hover,
+button[class*="bg-slate-200"]:hover,
+button[class*="bg-slate-205"]:hover,
+button[class*="bg-slate-300"]:hover,
+button[class*="bg-slate-350"]:hover,
+[class*="bg-slate-50"].cursor-pointer:hover,
+[class*="bg-slate-100"].cursor-pointer:hover,
+[class*="bg-slate-200"].cursor-pointer:hover,
+[class*="bg-slate-205"].cursor-pointer:hover,
+[class*="bg-slate-300"].cursor-pointer:hover,
+[class*="bg-slate-350"].cursor-pointer:hover,
+[class*="bg-slate-50"][class*="cursor-pointer"]:hover,
+[class*="bg-slate-100"][class*="cursor-pointer"]:hover,
+[class*="bg-slate-200"][class*="cursor-pointer"]:hover,
+[class*="bg-slate-205"][class*="cursor-pointer"]:hover,
+[class*="bg-slate-300"][class*="cursor-pointer"]:hover,
+[class*="bg-slate-350"][class*="cursor-pointer"]:hover {
+    background-color: rgba(11, 83, 244, 0.15) !important;
+    color: #0c4ad1 !important;
+    border-color: rgba(11, 83, 244, 0.24) !important;
+}
+
+/* Ensure child icons/SVGs in these buttons inherit unified blue colors */
+button.bg-slate-50 svg,
+button.bg-slate-100 svg,
+button.bg-slate-200 svg,
+button.bg-slate-205 svg,
+button.bg-slate-300 svg,
+button.bg-slate-350 svg,
+button[class*="bg-slate-50"] svg,
+button[class*="bg-slate-100"] svg,
+button[class*="bg-slate-200"] svg,
+button[class*="bg-slate-205"] svg,
+button[class*="bg-slate-300"] svg,
+button[class*="bg-slate-350"] svg,
+[class*="bg-slate-50"].cursor-pointer svg,
+[class*="bg-slate-100"].cursor-pointer svg,
+[class*="bg-slate-200"].cursor-pointer svg,
+[class*="bg-slate-205"].cursor-pointer svg,
+[class*="bg-slate-300"].cursor-pointer svg,
+[class*="bg-slate-350"].cursor-pointer svg,
+[class*="bg-slate-50"][class*="cursor-pointer"] svg,
+[class*="bg-slate-100"][class*="cursor-pointer"] svg,
+[class*="bg-slate-200"][class*="cursor-pointer"] svg,
+[class*="bg-slate-205"][class*="cursor-pointer"] svg,
+[class*="bg-slate-300"][class*="cursor-pointer"] svg,
+[class*="bg-slate-350"][class*="cursor-pointer"] svg {
+    color: #0B53F4 !important;
+    stroke: #0B53F4 !important;
+}
+

@@ -1,0 +1,10 @@
+{
+  "name": "Remix: FactuBot",
+  "description": "Automatización de facturación mexicana a partir de fotos de tickets con extracción por IA y simulación de conectores.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

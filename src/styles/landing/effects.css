@@ -1,0 +1,69 @@
+/* Slow wide breathing — outer atmosphere */
+@keyframes ztAuraSlow {
+    0%,
+    100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.85;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.06);
+        opacity: 1;
+    }
+}
+
+/* Bright pulsing bloom — the heart of the glow */
+@keyframes ztAuraPulse {
+    0%,
+    100% {
+        transform: translate(-50%, -50%) scale(0.94);
+        opacity: 0.75;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.08);
+        opacity: 1;
+    }
+}
+
+/* Inner highlight that drifts gently around the centre */
+@keyframes ztAuraDrift {
+    0%,
+    100% {
+        transform: translate(-50%, -50%) translate(0, 0) scale(1);
+        opacity: 0.85;
+    }
+    33% {
+        transform: translate(-50%, -50%) translate(-3%, -2%) scale(1.06);
+        opacity: 1;
+    }
+    66% {
+        transform: translate(-50%, -50%) translate(3%, 2%) scale(0.96);
+        opacity: 0.9;
+    }
+}
+
+/* Floating mascot */
+@keyframes ztFloat {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-10px);
+    }
+}
+.zt-float {
+    animation: ztFloat 6s ease-in-out infinite;
+}
+
+/* Marquee */
+@keyframes ztMarquee {
+    from {
+        transform: translateX(0);
+    }
+    to {
+        transform: translateX(-50%);
+    }
+}
+.zt-marquee {
+    animation: ztMarquee 40s linear infinite;
+}

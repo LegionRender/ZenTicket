@@ -1,0 +1,21 @@
+.zt-soft-bg {
+    background:
+        radial-gradient(
+            900px 500px at 15% 30%,
+            rgba(37, 99, 255, 0.08),
+            transparent 60%
+        ),
+        radial-gradient(
+            700px 400px at 90% 70%,
+            rgba(37, 99, 255, 0.06),
+            transparent 60%
+        ),
+        linear-gradient(180deg, #f6f8ff 0%, #eef2fb 100%);
+}
+
+.zt-light-grid {
+    background-image:
+        linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+}

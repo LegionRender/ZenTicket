@@ -1,0 +1,127 @@
+.zt-card-dark {
+    background: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.04) 0%,
+        rgba(255, 255, 255, 0.02) 100%
+    );
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+}
+
+.zt-chip {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(8px);
+}
+
+.zt-grad-text {
+    background: linear-gradient(90deg, #6ea0ff 0%, #4f7cff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.zt-btn-primary {
+    background: linear-gradient(180deg, #3b6dff 0%, #2152ee 100%);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.18) inset,
+        0 12px 30px rgba(37, 99, 255, 0.35);
+    transition:
+        transform 200ms ease,
+        box-shadow 200ms ease,
+        filter 200ms ease;
+}
+.zt-btn-primary:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.2) inset,
+        0 18px 40px rgba(37, 99, 255, 0.45);
+}
+
+.zt-btn-ghost-dark {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    transition:
+        background 200ms ease,
+        border-color 200ms ease,
+        transform 200ms ease;
+}
+.zt-btn-ghost-dark:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.zt-btn-secondary {
+    background-color: #f1f5ff;
+    color: #0B53F4;
+    border: 1px solid rgba(11, 83, 244, 0.16);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    transition:
+        background-color 150ms ease,
+        border-color 150ms ease,
+        color 150ms ease,
+        transform 150ms ease,
+        box-shadow 150ms ease;
+}
+.zt-btn-secondary:hover {
+    background-color: #e4ecff;
+    color: #0747D1;
+    border-color: rgba(11, 83, 244, 0.28);
+}
+.zt-btn-secondary:active {
+    transform: scale(0.98);
+}
+.zt-btn-secondary:focus-visible {
+    outline: 2px solid rgba(11, 83, 244, 0.28);
+    outline-offset: 2px;
+}
+.zt-btn-secondary svg {
+    color: currentColor;
+    stroke: currentColor;
+}
+
+.zt-btn-neutral {
+    background-color: #f8fafc;
+    color: #475569;
+    border: 1px solid #e2e8f0;
+    transition:
+        background-color 150ms ease,
+        border-color 150ms ease,
+        color 150ms ease,
+        transform 150ms ease;
+}
+.zt-btn-neutral:hover {
+    background-color: #f1f5f9;
+    color: #1e293b;
+    border-color: #cbd5e1;
+}
+.zt-btn-neutral:active {
+    transform: scale(0.98);
+}
+.zt-btn-neutral:focus-visible {
+    outline: 2px solid rgba(100, 116, 139, 0.28);
+    outline-offset: 2px;
+}
+
+.zt-divider-dot {
+    background-image: radial-gradient(
+        rgba(255, 255, 255, 0.18) 1px,
+        transparent 1px
+    );
+    background-size: 10px 10px;
+}
+
+/* Glow ring */
+.zt-glow {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
+        0 30px 80px -20px rgba(37, 99, 255, 0.45);
+}
+
+/* Custom premium hover glow effect for SaaS / Fintech appearance */
+.zt-hover-glow:hover {
+    box-shadow: 0 0 20px rgba(11, 83, 244, 0.15) !important;
+    border-color: rgba(11, 83, 244, 0.25) !important;
+}
+

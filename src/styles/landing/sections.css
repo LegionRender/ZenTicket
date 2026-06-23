@@ -1,0 +1,10 @@
+/* Subtle dotted connector for how-it-works */
+.zt-dotline {
+    background-image: radial-gradient(
+        rgba(15, 23, 42, 0.18) 1.5px,
+        transparent 1.5px
+    );
+    background-size: 12px 2px;
+    background-repeat: repeat-x;
+    background-position: center;
+}

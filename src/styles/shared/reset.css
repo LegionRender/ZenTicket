@@ -1,0 +1,35 @@
+html,
+body {
+    margin: 0;
+    background: #ffffff;
+    color: #0b1020;
+    font-family:
+        "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0s ease, color 0s ease;
+}
+
+* {
+    @apply border-border;
+}
+
+/* Selection */
+::selection {
+    background: #2563ff;
+    color: white;
+}
+
+/* No scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+/* App Wrapper Base */
+.App {
+    min-height: 100vh;
+}

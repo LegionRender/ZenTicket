@@ -1,0 +1,24 @@
+/* ZenTicket utility classes */
+.zt-dark {
+    background: radial-gradient(
+            1200px 600px at 80% 10%,
+            rgba(37, 99, 255, 0.18) 0%,
+            transparent 60%
+        ),
+        linear-gradient(180deg, #070a16 0%, #0a0e22 60%, #0a0e22 100%);
+}
+
+html.dark .zt-soft-bg {
+    background:
+        radial-gradient(
+            900px 500px at 15% 30%,
+            rgba(37, 99, 255, 0.14),
+            transparent 60%
+        ),
+        radial-gradient(
+            700px 400px at 90% 70%,
+            rgba(37, 99, 255, 0.09),
+            transparent 60%
+        ),
+        linear-gradient(180deg, #060913 0%, #030408 100%) !important;
+}

@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@import "./styles/shared/tokens.css";
+@import "./styles/shared/typography.css";
+@import "./styles/shared/reset.css";
+@import "./styles/shared/accessibility.css";
+
+@import "./styles/landing/landing.css";
+@import "./styles/landing/effects.css";
+@import "./styles/landing/sections.css";
+
+@import "./styles/workspace/workspace.css";
+@import "./styles/workspace/dark-theme.css";
+@import "./styles/workspace/components.css";
+
+@import "./styles/admin/admin.css";
