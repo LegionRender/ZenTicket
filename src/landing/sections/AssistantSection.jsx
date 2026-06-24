@@ -38,7 +38,7 @@ const AssistantSection = () => {
           {/* Mascot with animated video aura */}
           <div className="relative flex justify-center items-center min-h-[290px] lg:min-h-[680px]">
             {/* Fallback aura — shows through when the video can't decode */}
-            <div className="absolute inset-0 -mx-6 lg:-mx-12 overflow-hidden">
+            <div className="absolute inset-0 -mx-6 lg:-mx-12">
               <ZenAura theme="light" intensity={1} />
             </div>
             <div
@@ -46,11 +46,10 @@ const AssistantSection = () => {
               style={{
                 width: videoSize,
                 height: videoSize,
-                maxWidth: "calc(100vw - 48px)",
                 WebkitMaskImage:
-                  "radial-gradient(circle, #000 18%, rgba(0,0,0,0.55) 38%, rgba(0,0,0,0.18) 55%, transparent 70%)",
+                  "radial-gradient(circle, #000 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,0.15) 50%, transparent 65%)",
                 maskImage:
-                  "radial-gradient(circle, #000 18%, rgba(0,0,0,0.55) 38%, rgba(0,0,0,0.18) 55%, transparent 70%)",
+                  "radial-gradient(circle, #000 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,0.15) 50%, transparent 65%)",
               }}
             >
               <video

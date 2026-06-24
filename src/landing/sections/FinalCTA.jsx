@@ -46,7 +46,7 @@ const FinalCTA = ({ onCtaClick, onDemoClick }) => {
         <div className="grid lg:grid-cols-12 gap-6 lg:gap-8 items-center">
           <div className="lg:col-span-4 flex justify-center items-center relative min-h-[210px] lg:min-h-[480px]">
             {/* Fallback aura — shows through when the video can't decode */}
-            <div className="absolute inset-0 -mx-4 lg:-mx-8 overflow-hidden">
+            <div className="absolute inset-0 -mx-4 lg:-mx-8">
               <ZenAura theme="dark" intensity={0.9} />
             </div>
             {/* Animated video aura behind the mascot — tightly faded edges */}
@@ -55,11 +55,10 @@ const FinalCTA = ({ onCtaClick, onDemoClick }) => {
               style={{
                 width: videoSize,
                 height: videoSize,
-                maxWidth: "calc(100vw - 48px)",
                 WebkitMaskImage:
-                  "radial-gradient(circle, #000 18%, rgba(0,0,0,0.55) 38%, rgba(0,0,0,0.18) 55%, transparent 70%)",
+                  "radial-gradient(circle, #000 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,0.15) 50%, transparent 65%)",
                 maskImage:
-                  "radial-gradient(circle, #000 18%, rgba(0,0,0,0.55) 38%, rgba(0,0,0,0.18) 55%, transparent 70%)",
+                  "radial-gradient(circle, #000 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,0.15) 50%, transparent 65%)",
               }}
             >
               <video

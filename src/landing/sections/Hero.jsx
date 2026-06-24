@@ -93,20 +93,19 @@ const Hero = ({ onCtaClick }) => {
           </div>
 
           {/* Right phone mock */}
-          <div className="lg:col-span-5 relative flex items-center justify-center overflow-hidden min-h-[360px] sm:min-h-[520px] lg:min-h-[620px]">
+          <div className="lg:col-span-5 relative flex items-center justify-center min-h-[360px] sm:min-h-[520px] lg:min-h-[620px]">
             {/* Animated video aura behind the phone */}
             <div
               className="absolute top-1/2 pointer-events-none rounded-full overflow-hidden"
               style={{
                 width: "min(920px, 125vw)",
                 height: "min(920px, 125vw)",
-                maxWidth: "100%",
                 left: "50%",
                 transform: "translate(-50%, -50%)",
                 WebkitMaskImage:
-                  "radial-gradient(circle, #000 18%, rgba(0,0,0,0.55) 38%, rgba(0,0,0,0.18) 55%, transparent 70%)",
+                  "radial-gradient(circle, #000 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,0.15) 50%, transparent 65%)",
                 maskImage:
-                  "radial-gradient(circle, #000 18%, rgba(0,0,0,0.55) 38%, rgba(0,0,0,0.18) 55%, transparent 70%)",
+                  "radial-gradient(circle, #000 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,0.15) 50%, transparent 65%)",
               }}
             >
               <video
