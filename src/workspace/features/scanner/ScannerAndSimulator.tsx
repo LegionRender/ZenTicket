@@ -35,6 +35,8 @@ interface ScannerAndSimulatorProps {
   onSaveProfile?: (profile: any) => Promise<void>;
   triggerCameraScan?: boolean;
   onCameraScanTriggered?: () => void;
+  readNotifIds?: string[];
+  setReadNotifIds?: React.Dispatch<React.SetStateAction<string[]>>;
 }
 
 /**
@@ -112,6 +114,8 @@ export default function ScannerAndSimulator({
   onSaveProfile,
   triggerCameraScan,
   onCameraScanTriggered,
+  readNotifIds: readNotifIdsProp,
+  setReadNotifIds: setReadNotifIdsProp,
 }: ScannerAndSimulatorProps) {
   const toast = useToast();
   const { user } = useAuth();
@@ -213,7 +217,9 @@ export default function ScannerAndSimulator({
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   // Track read notification IDs in state to support dynamic computed operationalNotifications
-  const [readNotifIds, setReadNotifIds] = useState<string[]>([]);
+  const [localReadNotifIds, setLocalReadNotifIds] = useState<string[]>([]);
+  const readNotifIds = readNotifIdsProp !== undefined ? readNotifIdsProp : localReadNotifIds;
+  const setReadNotifIds = setReadNotifIdsProp !== undefined ? setReadNotifIdsProp : setLocalReadNotifIds;
 
   // Computed real-time operational notifications strictly derived from real user data
   const operationalNotifications = React.useMemo(() => {
