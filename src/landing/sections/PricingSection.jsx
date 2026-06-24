@@ -1,23 +1,49 @@
 import React from "react";
-import { Check, Leaf, Waves, Cloud, ShieldCheck } from "lucide-react";
+import { Check, Leaf, Waves, Cloud, ShieldCheck, Sparkles } from "lucide-react";
 import { TID } from "@/shared/utils/testIds";
 
 const plans = [
   {
-    id: "brisa",
-    name: "Brisa",
+    id: "gratuito",
+    name: "Gratuito",
     icon: Leaf,
     iconColor: "text-emerald-500 bg-emerald-50",
-    sub: "Ideal para usuarios ocasionales o facturación personal.",
+    sub: "Para uso ocasional o para probar la plataforma.",
+    desc: "Ideal para probar ZenTicket y automatizar las primeras facturas sin compromiso.",
+    price: "$0",
+    features: [
+      "5 facturas generadas al mes.",
+      "Escaneo de tickets desde imagen o archivo.",
+      "Historial básico de tickets.",
+      "Estado de procesamiento de cada ticket.",
+      "Descarga de factura cuando esté disponible.",
+      "Perfil fiscal básico.",
+      "Soporte por email.",
+    ],
+    cta: "Registrarse gratis",
+    ctaVariant: "ghost",
+    testId: "pricing-gratuito",
+    ctaTestId: "pricing-gratuito-cta",
+  },
+  {
+    id: "brisa",
+    name: "Brisa",
+    icon: Waves,
+    iconColor: "text-sky-500 bg-sky-50",
+    sub: "Para uso personal frecuente.",
+    desc: "Para personas que facturan algunos consumos al mes y quieren evitar hacerlo manualmente.",
     price: "$99",
     features: [
       "10 facturas generadas al mes.",
-      "Escaneo de tickets inteligente.",
+      "Todo lo del plan Gratuito.",
       "Historial ampliado de tickets.",
-      "Seguimiento básico en segundo plano.",
+      "Seguimiento de tickets en proceso.",
+      "Visualización de facturas emitidas, pendientes y con error.",
+      "Acceso a conectores disponibles.",
+      "Registro básico de gastos.",
       "Soporte por email.",
     ],
-    cta: "Empezar ahora",
+    cta: "Elegir Brisa",
     ctaVariant: "ghost",
     testId: TID.pricing.brisa,
     ctaTestId: TID.pricing.brisaCta,
@@ -25,8 +51,8 @@ const plans = [
   {
     id: "serenidad",
     name: "Serenidad",
-    icon: Waves,
-    iconColor: "text-sky-500 bg-sky-50",
+    icon: Cloud,
+    iconColor: "text-indigo-500 bg-indigo-50",
     sub: "Para freelancers, profesionistas\ny usuarios que facturan cada semana.",
     desc: "El plan recomendado para usuarios que facturan de forma constante y necesitan mayor control de sus tickets y gastos.",
     price: "$250",
@@ -51,8 +77,8 @@ const plans = [
   {
     id: "nirvana",
     name: "Nirvana",
-    icon: Cloud,
-    iconColor: "text-indigo-500 bg-indigo-50",
+    icon: Sparkles,
+    iconColor: "text-amber-500 bg-amber-50",
     sub: "Para negocios, equipos o usuarios\nque facturan de forma intensiva.",
     desc: "Para usuarios de alto volumen, negocios pequeños o equipos que necesitan automatizar muchas facturas cada mes.",
     price: "$500",
@@ -94,39 +120,27 @@ const PricingSection = ({ onChoose }) => {
       data-testid={TID.pricing.root}
       className="relative bg-white"
     >
-      <div className="absolute inset-0 zt-soft-bg opacity-50" />
-      <div className="relative max-w-[1240px] mx-auto px-6 lg:px-8 py-5 sm:py-8 lg:py-24">
-        <div className="grid lg:grid-cols-12 gap-10 items-start">
-          {/* Title column */}
-          <div className="lg:col-span-3 lg:pt-12">
-            <h2 className="font-display font-extrabold text-[30px] sm:text-[34px] lg:text-[40px] leading-[1.05] tracking-tight text-slate-900">
-              Elige el nivel de{" "}
-              <span className="text-blue-600">tranquilidad</span> que necesitas
-            </h2>
-            <svg
-              className="hidden sm:block mt-6 text-slate-300"
-              width="100"
-              height="60"
-              viewBox="0 0 100 60"
-              fill="none"
-            >
-              <path
-                d="M2 6 C 30 50, 60 50, 90 40"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                fill="none"
-                strokeDasharray="3 3"
-              />
-              <path d="M82 32 L 92 40 L 84 50" stroke="currentColor" strokeWidth="1.5" fill="none" />
-            </svg>
-          </div>
+      <div className="absolute inset-0 zt-soft-bg opacity-50 pointer-events-none" />
+      <div className="relative max-w-[1240px] mx-auto px-6 lg:px-8 py-10 sm:py-16 lg:py-24">
+        
+        {/* Centered Title Section */}
+        <div className="flex flex-col items-center text-center mb-16">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-widest text-blue-600 bg-blue-50 border border-blue-100">
+            Planes y Precios
+          </span>
+          <h2 className="font-display font-extrabold mt-4 text-[32px] sm:text-[44px] lg:text-[48px] leading-[1.05] tracking-tight text-slate-900">
+            Elige el nivel de <span className="text-blue-600">tranquilidad</span> que necesitas
+          </h2>
+          <p className="mt-3 text-slate-500 text-[15px] sm:text-[16px] max-w-[600px] leading-relaxed">
+            Planes flexibles adaptados a tu volumen de facturación. Transparente y sin letras chiquitas.
+          </p>
+        </div>
 
-          {/* Plans grid */}
-          <div className="lg:col-span-9 grid md:grid-cols-3 gap-5 items-stretch">
-            {plans.map((p) => (
-              <PlanCard key={p.id} plan={p} onChoose={onChoose} />
-            ))}
-          </div>
+        {/* 4-column Plans grid */}
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 items-stretch">
+          {plans.map((p) => (
+            <PlanCard key={p.id} plan={p} onChoose={onChoose} />
+          ))}
         </div>
 
         {/* Regla clara de consumo Banner */}
