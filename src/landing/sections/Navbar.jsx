@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Menu, X, Home, Play, Tag, Building2, FileText, LogIn } from "lucide-react";
+import { Menu, X, Home, Play, Tag, Building2, LogIn } from "lucide-react";
 import { ZenLogo } from "@/shared/brand/ZenLogo";
 import { TID } from "@/shared/utils/testIds";
 import { AnimatePresence, motion } from "motion/react";
@@ -13,13 +13,13 @@ const navItems = [
   ) },
   { id: "precios", label: "Precios", href: "#precios", icon: (props) => <Tag strokeWidth={1.5} {...props} /> },
   { id: "empresas", label: "Empresas", href: "#empresas", icon: (props) => <Building2 strokeWidth={1.5} {...props} /> },
-  { id: "blog", label: "Blog", href: "#blog", icon: (props) => <FileText strokeWidth={1.5} {...props} /> },
 ];
 
 const Navbar = ({ onCtaClick, onLoginClick }) => {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [activeSection, setActiveSection] = useState("inicio");
+  const [hoveredSection, setHoveredSection] = useState(null);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -63,12 +63,47 @@ const Navbar = ({ onCtaClick, onLoginClick }) => {
     };
   }, []);
 
+  const scrollToSection = (e, href) => {
+    e.preventDefault();
+    const targetId = href.replace("#", "");
+    const targetElement = document.getElementById(targetId);
+    if (!targetElement) return;
+
+    // Header is ~70px high when scrolled (py-3.5 + 42px logo = ~70px)
+    const headerOffset = window.scrollY > 20 ? 70 : 90;
+    const targetPosition = targetElement.offsetTop - headerOffset;
+    const startPosition = window.scrollY;
+    const distance = targetPosition - startPosition;
+    const duration = 800; // ms
+    let start = null;
+
+    const easeInOutQuad = (t, b, c, d) => {
+      t /= d / 2;
+      if (t < 1) return (c / 2) * t * t + b;
+      t--;
+      return (-c / 2) * (t * (t - 2) - 1) + b;
+    };
+
+    const step = (timestamp) => {
+      if (!start) start = timestamp;
+      const progress = timestamp - start;
+      window.scrollTo(0, easeInOutQuad(progress, startPosition, distance, duration));
+      if (progress < duration) {
+        window.requestAnimationFrame(step);
+      } else {
+        window.scrollTo(0, targetPosition);
+      }
+    };
+
+    window.requestAnimationFrame(step);
+  };
+
   return (
     <header
       data-testid={TID.nav.root}
       className={`fixed top-0 left-0 right-0 z-45 transition-all duration-300 ${
         scrolled
-          ? "bg-[#040712]/75 backdrop-blur-md border-b border-white/[0.06] py-3.5"
+          ? "bg-[#070a16] border-b border-white/[0.06] py-3.5"
           : "bg-transparent py-6"
       }`}
     >
@@ -81,22 +116,42 @@ const Navbar = ({ onCtaClick, onLoginClick }) => {
             className="flex items-center"
           />
 
-          <ul className="hidden lg:flex items-center gap-9 text-[14.5px] font-sans font-medium">
-            {navItems.map((it) => (
-              <li key={it.id}>
-                <a
-                  href={it.href}
-                  data-testid={`nav-link-${it.id}`}
-                  className={`transition-colors duration-200 ${
-                    activeSection === it.id
-                      ? "text-[#0b53f4] font-bold"
-                      : "text-white/70 hover:text-white"
-                  }`}
+          <ul 
+            className="hidden lg:flex items-center gap-1.5 text-[14.5px] font-sans font-medium"
+            onMouseLeave={() => setHoveredSection(null)}
+          >
+            {navItems.map((it) => {
+              const isActive = activeSection === it.id;
+              const isHovered = hoveredSection === it.id;
+              const isHighlighted = isHovered || (hoveredSection === null && isActive);
+              return (
+                <li 
+                  key={it.id}
+                  className="relative"
+                  onMouseEnter={() => setHoveredSection(it.id)}
                 >
-                  {it.label}
-                </a>
-              </li>
-            ))}
+                  {isHighlighted && (
+                    <motion.div
+                      layoutId="desktop-nav-pill"
+                      className="absolute inset-0 bg-[#406ff4] rounded-lg"
+                      transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                    />
+                  )}
+                  <a
+                    href={it.href}
+                    onClick={(e) => scrollToSection(e, it.id === "como" ? "#como-funciona" : it.href)}
+                    data-testid={`nav-link-${it.id}`}
+                    className={`transition-colors duration-200 block relative z-10 px-4 py-2 ${
+                      isHighlighted
+                        ? "text-white font-bold"
+                        : "text-white/70 hover:text-white"
+                    }`}
+                  >
+                    {it.label}
+                  </a>
+                </li>
+              );
+            })}
           </ul>
 
           <div className="hidden lg:flex items-center">
@@ -141,7 +196,10 @@ const Navbar = ({ onCtaClick, onLoginClick }) => {
                     <li key={it.id}>
                       <a
                         href={it.href}
-                        onClick={() => setOpen(false)}
+                        onClick={(e) => {
+                          setOpen(false);
+                          scrollToSection(e, it.id === "como" ? "#como-funciona" : it.href);
+                        }}
                         className={`flex items-center gap-3 px-4 py-3 rounded-xl text-[14.5px] font-semibold transition duration-150 ${
                           isActive
                             ? "bg-[#0b53f4] text-white shadow-md shadow-[#0b53f4]/25"
