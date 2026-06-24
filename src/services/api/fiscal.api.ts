@@ -1,3 +1,5 @@
+import { getApiUrl } from "./api-client";
+
 export interface ParseConstanciaParams {
   fileBase64: string;
   mimeType: string;
@@ -58,7 +60,7 @@ export const parseConstancia = async ({
   }
 
   try {
-    const response = await fetch("/api/fiscal/parse-constancia", {
+    const response = await fetch(getApiUrl("/api/fiscal/parse-constancia"), {
       method: "POST",
       headers,
       body: JSON.stringify({ file: fileBase64, mimeType }),

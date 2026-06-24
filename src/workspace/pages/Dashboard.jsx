@@ -23,7 +23,10 @@ import {
   Building2,
   RefreshCw,
   HelpCircle,
-  AlertCircle
+  AlertCircle,
+  Home,
+  Camera,
+  Shield
 } from "lucide-react";
 
 import HomeScreen from "@/workspace/features/home/HomeScreen";
@@ -55,6 +58,7 @@ export const Dashboard = () => {
   // 2. Auxiliary navigation states
   const [preselectedTicketId, setPreselectedTicketId] = useState(null);
   const [newlyAddedTicketId, setNewlyAddedTicketId] = useState(null);
+  const [triggerCameraScan, setTriggerCameraScan] = useState(false);
 
   // 3. AI Portal Training Simulator administrative parameters
   const [isLearningLoading, setIsLearningLoading] = useState(false);
@@ -963,6 +967,32 @@ export const Dashboard = () => {
     }
   };
 
+  const handleCameraClick = () => {
+    if (!isProfileComplete) {
+      toast.warning("Para poder usar la cámara de ZenTicket, es obligatorio configurar primero tus datos fiscales.", {
+        description: "Completa el formulario en tu panel de cuenta."
+      });
+      setActiveTab("cuenta");
+      return;
+    }
+    if (activeTab !== "capturar") {
+      setActiveTab("capturar");
+    }
+    setTriggerCameraScan(true);
+  };
+
+  const handleNotificationsClick = () => {
+    if (activeTab !== "capturar") {
+      setActiveTab("capturar");
+    }
+    setTimeout(() => {
+      const el = document.getElementById("operational-notifications-center");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth" });
+      }
+    }, 120);
+  };
+
   // Forzar pestaña "cuenta" si el perfil fiscal está incompleto
   useEffect(() => {
     if (fiscalProfile !== null && !isProfileComplete) {
@@ -1003,20 +1033,38 @@ export const Dashboard = () => {
       <aside className="hidden md:flex flex-col w-66 bg-white/80 backdrop-blur-md border-r border-slate-200/40 fixed inset-y-0 left-0 z-40 p-6 shadow-sm">
         <div className="flex flex-col h-full justify-between">
           <div>
-            {/* Top Brand Logo */}
-            <div className="cursor-pointer mb-8 py-2 border-b border-slate-200/30 pb-5" onClick={() => handleTabClick("capturar")}>
-              <ZenLogo size={38} className="h-9 w-auto" />
+            {/* Top Brand Logo & Notification Bell */}
+            <div className="flex items-center justify-between mb-8 py-2 border-b border-slate-200/30 pb-5">
+              <div className="cursor-pointer" onClick={() => handleTabClick("capturar")}>
+                <ZenLogo size={38} className="h-9 w-auto" />
+              </div>
+              <button
+                type="button"
+                onClick={handleNotificationsClick}
+                className="relative p-2 rounded-xl bg-slate-100 hover:bg-slate-200/70 dark:bg-slate-800/40 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white border border-slate-200/30 dark:border-slate-800/50 transition cursor-pointer select-none"
+                title="Alertas y Notificaciones"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.3" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#FFB200] rounded-full border-2 border-white dark:border-[#0a0d19]" />
+              </button>
             </div>
 
-            {/* Navigation Menu Links */}
+             {/* Navigation Menu Links */}
             <nav className="flex flex-col gap-1.5 px-0.5">
-              {[
-                { tab: "capturar", label: "Inicio", icon: <Sparkles className="w-4 h-4" /> },
-                { tab: "tickets", label: "Mis Tickets", icon: <Layers className="w-4 h-4" /> },
-                { tab: "historial", label: "Gastos", icon: <History className="w-4 h-4" /> },
-                { tab: "cuenta", label: "Mi Cuenta", icon: <User className="w-4 h-4" /> },
-                isAdmin && { tab: "admin", label: "Admin", icon: <ShieldCheck className="w-4 h-4" /> }
-              ].filter(Boolean).map((item) => {
+              {(() => {
+                const navItems = [
+                  { tab: "capturar", label: "Inicio", icon: <Home className="w-4 h-4" /> },
+                  { tab: "tickets", label: "Mis Tickets", icon: <Layers className="w-4 h-4" /> },
+                  { tab: "historial", label: "Gastos", icon: <History className="w-4 h-4" /> },
+                  { tab: "cuenta", label: "Mi Cuenta", icon: <User className="w-4 h-4" /> }
+                ];
+                if (isAdmin) {
+                  navItems.push({ tab: "admin", label: "Administración", icon: <Shield className="w-4 h-4" /> });
+                }
+                return navItems;
+              })().map((item) => {
                 const isDisabled = (!isProfileComplete && item.tab !== "cuenta") || isNavigationDisabled;
                 return (
                   <button
@@ -1080,6 +1128,31 @@ export const Dashboard = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Notification Bell Button */}
+            <button
+              type="button"
+              onClick={handleNotificationsClick}
+              className="relative p-2 rounded-lg bg-slate-150/80 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700 text-slate-650 dark:text-slate-350 cursor-pointer transition select-none hover:bg-slate-200/60 dark:hover:bg-slate-700"
+              title="Alertas y Notificaciones"
+            >
+              <svg className="w-4.5 h-4.5 text-slate-600 dark:text-slate-400" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#FFB200] rounded-full border-2 border-white dark:border-[#0b0d19]" />
+            </button>
+
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => handleTabClick("admin")}
+                className={`p-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/20 text-amber-500 transition cursor-pointer select-none ${
+                  activeTab === "admin" ? "bg-amber-500/20" : ""
+                }`}
+                title="Panel de Administración"
+              >
+                <Shield className="w-4.5 h-4.5 text-amber-500 fill-amber-500/20 stroke-[2.2]" />
+              </button>
+            )}
             <span className="bg-blue-50/50 text-[#0b53f4] border border-blue-100 text-[10px] font-bold px-2.5 py-1 rounded-md lowercase tracking-wide font-mono">
               {user?.email?.split('@')[0]}
             </span>
@@ -1098,7 +1171,8 @@ export const Dashboard = () => {
 
       {/* 3. MAIN WORKSPACE VIEW ROUTER (shifted left on desktop to clear sidebar space) */}
       <div className="flex-1 flex flex-col md:pl-66 min-w-0">
-        <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1">
+        <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 relative">
+
           
           {/* QUOTA LIMIT EXCEEDED WARNING BANNER */}
           {isQuotaExceeded && (
@@ -1174,6 +1248,8 @@ export const Dashboard = () => {
               onTabChange={handleTabClick}
               onSetNewlyAddedTicketId={setNewlyAddedTicketId}
               onSaveProfile={handleSaveProfile}
+              triggerCameraScan={triggerCameraScan}
+              onCameraScanTriggered={() => setTriggerCameraScan(false)}
             />
           )}
 
@@ -1256,37 +1332,86 @@ export const Dashboard = () => {
       </div>
 
       {/* 3. FIXED BOTTOM MOBILE NAVIGATION BAR */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200/60 bg-white/95 backdrop-blur-md px-1.5 py-2.5 grid text-[11px] shadow-[0_-8px_20px_-6px_rgba(0,0,0,0.06)]" style={{ gridTemplateColumns: `repeat(${isAdmin ? 5 : 4}, minmax(0, 1fr))` }}>
-        {[
-          { tab: "capturar", label: "Inicio", icon: <Sparkles className="w-4 h-4" /> },
-          { tab: "tickets", label: "Tickets", icon: <Layers className="w-4 h-4" /> },
-          { tab: "historial", label: "Gastos", icon: <History className="w-4 h-4" /> },
-          { tab: "cuenta", label: "Cuenta", icon: <User className="w-4 h-4" /> },
-          isAdmin && { tab: "admin", label: "Admin", icon: <ShieldCheck className="w-4 h-4" /> }
-        ].filter(Boolean).map((item) => {
-          const isDisabled = (!isProfileComplete && item.tab !== "cuenta") || isNavigationDisabled;
-          return (
-            <button
-              key={item.tab}
-              onClick={() => handleTabClick(item.tab)}
-              disabled={isDisabled}
-              className={`min-w-0 flex flex-col items-center gap-0.5 text-center py-1 transition-all rounded-xl duration-150 ${
-                isDisabled 
-                  ? "opacity-35 cursor-not-allowed" 
-                  : "cursor-pointer"
-              } ${
-                activeTab === item.tab && !isDisabled
-                  ? "text-[#0B53F4] font-bold scale-102" 
-                  : "text-slate-400 hover:text-slate-600 font-medium"
-              }`}
-            >
-              <div className={`p-1.5 rounded-lg transition-colors ${activeTab === item.tab && !isDisabled ? "bg-[#0B53F4]/10 text-[#0B53F4]" : "bg-transparent text-slate-400"}`}>
-                {item.icon}
-              </div>
-              <span className="max-w-full truncate text-[9px] leading-tight tracking-tight">{item.label}</span>
-            </button>
-          );
-        })}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200/60 dark:border-slate-800 bg-white/95 dark:bg-[#0b0d19]/95 backdrop-blur-md px-2 py-2 shadow-[0_-8px_30px_rgba(0,0,0,0.05)] select-none" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)" }}>
+        
+        {/* Protruding Center Camera Button Container */}
+        <div className="absolute -top-5 left-1/2 -translate-x-1/2 w-15 h-15 rounded-full bg-white dark:bg-[#0b0d19] flex items-center justify-center border-t border-slate-200/40 dark:border-slate-800 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
+          <button
+            type="button"
+            onClick={handleCameraClick}
+            disabled={isNavigationDisabled}
+            className="w-12 h-12 bg-[#0B53F4] hover:bg-[#0747D1] text-white rounded-full flex items-center justify-center active:scale-95 transition cursor-pointer shadow-lg shadow-[#0B53F4]/20 disabled:opacity-50 disabled:cursor-not-allowed border-none"
+            aria-label="Abrir cámara rápida"
+          >
+            <Camera className="w-5.5 h-5.5 text-white stroke-[2.2]" />
+          </button>
+        </div>
+
+        {/* 5-Column Navigation Grid */}
+        <div className="grid grid-cols-5 items-end text-[10px]">
+          {/* Tab 1: Inicio */}
+          <button
+            type="button"
+            onClick={() => handleTabClick("capturar")}
+            disabled={isNavigationDisabled}
+            className={`flex flex-col items-center gap-1 text-center py-1 transition duration-150 cursor-pointer ${
+              isNavigationDisabled ? "opacity-35 cursor-not-allowed" : ""
+            } ${
+              activeTab === "capturar" ? "text-[#0B53F4] font-black" : "text-slate-400 font-bold"
+            }`}
+          >
+            <Home className="w-5 h-5 stroke-[2.2]" />
+            <span className="text-[9.5px]">Inicio</span>
+          </button>
+
+          {/* Tab 2: Tickets */}
+          <button
+            type="button"
+            onClick={() => handleTabClick("tickets")}
+            disabled={(!isProfileComplete) || isNavigationDisabled}
+            className={`flex flex-col items-center gap-1 text-center py-1 transition duration-150 cursor-pointer ${
+              (!isProfileComplete) || isNavigationDisabled ? "opacity-35 cursor-not-allowed" : ""
+            } ${
+              activeTab === "tickets" ? "text-[#0B53F4] font-black" : "text-slate-400 font-bold"
+            }`}
+          >
+            <Layers className="w-5 h-5 stroke-[2.2]" />
+            <span className="text-[9.5px]">Tickets</span>
+          </button>
+
+          {/* Column 3: Spacer for Central Button */}
+          <div className="h-10 flex items-center justify-center select-none pointer-events-none" />
+
+          {/* Tab 4: Gastos */}
+          <button
+            type="button"
+            onClick={() => handleTabClick("historial")}
+            disabled={(!isProfileComplete) || isNavigationDisabled}
+            className={`flex flex-col items-center gap-1 text-center py-1 transition duration-150 cursor-pointer ${
+              (!isProfileComplete) || isNavigationDisabled ? "opacity-35 cursor-not-allowed" : ""
+            } ${
+              activeTab === "historial" ? "text-[#0B53F4] font-black" : "text-slate-400 font-bold"
+            }`}
+          >
+            <History className="w-5 h-5 stroke-[2.2]" />
+            <span className="text-[9.5px]">Gastos</span>
+          </button>
+
+          {/* Tab 5: Cuenta */}
+          <button
+            type="button"
+            onClick={() => handleTabClick("cuenta")}
+            disabled={isNavigationDisabled}
+            className={`flex flex-col items-center gap-1 text-center py-1 transition duration-150 cursor-pointer ${
+              isNavigationDisabled ? "opacity-35 cursor-not-allowed" : ""
+            } ${
+              activeTab === "cuenta" ? "text-[#0B53F4] font-black" : "text-slate-400 font-bold"
+            }`}
+          >
+            <User className="w-5 h-5 stroke-[2.2]" />
+            <span className="text-[9.5px]">Cuenta</span>
+          </button>
+        </div>
       </div>
     </div>
   );

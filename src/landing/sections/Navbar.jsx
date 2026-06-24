@@ -23,6 +23,7 @@ const Navbar = ({ onCtaClick, onLoginClick }) => {
         <nav className="flex items-center justify-between">
           <ZenLogo
             size={42}
+            theme="dark"
             data-testid={TID.nav.logo}
             className="flex items-center"
           />

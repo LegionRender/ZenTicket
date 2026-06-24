@@ -40,6 +40,8 @@ export interface ExtractedTicketData {
   total: number;
   sucursal?: string;
   items: TicketItem[];
+  ocrFailed?: boolean;
+  ocrError?: string;
 }
 
 export interface Ticket {

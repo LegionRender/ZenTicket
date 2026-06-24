@@ -769,7 +769,7 @@ export default function ProfileForm({
         </div>
 
         {/* Constancia Fiscal Upload Box at the beginning of the form */}
-        <div className="bg-gradient-to-br from-blue-50/50 to-white border border-[#0B53F4]/20 rounded-3xl p-5 mb-5 shadow-2xs text-left animate-fade-in">
+        <div className="bg-gradient-to-br from-blue-50/50 to-white border-[0.5px] border-[#0B53F4]/20 rounded-3xl p-5 mb-5 shadow-2xs text-left animate-fade-in">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1">
               <span className="text-xs font-black text-[#0B53F4] uppercase tracking-wider block">Autocompletar con IA</span>
@@ -931,61 +931,6 @@ export default function ProfileForm({
           </button>
         </div>
 
-        {/* SECTION: OPTIMIZACIÓN IA (GEMINI) */}
-        <h3 className="text-base font-black text-[#0B53F4] uppercase tracking-wide mb-3 mt-8 ml-1 pl-1 flex items-center gap-1.5">
-          <Sparkles className="w-5 h-5 text-[#0B53F4] fill-violet-200 animate-pulse" />
-          <span>Inteligencia Artificial Personal</span>
-        </h3>
-
-        <div className="bg-gradient-to-br from-violet-50/50 to-white border border-violet-100 rounded-3xl p-5 shadow-2xs mb-6 space-y-4 text-left">
-          <div className="leading-tight">
-            <span className="text-xs font-black text-violet-600 uppercase tracking-wider block mb-1">PROCESAMIENTO CON TU PROPIO AGENTE</span>
-            <span className="text-[11px] text-slate-500 block leading-relaxed">
-              Conecta tu propia cuenta de Gemini para optimizar el análisis de tus tickets con estructuras de facturación altamente complejas, reducir la latencia de procesamiento, y elevar los límites de peticiones mensuales.
-            </span>
-          </div>
-
-          <div className="space-y-1">
-            <label className="block text-[10px] font-black text-[#0B53F4] uppercase tracking-widest ml-1 font-sans">
-              GEMINI API KEY PERSONAL
-            </label>
-            <div className="relative">
-              <input
-                type="password"
-                value={personalGeminiKey}
-                onChange={(e) => setPersonalGeminiKey(e.target.value)}
-                placeholder="AIzaSy..."
-                className="w-full text-xs font-mono bg-white border border-slate-200 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl pl-4 pr-10 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (personalGeminiKey) {
-                    toast.info(`Clave de Gemini configurada. Longitud: ${personalGeminiKey.length} caracteres.`, "Seguridad IA");
-                  } else {
-                    window.open("https://aistudio.google.com/apikey", "_blank");
-                    toast.info("Abriendo Google AI Studio para que obtengas tu API Key gratuita.", "Lector de Claves");
-                  }
-                }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-[#0B53F4] transition bg-transparent cursor-pointer"
-                title={personalGeminiKey ? "Información de la Clave" : "Obtener API Key Gratis"}
-              >
-                <HelpCircle className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex items-center gap-1.5 mt-2 ml-1 text-[10px] text-slate-450 font-bold">
-              {personalGeminiKey ? (
-                <span className="text-emerald-600 flex items-center gap-1 font-semibold">
-                  <CheckCircle className="w-3.5 h-3.5 fill-emerald-100" /> Clave configurada. Los procesos complejos utilizarán tu propio límite.
-                </span>
-              ) : (
-                <span className="text-slate-450">
-                  ¿No tienes una API Key? Obtén una de forma gratuita en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-[#0B53F4] underline hover:text-[#0747D1]">Google AI Studio</a>.
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
 
         {/* SECTION 3: PREFERENCIAS */}
         <h3 className="text-base font-black text-[#0B53F4] uppercase tracking-wide mb-3 mt-8 ml-1 pl-1">
@@ -2333,10 +2278,9 @@ export default function ProfileForm({
             onClick={() => {
               setAddingCard(!addingCard);
             }}
-            className="group flex items-center justify-between gap-1.5 py-1.5 px-3 border border-[#0B53F4]/20 bg-[#F1F3FE]/45 hover:bg-[#F1F3FE]/80 hover:border-[#0B53F4]/40 text-[#0B53F4] hover:text-[#0747D1] font-extrabold text-[9.5px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none"
+            className="bg-[#ebf1ff] hover:bg-[#dee8ff] text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
           >
-            <span>{addingCard ? "Cancelar" : "+ Agregar Método de Pago"}</span>
-            <ChevronRight className="w-3.5 h-3.5 text-[#0B53F4]/60 group-hover:text-[#0747D1] transition-transform duration-150 transform group-hover:translate-x-0.5" />
+            {addingCard ? "Cancelar" : "+ Agregar Método de Pago"}
           </button>
         </div>
 
@@ -2779,31 +2723,7 @@ export default function ProfileForm({
             </div>
           </div>
 
-          {/* Item #3.5: Inteligencia Artificial (Gemini) */}
-          <div 
-            onClick={() => setIsEditingFiscal(true)}
-            className="flex items-center justify-between p-4.5 hover:bg-violet-50/50 transition cursor-pointer bg-violet-50/10"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-full bg-violet-100 flex items-center justify-center text-violet-600">
-                <Sparkles className="w-5 h-5 stroke-[2] animate-pulse" />
-              </div>
-              <div className="text-left leading-tight">
-                <span className="text-sm font-bold text-slate-800 block">Optimización IA (Gemini)</span>
-                <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">
-                  {personalGeminiKey ? "✓ Conectado con tu Api Key personal" : "Usa tu cuenta de Gemini para tickets complejos"}
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5">
-              {personalGeminiKey ? (
-                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">ACTIVO</span>
-              ) : (
-                <span className="text-[10px] font-bold text-slate-400">CONFIGURAR</span>
-              )}
-              <ChevronRight className="w-4 h-4 text-violet-500" />
-            </div>
-          </div>
+
 
           {/* Item #4: Seguridad y Privacidad -> triggers editable Form! */}
           <div 

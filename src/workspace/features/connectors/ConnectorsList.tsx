@@ -373,7 +373,7 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="text-[10.5px] bg-[#EBF1FF]/60 hover:bg-[#EBF1FF] text-[#0B53F4] px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-black transition-colors border border-[#0B53F4]/5"
+                        className="text-[10.5px] zt-btn-secondary-blue px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-black transition-colors"
                       >
                         <Link2 className="w-3.5 h-3.5 shrink-0" />
                         <span>Visitar</span>
@@ -499,19 +499,19 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
               <button
                 type="button"
                 onClick={() => setVisibleCount((prev) => Math.min(prev + 3, mainFilteredConnectors.length))}
-                className="group flex-1 py-3 px-4.5 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] font-black text-[11px] uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition duration-150 cursor-pointer shadow-2xs border-none"
+                className="group flex-1 py-3 px-4.5 zt-btn-secondary-blue font-black text-[11px] uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition duration-150 cursor-pointer shadow-2xs"
               >
                 <span>Ver más conectores</span>
-                <ChevronRight className="w-3.5 h-3.5 text-[#0B53F4] group-hover:translate-x-1 transition-transform stroke-[2.2]" />
+                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform stroke-[2.2]" />
               </button>
             ) : (
               <button
                 type="button"
                 onClick={() => setVisibleCount(3)}
-                className="group flex-1 py-3 px-4.5 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] font-black text-[11px] uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition duration-150 cursor-pointer shadow-2xs border-none"
+                className="group flex-1 py-3 px-4.5 zt-btn-secondary-blue font-black text-[11px] uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition duration-150 cursor-pointer shadow-2xs"
               >
                 <span>Ver menos</span>
-                <ChevronRight className="w-3.5 h-3.5 text-[#0B53F4] group-hover:translate-x-1 transition-transform -rotate-90 stroke-[2.2]" />
+                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform -rotate-90 stroke-[2.2]" />
               </button>
             )}
           </div>
@@ -522,11 +522,11 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
           <button
             type="button"
             onClick={() => setIsModalOpen(true)}
-            className="group w-full py-3.5 px-4.5 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] font-black text-[11px] uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition duration-150 cursor-pointer shadow-2xs border-none"
+            className="group w-full py-3.5 px-4.5 zt-btn-secondary-blue font-black text-[11px] uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition duration-150 cursor-pointer shadow-2xs"
           >
-            <Layers className="w-4 h-4 text-[#0B53F4] group-hover:scale-105 transition stroke-[2.2]" />
+            <Layers className="w-4 h-4 group-hover:scale-105 transition stroke-[2.2]" />
             <span>Ver Biblioteca Completa ({connectors.length})</span>
-            <ArrowRight className="w-3.5 h-3.5 text-[#0B53F4] group-hover:translate-x-1 transition-transform stroke-[2.2]" />
+            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform stroke-[2.2]" />
           </button>
         </div>
       </div>

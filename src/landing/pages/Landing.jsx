@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Navbar from "@/landing/sections/Navbar";
 import Hero from "@/landing/sections/Hero";
 import LogosBar from "@/landing/sections/LogosBar";
@@ -18,6 +18,26 @@ import AuthModal from "@/auth/components/AuthModal";
 const Landing = () => {
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState("signin"); // "signin" or "signup"
+
+  useEffect(() => {
+    // Save current theme preferences to restore when navigating away
+    const hadDark = document.documentElement.classList.contains("dark");
+    const originalTheme = document.documentElement.getAttribute("data-theme");
+
+    // Force light theme on landing page
+    document.documentElement.classList.remove("dark");
+    document.documentElement.setAttribute("data-theme", "light");
+
+    return () => {
+      // Restore original theme preference on unmount
+      if (hadDark) {
+        document.documentElement.classList.add("dark");
+      }
+      if (originalTheme) {
+        document.documentElement.setAttribute("data-theme", originalTheme);
+      }
+    };
+  }, []);
 
   const triggerAuth = (mode = "signup") => {
     setAuthMode(mode);

@@ -168,58 +168,24 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       fallbackToOcrMock = true;
     }
 
-    // High fidelity backup fallback parser in case Gemini is unavailable or overloaded (503/429)
+    // Do not invent ticket data when Gemini is unavailable or overloaded (503/429).
+    // Return an empty draft so the user can complete the fields manually.
     if (fallbackToOcrMock || !extractedData) {
-      console.warn("[OCR Fallback] Activating Mexican Ticket Mock Extractor due to Gemini unavailability.", ocrErrorDetails);
-      
-      const mockOptions = [
-        {
-          rfcEmisor: "XAXX010101000",
-          nombreEmisor: "ESTABLECIMIENTO POR CLASIFICAR",
-          fechaCompra: new Date().toISOString().split("T")[0],
-          folio: `CFG-${Math.floor(100000 + Math.random() * 900000)}`,
-          total: 150.00,
-          sucursal: "SUCURSAL MANUAL",
-          ocrFailed: true,
-          items: [
-            { description: "CONSUMO GENERAL (COMPLEMENTAR DATOS)", amount: 150.00 }
-          ]
-        },
-        {
-          rfcEmisor: "XAXX010101000",
-          nombreEmisor: "FARMACIA GENÉRICA / LOCAL",
-          fechaCompra: new Date().toISOString().split("T")[0],
-          folio: `FARM-${Math.floor(1000000 + Math.random() * 9000000)}`,
-          total: 320.00,
-          sucursal: "SUCURSAL LOCAL",
-          ocrFailed: true,
-          items: [
-            { description: "MEDICAMENTO Y ALIVIO (GENERAL)", amount: 320.00 }
-          ]
-        },
-        {
-          rfcEmisor: "CCO8605231N4",
-          nombreEmisor: "CADENA COMERCIAL OXXO S.A. DE C.V.",
-          fechaCompra: new Date().toISOString().split("T")[0],
-          folio: `OXXO-${Math.floor(100000 + Math.random() * 900000)}`,
-          total: 82.50,
-          sucursal: "SUCURSAL REFORMA CENTRO",
-          ocrFailed: true,
-          items: [
-            { description: "CAFE ANDATTI CAPUCCINO MED", amount: 24.50 },
-            { description: "SABRITAS RECETA CRUJIENTE 110G", amount: 36.00 },
-            { description: "AGUA PURIFICADA EPURA 1L", amount: 22.00 }
-          ]
-        }
-      ];
-
-      // Select a pseudorandom option based on timestamp / random index
-      const randomIndex = Math.floor(Math.random() * mockOptions.length);
-      extractedData = mockOptions[randomIndex];
+      console.warn("[OCR Fallback] Gemini unavailable. Returning empty manual-capture draft.", ocrErrorDetails);
+      extractedData = {
+        rfcEmisor: "",
+        nombreEmisor: "",
+        fechaCompra: "",
+        folio: "",
+        total: 0,
+        sucursal: "",
+        ocrFailed: true,
+        ocrError: "El OCR no pudo procesar la imagen. Completa los campos manualmente.",
+        items: []
+      };
     }
-
     // calculate real costs in MXN (Gemini LLM model rates + basic operational cost)
-    const cost = fallbackToOcrMock ? 0.05 : 0.50; // $0.50 MXN standard operational price, $0.05 for cache fallback
+    const cost = fallbackToOcrMock ? 0 : 0.50; // no OCR charge when only a manual-capture draft is returned
     let rawCost = 0.00;
     if (textResult) {
       const exchangeRate = 18.50;
@@ -235,14 +201,16 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
   } catch (error: any) {
     console.error("Critical OCR Analysis process went down:", error);
     res.json({
-      rfcEmisor: "XAXX010101000",
-      nombreEmisor: "TIENDA EN GRAL (SIMULADO)",
-      fechaCompra: new Date().toISOString().split("T")[0],
-      folio: `TKT-${Math.floor(100000 + Math.random() * 900000)}`,
-      total: 50.00,
-      sucursal: "CENTRO",
-      items: [{ description: "Consumo General de Alimentos", amount: 50.00 }],
-      cost: 0.05,
+      rfcEmisor: "",
+      nombreEmisor: "",
+      fechaCompra: "",
+      folio: "",
+      total: 0,
+      sucursal: "",
+      ocrFailed: true,
+      ocrError: "El OCR no pudo procesar la imagen. Completa los campos manualmente.",
+      items: [],
+      cost: 0,
       rawCost: 0
     });
   }

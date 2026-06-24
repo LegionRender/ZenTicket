@@ -1,10 +1,10 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { CheckCircle, AlertCircle, Info, Loader2, X } from "lucide-react";
+import { CheckCircle, AlertCircle, Info, Loader2, X, AlertTriangle } from "lucide-react";
 
 export interface Toast {
   id: string;
-  type: "success" | "error" | "info" | "loading";
+  type: "success" | "error" | "info" | "warning" | "loading";
   title?: string;
   message: string;
   duration?: number; // in ms. 0 or undefined for loading toasts (won't auto-dismiss)
@@ -21,6 +21,8 @@ interface ToastContextType {
   success: (message: string, title?: string, options?: Partial<Omit<Toast, "id" | "type" | "message">>) => string;
   error: (message: string, title?: string, options?: Partial<Omit<Toast, "id" | "type" | "message">>) => string;
   info: (message: string, title?: string, options?: Partial<Omit<Toast, "id" | "type" | "message">>) => string;
+  warning: (message: string, title?: string, options?: Partial<Omit<Toast, "id" | "type" | "message">>) => string;
+  warn: (message: string, title?: string, options?: Partial<Omit<Toast, "id" | "type" | "message">>) => string;
   loading: (message: string, title?: string, options?: Partial<Omit<Toast, "id" | "type" | "message">>) => string;
 }
 
@@ -93,6 +95,13 @@ export function ToastProvider({ children }: ToastProviderProps) {
     [addToast]
   );
 
+  const warning = useCallback(
+    (message: string, title?: string, options?: Partial<Omit<Toast, "id" | "type" | "message">>) => {
+      return addToast({ type: "warning", message, title, ...options });
+    },
+    [addToast]
+  );
+
   const loading = useCallback(
     (message: string, title?: string, options?: Partial<Omit<Toast, "id" | "type" | "message">>) => {
       return addToast({ type: "loading", message, title, ...options });
@@ -101,7 +110,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
   );
 
   return (
-    <ToastContext.Provider value={{ toasts, addToast, removeToast, success, error, info, loading }}>
+    <ToastContext.Provider value={{ toasts, addToast, removeToast, success, error, info, warning, warn: warning, loading }}>
       {children}
       <ToastContainer toasts={toasts} removeToast={removeToast} />
     </ToastContext.Provider>
@@ -157,6 +166,14 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
       msgColor: "text-slate-700",
       icon: <Info className="w-5 h-5 text-[#0B53F4] shrink-0" />,
       glow: "shadow-xl shadow-blue-500/5",
+    },
+    warning: {
+      bg: "bg-white/95 border-amber-500/35",
+      accent: "bg-amber-500",
+      titleColor: "text-amber-800",
+      msgColor: "text-slate-700",
+      icon: <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />,
+      glow: "shadow-xl shadow-amber-500/5",
     },
     loading: {
       bg: "bg-white/90 border-[#FFB200]/40",

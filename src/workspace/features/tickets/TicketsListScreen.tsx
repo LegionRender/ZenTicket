@@ -310,7 +310,7 @@ export default function TicketsListScreen({
       <div className="max-w-6xl mx-auto space-y-8 font-sans text-left mt-2 relative select-none pb-24 animate-fade-in_50">
         
         {/* Nav header matching Screen 3 */}
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="flex items-center justify-between pb-3 border-b border-[#1360f8]">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -323,7 +323,7 @@ export default function TicketsListScreen({
             >
               <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
             </button>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight">Ver PDF - Detalle de Factura</h1>
+            <h1 className="text-xl font-black text-[#1360f8] tracking-tight">Ver PDF - Detalle de Factura</h1>
           </div>
 
           <button
@@ -1152,7 +1152,7 @@ export default function TicketsListScreen({
           <button
             type="button"
             onClick={() => downloadFile(activeInvoiceData.xmlContent, `Factura_${emisorNameRaw}_${uuidVal.substring(0,10)}.xml`, "text/xml")}
-            className="w-full bg-[#F1F3FE] text-[#0B53F4] hover:bg-[#E2E6FD] border border-[#0B53F4]/10 transition duration-150 flex items-center justify-center gap-2 py-4 rounded-2xl font-black uppercase text-xs cursor-pointer"
+            className="w-full zt-btn-secondary-blue transition duration-150 flex items-center justify-center gap-2 py-4 rounded-2xl font-black uppercase text-xs cursor-pointer"
           >
             <span>{"</>"}</span>
             Descargar XML
@@ -1508,22 +1508,8 @@ export default function TicketsListScreen({
     <div className="max-w-6xl mx-auto space-y-6 font-body text-left mt-2 relative select-none pb-24 animate-fade-in_50">
       
       {/* Top title header matching Screenshots 1 & 2 */}
-      <div className="flex items-center gap-4 py-2 border-b border-transparent relative">
-        <button
-          type="button"
-          onClick={() => {
-            if (onTabChange) {
-              onTabChange("capturar");
-            } else {
-              toast.info("Regresando a pantalla de inicio.", "Navegación");
-            }
-          }}
-          className="p-2 w-10 h-10 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] rounded-full cursor-pointer transition flex items-center justify-center shrink-0 border-none shadow-2xs"
-          title="Regresar a Inicio"
-        >
-          <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
-        </button>
-        <h1 className="font-display font-extrabold text-[28px] text-slate-900 tracking-tight">Mis Tickets</h1>
+      <div className="flex items-center gap-4 py-2 border-b border-[#1360f8] pb-3 relative">
+        <h1 className="font-display font-extrabold text-[28px] text-[#1360f8] tracking-tight">Mis Tickets</h1>
       </div>
 
       {/* SEGMENTED CONTROL TAB BAR FILTERS MATCHING IMAGE - Hidden on desktop screens */}
@@ -1706,10 +1692,10 @@ export default function TicketsListScreen({
                             onTriggerSimulationInline(t);
                             toast.success(`Iniciando conexión con el SAT para facturar ticket #${t.folio || "88219"}.`, "Sincronizador SAT");
                           }}
-                          className="group flex items-center justify-between gap-1.5 py-1.5 px-3 border border-[#0B53F4]/20 bg-[#F1F3FE]/45 hover:bg-[#F1F3FE]/80 hover:border-[#0B53F4]/40 text-[#0B53F4] hover:text-[#0747D1] font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none shrink-0"
+                          className="group flex items-center justify-between gap-1.5 py-1.5 px-3 zt-btn-secondary-blue font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none shrink-0"
                         >
                           <span>Ver detalles</span>
-                          <ChevronRight className="w-3.5 h-3.5 text-[#0B53F4]/60 group-hover:text-[#0747D1] transition-transform duration-150 transform group-hover:translate-x-0.5" />
+                          <ChevronRight className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-all duration-150 transform group-hover:translate-x-0.5" />
                         </button>
                       </div>
                     </div>
@@ -1795,18 +1781,18 @@ export default function TicketsListScreen({
                         <button
                           type="button"
                           onClick={() => setSelectedInvoiceId(inv.id || null)}
-                          className="w-full bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] font-black rounded-xl py-1.5 px-3 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer border-none"
+                          className="w-full zt-btn-secondary-blue font-black rounded-xl py-1.5 px-3 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer"
                         >
-                          <FileText className="w-3.5 h-3.5 text-[#0B53F4] stroke-[2.2]" />
+                          <FileText className="w-3.5 h-3.5 stroke-[2.2]" />
                           Ver PDF
                         </button>
                         
                         <button
                           type="button"
                           onClick={() => downloadFile(inv.xmlContent, `Factura_${inv.nombreEmisor}_${inv.folioFiscal?.substring(0,8)}.xml`, "text/xml")}
-                          className="w-full bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] font-black rounded-xl py-1.5 px-3 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer border-none"
+                          className="w-full zt-btn-secondary-blue font-black rounded-xl py-1.5 px-3 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer"
                         >
-                          <Download className="w-3.5 h-3.5 text-[#0B53F4] stroke-[2.2]" />
+                          <Download className="w-3.5 h-3.5 stroke-[2.2]" />
                           Descargar XML
                         </button>
                       </div>
@@ -1824,18 +1810,18 @@ export default function TicketsListScreen({
                       <button
                         type="button"
                         onClick={() => setSelectedInvoiceId(inv.id || null)}
-                        className="flex-1 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] font-black rounded-xl py-2.5 px-3.5 text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-2xs cursor-pointer min-h-[42px] border-none"
+                        className="flex-1 zt-btn-secondary-blue font-black rounded-xl py-2.5 px-3.5 text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-2xs cursor-pointer min-h-[42px]"
                       >
-                        <FileText className="w-4 h-4 text-[#0B53F4] stroke-[2.2]" />
+                        <FileText className="w-4 h-4 stroke-[2.2]" />
                         Ver PDF
                       </button>
                       
                       <button
                         type="button"
                         onClick={() => downloadFile(inv.xmlContent, `Factura_${inv.nombreEmisor}_${inv.folioFiscal?.substring(0,8)}.xml`, "text/xml")}
-                        className="flex-1 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] font-black rounded-xl py-2.5 px-3.5 text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-2xs cursor-pointer min-h-[42px] border-none"
+                        className="flex-1 zt-btn-secondary-blue font-black rounded-xl py-2.5 px-3.5 text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-2xs cursor-pointer min-h-[42px]"
                       >
-                        <Download className="w-4 h-4 text-[#0B53F4] stroke-[2.2]" />
+                        <Download className="w-4 h-4 stroke-[2.2]" />
                         Descargar XML
                       </button>
                     </div>
@@ -1849,20 +1835,7 @@ export default function TicketsListScreen({
 
       </div> {/* Close Grid layout container */}
 
-      {/* FLOATING ACTION CAPTURE ACCESS AT BOTTOM RIGHT TO MAKE ACTION EASY */}
-      {onTabChange && (
-        <button
-          type="button"
-          onClick={() => {
-            onTabChange("capturar");
-            toast.info("Abre o arrastra un ticket para procesarlo por OCR.", "Capturando");
-          }}
-          className="fixed bottom-24 right-5 z-45 w-14 h-14 bg-[#0B53F4] text-white rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(11,83,244,0.35)] hover:bg-[#0747D1] active:scale-95 cursor-pointer transition duration-150 relative"
-          title="Capturar nuevo ticket"
-        >
-          <Plus className="w-6.5 h-6.5 stroke-[3] text-white" />
-        </button>
-      )}
+
 
     </div>
   );

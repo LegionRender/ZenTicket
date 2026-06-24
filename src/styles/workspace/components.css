@@ -73,91 +73,57 @@
     border-color: rgba(11, 83, 244, 0.25) !important;
 }
 
-/* Unified Gray Buttons Override to "Ver PDF / Descargar XML" style in Light Mode */
-button.bg-slate-50,
-button.bg-slate-100,
-button.bg-slate-200,
-button.bg-slate-205,
-button.bg-slate-300,
-button.bg-slate-350,
-button[class*="bg-slate-50"],
-button[class*="bg-slate-100"],
-button[class*="bg-slate-200"],
-button[class*="bg-slate-205"],
-button[class*="bg-slate-300"],
-button[class*="bg-slate-350"],
-[class*="bg-slate-50"].cursor-pointer,
-[class*="bg-slate-100"].cursor-pointer,
-[class*="bg-slate-200"].cursor-pointer,
-[class*="bg-slate-205"].cursor-pointer,
-[class*="bg-slate-300"].cursor-pointer,
-[class*="bg-slate-350"].cursor-pointer,
-[class*="bg-slate-50"][class*="cursor-pointer"],
-[class*="bg-slate-100"][class*="cursor-pointer"],
-[class*="bg-slate-200"][class*="cursor-pointer"],
-[class*="bg-slate-205"][class*="cursor-pointer"],
-[class*="bg-slate-300"][class*="cursor-pointer"],
-[class*="bg-slate-350"][class*="cursor-pointer"] {
+/* Explicit styles for secondary/neutral buttons with hover/focus states */
+.zt-btn-secondary {
+    background-color: #f1f5f9 !important;
+    color: #334155 !important;
+    border: 1px solid #e2e8f0 !important;
+    transition: all 150ms ease-in-out;
+}
+.zt-btn-secondary:hover {
+    background-color: #e2e8f0 !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+}
+.zt-btn-secondary:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.3) !important;
+}
+
+.zt-btn-secondary-blue {
     background-color: #ebf1ff !important;
     color: #0B53F4 !important;
-    border-color: rgba(11, 83, 244, 0.16) !important;
+    border: 1px solid rgba(11, 83, 244, 0.16) !important;
+    transition: all 150ms ease-in-out;
 }
-
-button.bg-slate-50:hover,
-button.bg-slate-100:hover,
-button.bg-slate-200:hover,
-button.bg-slate-205:hover,
-button.bg-slate-300:hover,
-button.bg-slate-350:hover,
-button[class*="bg-slate-50"]:hover,
-button[class*="bg-slate-100"]:hover,
-button[class*="bg-slate-200"]:hover,
-button[class*="bg-slate-205"]:hover,
-button[class*="bg-slate-300"]:hover,
-button[class*="bg-slate-350"]:hover,
-[class*="bg-slate-50"].cursor-pointer:hover,
-[class*="bg-slate-100"].cursor-pointer:hover,
-[class*="bg-slate-200"].cursor-pointer:hover,
-[class*="bg-slate-205"].cursor-pointer:hover,
-[class*="bg-slate-300"].cursor-pointer:hover,
-[class*="bg-slate-350"].cursor-pointer:hover,
-[class*="bg-slate-50"][class*="cursor-pointer"]:hover,
-[class*="bg-slate-100"][class*="cursor-pointer"]:hover,
-[class*="bg-slate-200"][class*="cursor-pointer"]:hover,
-[class*="bg-slate-205"][class*="cursor-pointer"]:hover,
-[class*="bg-slate-300"][class*="cursor-pointer"]:hover,
-[class*="bg-slate-350"][class*="cursor-pointer"]:hover {
+.zt-btn-secondary-blue:hover {
     background-color: rgba(11, 83, 244, 0.15) !important;
     color: #0c4ad1 !important;
-    border-color: rgba(11, 83, 244, 0.24) !important;
+    border-color: rgba(11, 83, 244, 0.28) !important;
+}
+.zt-btn-secondary-blue:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(11, 83, 244, 0.3) !important;
+}
+/* Ensure child icons/SVGs in secondary blue buttons inherit the correct color */
+.zt-btn-secondary-blue svg {
+    color: currentColor !important;
+    stroke: currentColor !important;
 }
 
-/* Ensure child icons/SVGs in these buttons inherit unified blue colors */
-button.bg-slate-50 svg,
-button.bg-slate-100 svg,
-button.bg-slate-200 svg,
-button.bg-slate-205 svg,
-button.bg-slate-300 svg,
-button.bg-slate-350 svg,
-button[class*="bg-slate-50"] svg,
-button[class*="bg-slate-100"] svg,
-button[class*="bg-slate-200"] svg,
-button[class*="bg-slate-205"] svg,
-button[class*="bg-slate-300"] svg,
-button[class*="bg-slate-350"] svg,
-[class*="bg-slate-50"].cursor-pointer svg,
-[class*="bg-slate-100"].cursor-pointer svg,
-[class*="bg-slate-200"].cursor-pointer svg,
-[class*="bg-slate-205"].cursor-pointer svg,
-[class*="bg-slate-300"].cursor-pointer svg,
-[class*="bg-slate-350"].cursor-pointer svg,
-[class*="bg-slate-50"][class*="cursor-pointer"] svg,
-[class*="bg-slate-100"][class*="cursor-pointer"] svg,
-[class*="bg-slate-200"][class*="cursor-pointer"] svg,
-[class*="bg-slate-205"][class*="cursor-pointer"] svg,
-[class*="bg-slate-300"][class*="cursor-pointer"] svg,
-[class*="bg-slate-350"][class*="cursor-pointer"] svg {
-    color: #0B53F4 !important;
-    stroke: #0B53F4 !important;
+.zt-btn-neutral {
+    background-color: #f8fafc !important;
+    color: #475569 !important;
+    border: 1px solid #e2e8f0 !important;
+    transition: all 150ms ease-in-out;
+}
+.zt-btn-neutral:hover {
+    background-color: #f1f5f9 !important;
+    color: #1e293b !important;
+    border-color: #cbd5e1 !important;
+}
+.zt-btn-neutral:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2) !important;
 }
 

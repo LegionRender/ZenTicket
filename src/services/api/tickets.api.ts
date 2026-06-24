@@ -1,7 +1,10 @@
+import { getApiUrl } from "./api-client";
+
 export interface AnalyzeTicketParams {
   imageBase64: string;
   mimeType: string;
   personalGeminiKey?: string;
+  userId?: string;
 }
 
 const MOCK_TICKETS = [
@@ -75,7 +78,8 @@ const createMockResponse = (data: any): Response => {
 export const analyzeTicket = async ({
   imageBase64,
   mimeType,
-  personalGeminiKey
+  personalGeminiKey,
+  userId
 }: AnalyzeTicketParams): Promise<Response> => {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (personalGeminiKey) {
@@ -83,12 +87,13 @@ export const analyzeTicket = async ({
   }
 
   try {
-    const response = await fetch("/api/tickets/analyze", {
+    const response = await fetch(getApiUrl("/api/tickets/analyze"), {
       method: "POST",
       headers,
       body: JSON.stringify({
         image: imageBase64,
         mimeType,
+        userId,
       }),
     });
 
@@ -100,19 +105,18 @@ export const analyzeTicket = async ({
     console.warn("Backend API endpoint not available. Activating high-fidelity local OCR mock engine...", err);
   }
 
-  // Generate high-fidelity client-side fallback with clear indicators that real parsing couldn't be done
+  // Never invent ticket data when OCR is unavailable. Return an empty manual-capture draft.
   const mockData = {
-    rfcEmisor: "XAXX010101000",
-    nombreEmisor: "COMPROBANTE POR CLASIFICAR",
-    sucursal: "SUCURSAL TEMPORAL",
-    fechaCompra: new Date().toISOString().split("T")[0],
-    folio: `CFG-${Math.floor(100000 + Math.random() * 900000)}`,
-    total: 150.00,
+    rfcEmisor: "",
+    nombreEmisor: "",
+    sucursal: "",
+    fechaCompra: "",
+    folio: "",
+    total: 0,
     ocrFailed: true,
-    items: [
-      { description: "CONCEPTOS NO EXTRAÍDOS (COMPLEMENTAR MANUALMENTE)", amount: 150.00 }
-    ],
-    cost: 0.05,
+    ocrError: "El OCR no pudo procesar la imagen. Completa los campos manualmente.",
+    items: [],
+    cost: 0,
     rawCost: 0
   };
 

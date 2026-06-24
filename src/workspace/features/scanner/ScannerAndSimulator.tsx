@@ -14,6 +14,7 @@ import { db, auth } from "@/services/firebase/firebase";
 import { handleFirestoreError, OperationType } from "@/services/firebase/firestore-helper";
 import { doc, setDoc, updateDoc } from "firebase/firestore";
 import { AnimatePresence, motion } from "motion/react";
+import { useAuth } from "@/auth/context/AuthContext";
 import logoLight from "@/assets/logos/logo-light.png";
 import logoDark from "@/assets/logos/logo-dark.png";
 
@@ -32,6 +33,8 @@ interface ScannerAndSimulatorProps {
   onTabChange?: (tab: string) => void;
   onSetNewlyAddedTicketId?: (id: string | null) => void;
   onSaveProfile?: (profile: any) => Promise<void>;
+  triggerCameraScan?: boolean;
+  onCameraScanTriggered?: () => void;
 }
 
 /**
@@ -107,8 +110,12 @@ export default function ScannerAndSimulator({
   onTabChange,
   onSetNewlyAddedTicketId,
   onSaveProfile,
+  triggerCameraScan,
+  onCameraScanTriggered,
 }: ScannerAndSimulatorProps) {
   const toast = useToast();
+  const { user } = useAuth();
+  const userName = fiscalProfile?.razonSocial || user?.displayName || "Usuario";
 
   // Renewal/Blocker States
   const [showRenewalBlocker, setShowRenewalBlocker] = useState(false);
@@ -330,6 +337,19 @@ export default function ScannerAndSimulator({
     return () => clearInterval(interval);
   }, []);
 
+  // Trigger camera scan when requested by parent component (Dashboard FAB navigation shortcut)
+  useEffect(() => {
+    if (triggerCameraScan) {
+      if (fileInputRef.current) {
+        fileInputRef.current.setAttribute("capture", "environment");
+        fileInputRef.current.click();
+      }
+      if (onCameraScanTriggered) {
+        onCameraScanTriggered();
+      }
+    }
+  }, [triggerCameraScan, onCameraScanTriggered]);
+
   const handleSolveContingency = async (ticket: Ticket | any) => {
     if (!ticket) return;
     setIsSolvingContingency(true);
@@ -524,6 +544,7 @@ export default function ScannerAndSimulator({
         imageBase64: dataUrl.split(",")[1],
         mimeType: "image/png",
         personalGeminiKey: fiscalProfile?.personalGeminiKey,
+        userId: user?.uid,
       });
 
       if (!response.ok) {
@@ -541,7 +562,7 @@ export default function ScannerAndSimulator({
 
       const ocrResult: any = await response.json();
       if (ocrResult.ocrFailed) {
-        toast.warn("El motor de IA OCR de demostración no pudo procesar la imagen de forma dinámica. Generamos un formulario editable para el ticket de muestra.", "Captura Manual Activada ✏️");
+        toast.warning(ocrResult.ocrError || "El OCR no pudo leer este ticket. No se generaron datos simulados; completa los campos manualmente.", "Captura Manual Activada");
       }
       setExtractedData(ocrResult);
       setEditNombre(ocrResult.nombreEmisor || "");
@@ -556,7 +577,7 @@ export default function ScannerAndSimulator({
       const tId = await onSaveTicketToDb({
         userId: "guest",
         imageUrl: dataUrl,
-        status: "extracted",
+        status: ocrResult.ocrFailed ? "review" : "extracted",
         rfcEmisor: ocrResult.rfcEmisor,
         nombreEmisor: ocrResult.nombreEmisor,
         fechaCompra: ocrResult.fechaCompra,
@@ -631,6 +652,7 @@ export default function ScannerAndSimulator({
         imageBase64: rawBase64,
         mimeType: mime,
         personalGeminiKey: fiscalProfile?.personalGeminiKey,
+        userId: user?.uid,
       });
 
       if (!response.ok) {
@@ -648,7 +670,7 @@ export default function ScannerAndSimulator({
 
       const ocrResult: any = await response.json();
       if (ocrResult.ocrFailed) {
-        toast.warn("El motor de IA OCR no pudo procesar la imagen (falta configurar GEMINI_API_KEY o límite de consumo alcanzado). Por favor llena los datos de tu farmacia/tienda manualmente.", "Captura Manual Activada ✏️");
+        toast.warning(ocrResult.ocrError || "El OCR no pudo leer este ticket. No se generaron datos simulados; completa los campos manualmente.", "Captura Manual Activada");
       }
       setExtractedData(ocrResult);
       setEditNombre(ocrResult.nombreEmisor || "");
@@ -663,7 +685,7 @@ export default function ScannerAndSimulator({
       const tId = await onSaveTicketToDb({
         userId: "guest",
         imageUrl: base64Str,
-        status: "extracted",
+        status: ocrResult.ocrFailed ? "review" : "extracted",
         rfcEmisor: ocrResult.rfcEmisor,
         nombreEmisor: ocrResult.nombreEmisor,
         fechaCompra: ocrResult.fechaCompra,
@@ -1159,35 +1181,7 @@ export default function ScannerAndSimulator({
       
 
 
-      {/* 2. ZenTicket Brand Header with Logo Box and Notification Bell */}
-      {activeStep === "upload" && (
-        <div className="flex items-center justify-between relative z-10 bg-white border border-slate-200/60 py-2.5 px-4.5 rounded-2xl shadow-sm">
-          <img
-            src={logoLight}
-            alt="ZenTicket"
-            className="h-8 w-auto object-contain select-none pointer-events-none block dark:hidden"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = "https://customer-assets.emergentagent.com/job_zenticket-preview/artifacts/23vqzgm3_Zenticket%20logo%203B.png";
-            }}
-          />
-          <img
-            src={logoDark}
-            alt="ZenTicket"
-            className="h-8 w-auto object-contain select-none pointer-events-none hidden dark:block"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = "https://customer-assets.emergentagent.com/job_zenticket-preview/artifacts/23vqzgm3_Zenticket%20logo%203B.png";
-            }}
-          />
 
-          {/* Golden active bell icon */}
-          <div className="relative p-2 rounded-full border border-slate-200 bg-slate-50 cursor-pointer text-slate-550 hover:text-slate-800 transition shadow-sm">
-            <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-            </svg>
-            <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#FFB200] rounded-full border-2 border-white" />
-          </div>
-        </div>
-      )}
 
       {/* Standard Step header for active editing actions */}
       {activeStep !== "upload" && activeStep !== "tracking" && (
@@ -1259,12 +1253,16 @@ export default function ScannerAndSimulator({
             </div>
           ) : (
             <>
+              {/* 1. HEADER SECTION */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#1360f8] pb-5">
+                <div>
+                  <h1 className="font-display font-extrabold text-[28px] text-[#1360f8] tracking-tight">Inicio</h1>
+                  <p className="text-sm text-slate-500 mt-1 font-medium">¡Bienvenido, {userName}! Gestiona tus tickets y gastos corporativos.</p>
+                </div>
+              </div>
+
               {/* 1. General Status / Activity Summary Blue Card (Exact screenshot style) - Reduced 50% in height */}
               <div id="general-status-card" className="bg-gradient-to-tr from-[#0546F0] to-[#1268FF] text-white rounded-2xl p-4 shadow-md relative overflow-hidden select-none">
-                {/* Sparkle top right decorator */}
-                <div className="absolute top-3 right-4 opacity-75">
-                  <Sparkles className="w-6 h-6 text-white animate-pulse" />
-                </div>
 
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-bold text-white/70 uppercase tracking-wider text-left">
@@ -1275,7 +1273,7 @@ export default function ScannerAndSimulator({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   {/* Procesado Card with live calculated values */}
                   <div className="bg-white/10 backdrop-blur-xs border border-white/10 rounded-xl p-2.5 text-left">
                     <span className="text-[10px] text-white/70 font-semibold block uppercase tracking-wider">
@@ -1361,16 +1359,16 @@ export default function ScannerAndSimulator({
                         fileInputRef.current.click();
                       }
                     }}
-                    className="bg-[#ebf1ff] text-[#0b53f4] rounded-2xl p-3.5 flex flex-col justify-between items-start gap-3.5 cursor-pointer hover:bg-[#dee8ff] transition border border-[#0b53f4]/5 relative select-none group active:scale-[0.98] text-left h-full min-h-[148px]"
+                    className="bg-[#ebf1ff] dark:bg-blue-950/25 hover:bg-[#dee8ff] dark:hover:bg-blue-900/30 text-[#0b53f4] dark:text-blue-300 rounded-2xl p-3.5 flex flex-col justify-between items-start gap-3.5 cursor-pointer transition border border-[#0b53f4]/5 dark:border-blue-500/15 relative select-none group active:scale-[0.98] text-left h-full min-h-[148px]"
                   >
-                    <div className="p-2 bg-[#0b53f4]/10 rounded-xl w-fit shrink-0">
-                      <Upload className="w-6 h-6 text-[#0b53f4] stroke-[2]" />
+                    <div className="p-2 bg-[#0b53f4]/10 dark:bg-blue-400/10 rounded-xl w-fit shrink-0">
+                      <Upload className="w-6 h-6 text-[#0b53f4] dark:text-blue-400 stroke-[2]" />
                     </div>
                     <span className="block">
-                      <span className="text-xs sm:text-sm font-extrabold text-[#0b53f4] leading-tight block group-hover:translate-x-0.5 transition duration-150">
+                      <span className="text-xs sm:text-sm font-extrabold text-[#0b53f4] dark:text-white leading-tight block group-hover:translate-x-0.5 transition duration-150">
                         Subir Imagen
                       </span>
-                      <span className="text-[10px] text-blue-700/80 font-medium leading-normal block mt-1">
+                      <span className="text-[10px] text-blue-700/80 dark:text-blue-300/70 font-medium leading-normal block mt-1">
                         Usa una foto guardada sin activar cámara.
                       </span>
                     </span>
@@ -1388,18 +1386,18 @@ export default function ScannerAndSimulator({
               />
 
               {/* 3. Operational Notifications / Alerts Hub & Dynamic AI Contingency Center */}
-              <div id="operational-notifications-center" className="bg-white border border-slate-200/70 rounded-3xl p-5 shadow-2xs space-y-4 text-left">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div id="operational-notifications-center" className="bg-white dark:bg-[#0b0d19] border border-slate-200/70 dark:border-slate-800/80 rounded-3xl p-5 shadow-2xs space-y-4 text-left">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/60 pb-3">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#0B53F4] flex items-center justify-center">
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-[#0B53F4] dark:text-blue-400 flex items-center justify-center">
                       <Bell className="w-5 h-5 stroke-[2.3]" />
                     </div>
                     <div>
                       <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider block font-mono">Monitoreo Técnico</span>
-                      <h3 className="text-base font-black text-slate-800 tracking-tight">Centro de Notificaciones Operativas</h3>
+                      <h3 className="text-base font-black text-slate-800 dark:text-white tracking-tight">Centro de Notificaciones Operativas</h3>
                     </div>
                   </div>
-                  <span className="bg-rose-100 text-rose-700 text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1.5 leading-none">
+                  <span className="bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-450 text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1.5 leading-none">
                     <span className="relative flex h-2 w-2">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
@@ -1408,7 +1406,7 @@ export default function ScannerAndSimulator({
                   </span>
                 </div>
 
-                <p className="text-xs text-slate-450 leading-relaxed font-medium">
+                 <p className="text-xs text-slate-450 leading-relaxed font-medium">
                   Bitácora inteligente en tiempo real para flujos técnicos, de timbrado y de integraciones bancarias. Organiza alertas operativas críticas del robot de Playwright y el SAT.
                 </p>
 
@@ -1428,7 +1426,7 @@ export default function ScannerAndSimulator({
                       className={`px-3 py-1.5 text-[11px] font-extrabold rounded-xl transition duration-150 cursor-pointer ${
                         activeNotificationTab === tab.id
                           ? "bg-[#0B53F4] text-white"
-                          : "bg-slate-50 hover:bg-slate-100 text-slate-600"
+                          : "bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-700/60 text-slate-650 dark:text-slate-300"
                       }`}
                     >
                       {tab.label}
@@ -1464,17 +1462,17 @@ export default function ScannerAndSimulator({
                             const isCrit = n.criticality === "critica";
                             const isImp = n.criticality === "importante";
                             
-                            const borderStyle = isCrit 
-                              ? "border-rose-100 bg-rose-50/20" 
+                            const cardStyle = isCrit 
+                              ? "border-rose-100/60 dark:border-rose-500/10 bg-rose-50/10 dark:bg-rose-500/5 text-slate-700 dark:text-slate-200" 
                               : isImp 
-                                ? "border-amber-100 bg-amber-50/20" 
-                                : "border-[#E4ECFE] bg-blue-50/10";
+                                ? "border-amber-100/60 dark:border-amber-500/10 bg-amber-50/10 dark:bg-amber-500/5 text-slate-700 dark:text-slate-200" 
+                                : "border-slate-150/60 dark:border-slate-800/60 bg-slate-50/40 dark:bg-slate-900/20 text-slate-700 dark:text-slate-200";
 
                             const badgeStyle = isCrit
-                              ? "bg-rose-105 text-rose-700"
+                              ? "bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-100/50 dark:border-rose-500/10"
                               : isImp
-                                ? "bg-amber-105 text-amber-700"
-                                : "bg-blue-55 text-[#0B53F4]";
+                                ? "bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-100/50 dark:border-amber-500/10"
+                                : "bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-100/50 dark:border-blue-500/10";
 
                             const dotStyle = isCrit 
                               ? "bg-rose-500" 
@@ -1505,23 +1503,30 @@ export default function ScannerAndSimulator({
                             };
 
                             return (
-                              <div key={n.id} className={`border ${borderStyle} rounded-2xl p-4 space-y-2.5 transition duration-150 relative ${!n.read ? "shadow-2xs border-l-4 border-l-[#0B53F4]" : "opacity-85"}`}>
+                              <div 
+                                key={n.id} 
+                                className={`border ${cardStyle} rounded-2xl p-4.5 space-y-3 transition duration-200 hover:scale-[1.005] hover:shadow-2xs relative ${
+                                  !n.read 
+                                    ? "border-l-4 border-l-[#0B53F4] shadow-3xs" 
+                                    : "opacity-90"
+                                }`}
+                              >
                                 <div className="flex justify-between items-start gap-4">
                                   <div className="flex items-center gap-2">
                                     <span className={`w-2.5 h-2.5 rounded-full ${dotStyle} shrink-0 ${!n.read ? "animate-pulse" : ""}`} />
-                                    <span className="text-[11px] font-black uppercase text-slate-800 tracking-wide font-sans leading-none">{n.title}</span>
+                                    <span className="text-[11px] font-extrabold uppercase text-slate-700 dark:text-slate-200 tracking-wider font-sans leading-none">{n.title}</span>
                                   </div>
                                   <span className="text-[10px] text-slate-400 font-bold shrink-0">{getRelativeTimeText(n.createdAt)}</span>
                                 </div>
 
-                                <p className="text-[11px] text-slate-550 leading-relaxed font-sans font-medium select-text">{n.message}</p>
+                                <p className="text-[11.5px] text-slate-600 dark:text-slate-400 leading-relaxed font-sans font-medium select-text">{n.message}</p>
 
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2.5 border-t border-slate-100/50">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
                                   <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
                                     <span className={`text-[8.5px] font-black px-2 py-0.5 rounded-md ${badgeStyle} uppercase font-mono`}>
                                       {n.criticality === "critica" ? "🔴 Crítico" : n.criticality === "importante" ? "🟡 Alerta" : "🔵 Información"}
                                     </span>
-                                    <span className="text-[9px] text-slate-450 font-bold uppercase tracking-wider font-mono bg-slate-50 border border-slate-100 px-1.5 py-0.5 rounded-md">
+                                    <span className="text-[8.5px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider font-mono bg-slate-50/50 dark:bg-slate-800/40 border border-slate-200/40 dark:border-slate-700/40 px-1.5 py-0.5 rounded-md">
                                       {n.category}
                                     </span>
                                   </div>
@@ -1536,7 +1541,7 @@ export default function ScannerAndSimulator({
                                           setReadNotifIds(prev => prev.includes(n.id) ? prev : [...prev, n.id]);
                                           toast.success("Notificación archivada.");
                                         }}
-                                        className="text-[9.5px] font-black text-slate-500 hover:text-slate-700 bg-white border border-slate-200 hover:border-slate-300 px-2.5 py-1.5 rounded-lg cursor-pointer outline-none transition py-1 sm:py-1.5 grow sm:grow-0 text-center"
+                                        className="text-[9.5px] font-bold text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 bg-transparent hover:bg-slate-100/50 dark:hover:bg-slate-800/50 px-2.5 py-1.5 rounded-lg cursor-pointer transition grow sm:grow-0 text-center select-none"
                                       >
                                         Archivar
                                       </button>
@@ -1544,10 +1549,10 @@ export default function ScannerAndSimulator({
                                     <button
                                       type="button"
                                       onClick={handleNotifClick}
-                                      className={`text-[10px] font-black px-3 py-1.5 rounded-lg cursor-pointer transition border py-1 sm:py-1.5 grow sm:grow-0 text-center ${
+                                      className={`text-[10px] font-black px-3 py-1.5 rounded-lg cursor-pointer transition grow sm:grow-0 text-center ${
                                         n.actionType === "contingency"
-                                          ? "bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200"
-                                          : "bg-[#F1F3FE]/65 hover:bg-[#F1F3FE] text-[#0B53F4] border-[#0B53F4]/20"
+                                          ? "border bg-amber-50 dark:bg-amber-950/20 hover:bg-amber-100 dark:hover:bg-amber-900/30 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-500/20"
+                                          : "zt-btn-secondary-blue"
                                       }`}
                                     >
                                       {n.actionText}
@@ -1594,31 +1599,31 @@ export default function ScannerAndSimulator({
                       initial={{ opacity: 0, scale: 0.95, y: 15 }}
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.95, y: 15 }}
-                      className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-xl relative max-w-2xl w-full z-10 flex flex-col max-h-[85vh]"
+                      className="bg-white dark:bg-[#0b0d19] border border-slate-200/80 dark:border-slate-800/80 rounded-3xl p-6 shadow-xl relative max-w-2xl w-full z-10 flex flex-col max-h-[85vh]"
                     >
                       {/* Header block */}
-                      <div className="flex items-center justify-between border-b border-slate-105 pb-3.5">
+                      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#0B53F4] flex items-center justify-center">
+                          <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-[#0B53F4] dark:text-blue-400 flex items-center justify-center">
                             <Bell className="w-5 h-5 stroke-[2.3]" />
                           </div>
                           <div className="text-left">
-                            <span className="text-[9px] uppercase font-black text-[#0B53F4] tracking-wider block font-mono">Ventana Detallada</span>
-                            <h3 className="text-base font-black text-slate-900 leading-tight">Centro de Notificaciones (Historial Completo)</h3>
+                            <span className="text-[9px] uppercase font-black text-[#0B53F4] dark:text-blue-400 tracking-wider block font-mono">Ventana Detallada</span>
+                            <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">Centro de Notificaciones (Historial Completo)</h3>
                           </div>
                         </div>
 
                         <button
                           type="button"
                           onClick={() => setIsNotificationsModalOpen(false)}
-                          className="w-8 h-8 rounded-full hover:bg-slate-100/80 flex items-center justify-center text-slate-400 hover:text-slate-700 transition cursor-pointer"
+                          className="w-8 h-8 rounded-full hover:bg-slate-100/80 dark:hover:bg-slate-800/80 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
                         >
                           <X className="w-5 h-5 stroke-[2.5]" />
                         </button>
                       </div>
 
                       {/* Modal Tabs inside */}
-                      <div className="flex gap-1.5 overflow-x-auto py-3 border-b border-slate-100 select-none scrollbar-none">
+                      <div className="flex gap-1.5 overflow-x-auto py-3 border-b border-slate-100 dark:border-slate-800 select-none scrollbar-none">
                         {[
                           { id: "todas", label: "Todas" },
                           { id: "pendientes", label: "Pendientes" },
@@ -1632,8 +1637,8 @@ export default function ScannerAndSimulator({
                             onClick={() => setActiveNotificationTab(tab.id as any)}
                             className={`px-3 py-1.5 text-[11px] font-extrabold rounded-xl transition duration-150 cursor-pointer whitespace-nowrap leading-none ${
                               activeNotificationTab === tab.id
-                                ? "bg-[#0B53F4] text-white shadow-3xs"
-                                : "bg-slate-50 hover:bg-slate-100 text-slate-600"
+                                ? "bg-[#0B53F4] dark:bg-blue-600 text-white shadow-3xs"
+                                : "bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-700/60 text-slate-600 dark:text-slate-350"
                             }`}
                           >
                             {tab.label}
@@ -1662,17 +1667,17 @@ export default function ScannerAndSimulator({
                             const isCrit = n.criticality === "critica";
                             const isImp = n.criticality === "importante";
                             
-                            const borderStyle = isCrit 
-                              ? "border-rose-100 bg-rose-50/20" 
+                            const cardStyle = isCrit 
+                              ? "border-rose-100/60 dark:border-rose-500/10 bg-rose-50/10 dark:bg-rose-500/5 text-slate-700 dark:text-slate-200" 
                               : isImp 
-                                ? "border-amber-100 bg-amber-50/20" 
-                                : "border-[#E4ECFE] bg-blue-50/10";
+                                ? "border-amber-100/60 dark:border-amber-500/10 bg-amber-50/10 dark:bg-amber-500/5 text-slate-700 dark:text-slate-200" 
+                                : "border-slate-150/60 dark:border-slate-800/60 bg-slate-50/40 dark:bg-slate-900/20 text-slate-700 dark:text-slate-200";
 
                             const badgeStyle = isCrit
-                              ? "bg-rose-105 text-rose-700"
+                              ? "bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-100/50 dark:border-rose-500/10"
                               : isImp
-                                ? "bg-amber-105 text-amber-700"
-                                : "bg-blue-55 text-[#0B53F4]";
+                                ? "bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-100/50 dark:border-amber-500/10"
+                                : "bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-100/50 dark:border-blue-500/10";
 
                             const dotStyle = isCrit 
                               ? "bg-rose-500" 
@@ -1708,51 +1713,58 @@ export default function ScannerAndSimulator({
                             };
 
                             return (
-                              <div key={n.id} className={`border ${borderStyle} rounded-2xl p-4 space-y-2.5 transition duration-150 relative text-left ${!n.read ? "shadow-2xs border-l-4 border-l-[#0B53F4]" : "opacity-85"}`}>
-                                <div className="flex justify-between items-start gap-4">
-                                  <div className="flex items-center gap-2">
-                                    <span className={`w-2.5 h-2.5 rounded-full ${dotStyle} shrink-0 ${!n.read ? "animate-pulse" : ""}`} />
-                                    <span className="text-[11px] font-black uppercase text-slate-800 tracking-wide font-sans leading-none">{n.title}</span>
-                                  </div>
-                                  <span className="text-[10px] text-slate-455 font-bold shrink-0">{getRelativeTimeText(n.createdAt)}</span>
-                                </div>
+                               <div 
+                                 key={n.id} 
+                                 className={`border ${cardStyle} rounded-2xl p-4.5 space-y-3 transition duration-200 hover:scale-[1.005] hover:shadow-2xs relative text-left ${
+                                   !n.read 
+                                     ? "border-l-4 border-l-[#0B53F4] shadow-3xs" 
+                                     : "opacity-90"
+                                 }`}
+                               >
+                                 <div className="flex justify-between items-start gap-4">
+                                   <div className="flex items-center gap-2">
+                                     <span className={`w-2.5 h-2.5 rounded-full ${dotStyle} shrink-0 ${!n.read ? "animate-pulse" : ""}`} />
+                                     <span className="text-[11px] font-extrabold uppercase text-slate-700 dark:text-slate-200 tracking-wider font-sans leading-none">{n.title}</span>
+                                   </div>
+                                   <span className="text-[10px] text-slate-400 font-bold shrink-0">{getRelativeTimeText(n.createdAt)}</span>
+                                 </div>
 
-                                <p className="text-[11px] text-slate-550 leading-relaxed font-sans font-medium">{n.message}</p>
+                                 <p className="text-[11.5px] text-slate-600 dark:text-slate-400 leading-relaxed font-sans font-medium">{n.message}</p>
 
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2.5 border-t border-slate-100/50">
-                                  <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
-                                    <span className={`text-[8.5px] font-black px-2 py-0.5 rounded-md ${badgeStyle} uppercase font-mono`}>
-                                      {n.criticality === "critica" ? "🔴 Crítico" : n.criticality === "importante" ? "🟡 Alerta" : "🔵 Información"}
-                                    </span>
-                                    <span className="text-[9px] text-slate-450 font-bold uppercase tracking-wider font-mono bg-slate-50 border border-slate-100 px-1.5 py-0.5 rounded-md">
-                                      {n.category}
-                                    </span>
-                                  </div>
+                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                                   <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+                                     <span className={`text-[8.5px] font-black px-2 py-0.5 rounded-md ${badgeStyle} uppercase font-mono`}>
+                                       {n.criticality === "critica" ? "🔴 Crítico" : n.criticality === "importante" ? "🟡 Alerta" : "🔵 Información"}
+                                     </span>
+                                     <span className="text-[8.5px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider font-mono bg-slate-50/50 dark:bg-slate-800/40 border border-slate-200/40 dark:border-slate-700/40 px-1.5 py-0.5 rounded-md">
+                                       {n.category}
+                                     </span>
+                                   </div>
 
-                                  <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-                                    {!n.read && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setReadNotifIds(prev => prev.includes(n.id) ? prev : [...prev, n.id]);
-                                          toast.success("Notificación archivada.");
-                                        }}
-                                        className="text-[9.5px] font-bold text-slate-400 hover:text-slate-600 bg-transparent border-none cursor-pointer outline-none py-1 sm:py-1.5 grow sm:grow-0 text-center"
-                                      >
-                                        Archivar
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={handleNotifClickModal}
-                                      className="bg-[#F1F3FE]/65 hover:bg-[#F1F3FE] text-[#0B53F4] text-[10px] font-black px-3 py-1.5 rounded-lg cursor-pointer transition border border-[#0B53F4]/20 py-1 sm:py-1.5 grow sm:grow-0 text-center"
-                                    >
-                                      {n.actionText}
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            );
+                                   <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                                     {!n.read && (
+                                       <button
+                                         type="button"
+                                         onClick={() => {
+                                           setReadNotifIds(prev => prev.includes(n.id) ? prev : [...prev, n.id]);
+                                           toast.success("Notificación archivada.");
+                                         }}
+                                         className="text-[9.5px] font-bold text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 bg-transparent hover:bg-slate-100/50 dark:hover:bg-slate-800/50 px-2.5 py-1.5 rounded-lg cursor-pointer transition grow sm:grow-0 text-center select-none"
+                                       >
+                                         Archivar
+                                       </button>
+                                     )}
+                                     <button
+                                       type="button"
+                                       onClick={handleNotifClickModal}
+                                       className="zt-btn-secondary-blue text-[10px] font-black px-3 py-1.5 rounded-lg cursor-pointer transition grow sm:grow-0 text-center"
+                                     >
+                                       {n.actionText}
+                                     </button>
+                                   </div>
+                                 </div>
+                               </div>
+                             );
                           });
                         })()}
                       </div>
@@ -2145,31 +2157,6 @@ export default function ScannerAndSimulator({
                 )}
               </div>
 
-              {/* 4. Bottom Beautiful Banner Card (Insight card from screenshot) */}
-              <div className="rounded-3xl overflow-hidden relative shadow-md aspect-[16/8] md:aspect-auto md:h-44 flex flex-col justify-end p-5 select-none text-left">
-                {/* Background image of workspace chart display */}
-                <img
-                  src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=800"
-                  alt="Insight Chart Banner"
-                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                  referrerPolicy="no-referrer"
-                />
-                
-                {/* Visual rich gradient overlay */}
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-900/40 to-transparent pointer-events-none" />
-
-                <div className="relative z-10 space-y-1">
-                  <span className="text-[10px] text-white/70 uppercase tracking-widest font-extrabold font-sans">
-                    Insight Mensual
-                  </span>
-                  <h4 className="text-lg lg:text-xl font-black text-white leading-tight">
-                    Tus gastos han bajado un 12%
-                  </h4>
-                  <p className="text-[11px] text-white/80 leading-snug font-medium leading-none">
-                    Sigue así para optimizar tus deducciones fiscales de forma legal.
-                  </p>
-                </div>
-              </div>
             </>
           )}
         </div>
@@ -3063,7 +3050,9 @@ export default function ScannerAndSimulator({
             {/* Content */}
             <div className="p-6 text-left space-y-5">
               <p className="text-xs text-slate-500 font-semibold leading-relaxed">
-                Nuestra Inteligencia Artificial ha interpretado con éxito la transcripción del ticket termal. Por favor verifique que los datos primarios sean correctos antes de proceder.
+                {extractedData.ocrFailed
+                  ? "El OCR no pudo leer con confianza este ticket. Por seguridad fiscal, dejamos los campos vacíos para que captures únicamente los datos reales impresos en el comprobante."
+                  : "Nuestra Inteligencia Artificial interpretó la transcripción del ticket. Por favor verifica que los datos primarios sean correctos antes de proceder."}
               </p>
 
               {/* Info Box */}
@@ -3125,11 +3114,25 @@ export default function ScannerAndSimulator({
 
               {/* Automatic status indicator block precisely as requested */}
               <div className={`p-4 rounded-2xl border flex items-start gap-3.5 text-xs leading-relaxed ${
-                matchingConnector 
+                extractedData.ocrFailed
+                  ? "bg-rose-50 border-rose-200 text-rose-900"
+                  : matchingConnector 
                   ? "bg-emerald-500/5 border-emerald-200 text-emerald-800"
                   : "bg-[#FFFDF5] border-amber-200 text-amber-900"
               }`}>
-                {matchingConnector ? (
+                {extractedData.ocrFailed ? (
+                  <>
+                    <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center shrink-0 text-rose-600 mt-0.5">
+                      <AlertTriangle className="w-4.5 h-4.5" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="font-extrabold text-[10px] uppercase tracking-wider block text-rose-700">Captura manual requerida</span>
+                      <p className="font-medium text-[11px] text-rose-800 leading-relaxed">
+                        No se detectó información suficiente para facturar. Completa establecimiento, RFC, folio, fecha y total con los datos impresos en el ticket.
+                      </p>
+                    </div>
+                  </>
+                ) : matchingConnector ? (
                   <>
                     <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-600 mt-0.5 animate-pulse">
                       <CheckCircle className="w-4.5 h-4.5" />
@@ -3194,7 +3197,7 @@ export default function ScannerAndSimulator({
                 disabled={checkIsDataIncomplete(extractedData)}
                 className="text-xs font-black uppercase tracking-wider text-white bg-[#0B53F4] hover:bg-blue-600 disabled:opacity-50 py-3 px-6 rounded-xl duration-150 cursor-pointer active:scale-98 text-center shadow-md shadow-[#0B53F4]/15"
               >
-                {matchingConnector ? "✓ Confirmar y Facturar" : "🧠 Entrenar y Facturar"}
+                {extractedData.ocrFailed ? "Completa los datos para continuar" : matchingConnector ? "Confirmar y Facturar" : "Entrenar y Facturar"}
               </button>
             </div>
           </div>

@@ -7,7 +7,10 @@ import logoDark from "@/assets/logos/logo-dark.png";
  * ZenTicket brand logo — uses the supplied PNG asset as-is.
  * The asset is a wide horizontal lockup with mascot + wordmark + tagline.
  */
-export const ZenLogo = ({ className = "", size = 40, ...props }) => {
+export const ZenLogo = ({ className = "", size = 40, theme, ...props }) => {
+  const forceDark = theme === "dark";
+  const forceLight = theme === "light";
+
   return (
     <a
       href="#inicio"
@@ -15,38 +18,42 @@ export const ZenLogo = ({ className = "", size = 40, ...props }) => {
       aria-label="ZenTicket — inicio"
       {...props}
     >
-      <img
-        src={logoLight}
-        alt="ZenTicket"
-        draggable={false}
-        loading="eager"
-        decoding="async"
-        className="block dark:hidden select-none"
-        style={{
-          height: size,
-          width: "auto",
-          objectFit: "contain",
-        }}
-        onError={(e) => {
-          e.target.src = ASSETS.logo;
-        }}
-      />
-      <img
-        src={logoDark}
-        alt="ZenTicket"
-        draggable={false}
-        loading="eager"
-        decoding="async"
-        className="hidden dark:block select-none"
-        style={{
-          height: size,
-          width: "auto",
-          objectFit: "contain",
-        }}
-        onError={(e) => {
-          e.target.src = ASSETS.logo;
-        }}
-      />
+      {(!forceDark || forceLight) && (
+        <img
+          src={logoLight}
+          alt="ZenTicket"
+          draggable={false}
+          loading="eager"
+          decoding="async"
+          className={`${forceLight ? "block" : "block dark:hidden"} select-none`}
+          style={{
+            height: size,
+            width: "auto",
+            objectFit: "contain",
+          }}
+          onError={(e) => {
+            e.target.src = ASSETS.logo;
+          }}
+        />
+      )}
+      {(forceDark || !forceLight) && (
+        <img
+          src={logoDark}
+          alt="ZenTicket"
+          draggable={false}
+          loading="eager"
+          decoding="async"
+          className={`${forceDark ? "block" : "hidden dark:block"} select-none`}
+          style={{
+            height: size,
+            width: "auto",
+            objectFit: "contain",
+          }}
+          onError={(e) => {
+            e.target.src = ASSETS.logo;
+          }}
+        />
+      )}
     </a>
   );
 };

@@ -3,3 +3,5 @@ export * from "./automation.api";
 export * from "./fiscal.api";
 export * from "./email.api";
 export * from "./config.api";
+export * from "./api-client";
+

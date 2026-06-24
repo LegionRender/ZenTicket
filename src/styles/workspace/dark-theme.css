@@ -96,11 +96,18 @@ html.dark .text-\[\#1a202c\] {
 
 /* Borders and lines */
 html.dark .border-slate-200,
+html.dark .border-slate-200\/80,
+html.dark .border-slate-200\/70,
 html.dark .border-slate-200\/60,
+html.dark .border-slate-200\/55,
 html.dark .border-slate-200\/50,
 html.dark .border-slate-200\/40,
+html.dark .border-slate-150\/70,
 html.dark .border-slate-150\/50,
 html.dark .border-slate-100,
+html.dark .border-slate-100\/80,
+html.dark .border-slate-100\/70,
+html.dark .border-slate-105,
 html.dark .border-slate-300,
 html.dark .border-slate-250\/20,
 html.dark .border-slate-202,
@@ -108,6 +115,15 @@ html.dark .border-\[\#cbd5e1\]\/40,
 html.dark .border-indigo-250\/20,
 html.dark .border-\[\#ebf1ff\],
 html.dark .border-\[\#EBF1FF\],
+html.dark .border-\[\#E4ECFE\],
+html.dark .border-\[\#f0efff\],
+html.dark .border-\[\#e2e1fe\],
+html.dark .border-\[\#CBD9FE\],
+html.dark .dark\:border-slate-800,
+html.dark .dark\:border-slate-800\/80,
+html.dark .dark\:border-slate-800\/60,
+html.dark .dark\:border-slate-700,
+html.dark .dark\:border-slate-700\/40,
 html.dark .border-amber-250\/20,
 html.dark .border-rose-250\/20,
 html.dark .border-emerald-250\/20,
@@ -246,7 +262,8 @@ html.dark .bg-\[\#CBD9FE\]\/10 {
 html.dark .hover\:bg-\[\#E4ECFE\]:hover {
     background-color: rgba(37, 99, 255, 0.14) !important;
 }
-html.dark .bg-\[\#FAF9FF\] {
+html.dark .bg-\[\#FAF9FF\],
+html.dark .bg-\[\#FAF9FE\] {
     background-color: #0c0e1a !important;
     border-color: rgba(255, 255, 255, 0.05) !important;
 }
@@ -295,8 +312,8 @@ html.dark {
     --zt-dark-panel: #0a0d19;
     --zt-dark-panel-2: #0f1426;
     --zt-dark-panel-3: #151a2c;
-    --zt-dark-border: rgba(226, 232, 240, 0.16);
-    --zt-dark-border-soft: rgba(226, 232, 240, 0.1);
+    --zt-dark-border: rgba(255, 255, 255, 0.08);
+    --zt-dark-border-soft: rgba(255, 255, 255, 0.05);
     --zt-dark-ink: #f8fafc;
     --zt-dark-text: #e5e7eb;
     --zt-dark-muted: #b6c2d4;
@@ -310,13 +327,16 @@ html.dark [class~="bg-[#F8FAFC]/90"],
 html.dark [class~="bg-[#F4F7FF]"],
 html.dark [class~="bg-[#F1F3FE]"],
 html.dark [class~="bg-[#F1F3FE]/70"],
-html.dark [class~="bg-[#FAF9FF]"] {
+html.dark [class~="bg-[#FAF9FF]"],
+html.dark [class~="bg-[#FAF9FE]"] {
     background-color: var(--zt-dark-panel) !important;
 }
 
 html.dark [class~="bg-[#EBF1FF]"],
 html.dark [class~="bg-[#EBF1FF]/80"],
+html.dark [class~="bg-[#EBF1FF]/75"],
 html.dark [class~="bg-[#EBF1FF]/70"],
+html.dark [class~="bg-[#EBF1FF]/60"],
 html.dark [class~="bg-[#ebf1ff]"],
 html.dark [class~="bg-[#ebf1ff]/70"],
 html.dark [class~="bg-[#E4ECFE]"],
@@ -473,6 +493,10 @@ html.dark [class~="text-[#0B53F4]"] {
 html.dark [class~="border-[#0B53F4]"] {
     border-color: rgba(91, 147, 255, 0.75) !important;
 }
+html.dark .border-\[\#0B53F4\]\/5,
+html.dark .border-\[\#0b53f4\]\/5 {
+    border-color: rgba(91, 147, 255, 0.08) !important;
+}
 
 html.dark [class~="bg-[#0B53F4]"],
 html.dark [class~="bg-[#0153F4]"] {
@@ -482,7 +506,10 @@ html.dark [class~="bg-[#0153F4]"] {
 
 html.dark [class~="hover:bg-[#DDECFF]"]:hover,
 html.dark [class~="hover:bg-[#E4ECFE]"]:hover,
-html.dark [class~="hover:bg-[#F1F3FE]"]:hover {
+html.dark [class~="hover:bg-[#F1F3FE]"]:hover,
+html.dark [class~="hover:bg-[#EBF1FF]"]:hover,
+html.dark [class~="hover:bg-[#ebf1ff]"]:hover,
+html.dark [class~="hover:bg-[#ebf1ff]/80"]:hover {
     background-color: rgba(79, 140, 255, 0.18) !important;
 }
 
@@ -499,90 +526,68 @@ html.dark .rounded-full.bg-white {
     border-color: var(--zt-dark-border) !important;
 }
 
-/* Dark Mode Overrides for Unified Gray Buttons to "Ver PDF / Descargar XML" style */
-html.dark button.bg-slate-50,
-html.dark button.bg-slate-100,
-html.dark button.bg-slate-200,
-html.dark button.bg-slate-205,
-html.dark button.bg-slate-300,
-html.dark button.bg-slate-350,
-html.dark button[class*="bg-slate-50"],
-html.dark button[class*="bg-slate-100"],
-html.dark button[class*="bg-slate-200"],
-html.dark button[class*="bg-slate-205"],
-html.dark button[class*="bg-slate-300"],
-html.dark button[class*="bg-slate-350"],
-html.dark [class*="bg-slate-50"].cursor-pointer,
-html.dark [class*="bg-slate-100"].cursor-pointer,
-html.dark [class*="bg-slate-200"].cursor-pointer,
-html.dark [class*="bg-slate-205"].cursor-pointer,
-html.dark [class*="bg-slate-300"].cursor-pointer,
-html.dark [class*="bg-slate-350"].cursor-pointer,
-html.dark [class*="bg-slate-50"][class*="cursor-pointer"],
-html.dark [class*="bg-slate-100"][class*="cursor-pointer"],
-html.dark [class*="bg-slate-200"][class*="cursor-pointer"],
-html.dark [class*="bg-slate-205"][class*="cursor-pointer"],
-html.dark [class*="bg-slate-300"][class*="cursor-pointer"],
-html.dark [class*="bg-slate-350"][class*="cursor-pointer"] {
+/* Explicit button overrides for secondary and neutral buttons under dark theme */
+html.dark .zt-btn-secondary {
+    background-color: var(--zt-dark-panel-2) !important;
+    color: var(--zt-dark-text) !important;
+    border-color: var(--zt-dark-border) !important;
+}
+html.dark .zt-btn-secondary:hover {
+    background-color: var(--zt-dark-panel-3) !important;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+html.dark .zt-btn-secondary-blue {
     background-color: rgba(79, 140, 255, 0.12) !important;
     color: #5b93ff !important;
-    border-color: rgba(79, 140, 255, 0.15) !important;
+    border-color: rgba(79, 140, 255, 0.22) !important;
 }
-
-html.dark button.bg-slate-50:hover,
-html.dark button.bg-slate-100:hover,
-html.dark button.bg-slate-200:hover,
-html.dark button.bg-slate-205:hover,
-html.dark button.bg-slate-300:hover,
-html.dark button.bg-slate-350:hover,
-html.dark button[class*="bg-slate-50"]:hover,
-html.dark button[class*="bg-slate-100"]:hover,
-html.dark button[class*="bg-slate-200"]:hover,
-html.dark button[class*="bg-slate-205"]:hover,
-html.dark button[class*="bg-slate-300"]:hover,
-html.dark button[class*="bg-slate-350"]:hover,
-html.dark [class*="bg-slate-50"].cursor-pointer:hover,
-html.dark [class*="bg-slate-100"].cursor-pointer:hover,
-html.dark [class*="bg-slate-200"].cursor-pointer:hover,
-html.dark [class*="bg-slate-205"].cursor-pointer:hover,
-html.dark [class*="bg-slate-300"].cursor-pointer:hover,
-html.dark [class*="bg-slate-350"].cursor-pointer:hover,
-html.dark [class*="bg-slate-50"][class*="cursor-pointer"]:hover,
-html.dark [class*="bg-slate-100"][class*="cursor-pointer"]:hover,
-html.dark [class*="bg-slate-200"][class*="cursor-pointer"]:hover,
-html.dark [class*="bg-slate-205"][class*="cursor-pointer"]:hover,
-html.dark [class*="bg-slate-300"][class*="cursor-pointer"]:hover,
-html.dark [class*="bg-slate-350"][class*="cursor-pointer"]:hover {
+html.dark .zt-btn-secondary-blue:hover {
     background-color: rgba(79, 140, 255, 0.22) !important;
     color: #8bb4ff !important;
-    border-color: rgba(79, 140, 255, 0.25) !important;
+    border-color: rgba(79, 140, 255, 0.35) !important;
 }
 
-/* Ensure child icons/SVGs in dark mode buttons inherit unified bright colors */
-html.dark button.bg-slate-50 svg,
-html.dark button.bg-slate-100 svg,
-html.dark button.bg-slate-200 svg,
-html.dark button.bg-slate-205 svg,
-html.dark button.bg-slate-300 svg,
-html.dark button.bg-slate-350 svg,
-html.dark button[class*="bg-slate-50"] svg,
-html.dark button[class*="bg-slate-100"] svg,
-html.dark button[class*="bg-slate-200"] svg,
-html.dark button[class*="bg-slate-205"] svg,
-html.dark button[class*="bg-slate-300"] svg,
-html.dark button[class*="bg-slate-350"] svg,
-html.dark [class*="bg-slate-50"].cursor-pointer svg,
-html.dark [class*="bg-slate-100"].cursor-pointer svg,
-html.dark [class*="bg-slate-200"].cursor-pointer svg,
-html.dark [class*="bg-slate-205"].cursor-pointer svg,
-html.dark [class*="bg-slate-300"].cursor-pointer svg,
-html.dark [class*="bg-slate-350"].cursor-pointer svg,
-html.dark [class*="bg-slate-50"][class*="cursor-pointer"] svg,
-html.dark [class*="bg-slate-100"][class*="cursor-pointer"] svg,
-html.dark [class*="bg-slate-200"][class*="cursor-pointer"] svg,
-html.dark [class*="bg-slate-205"][class*="cursor-pointer"] svg,
-html.dark [class*="bg-slate-300"][class*="cursor-pointer"] svg,
-html.dark [class*="bg-slate-350"][class*="cursor-pointer"] svg {
-    color: #5b93ff !important;
-    stroke: #5b93ff !important;
+html.dark .zt-btn-neutral {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+    color: var(--zt-dark-muted) !important;
+    border-color: var(--zt-dark-border-soft) !important;
+}
+html.dark .zt-btn-neutral:hover {
+    background-color: rgba(255, 255, 255, 0.06) !important;
+    color: var(--zt-dark-text) !important;
+    border-color: var(--zt-dark-border) !important;
+}
+
+/* Custom Profile Form / Edit Profile dark theme optimizations */
+html.dark [class~="from-blue-50/50"][class~="to-white"] {
+    background-image: linear-gradient(to bottom right, rgba(11, 83, 244, 0.12), var(--zt-dark-panel-2)) !important;
+}
+
+html.dark [class~="from-violet-50/50"][class~="to-white"] {
+    background-image: linear-gradient(to bottom right, rgba(139, 92, 246, 0.12), var(--zt-dark-panel-2)) !important;
+}
+
+html.dark .border-\[\#0B53F4\]\/20,
+html.dark .border-\[\#0b53f4\]\/20 {
+    border-color: rgba(91, 147, 255, 0.12) !important;
+}
+
+html.dark .border-violet-100 {
+    border-color: rgba(139, 92, 246, 0.24) !important;
+}
+
+html.dark .text-violet-600 {
+    color: #a78bfa !important;
+}
+
+html.dark [class~="bg-blue-50/40"] {
+    background-color: rgba(79, 140, 255, 0.08) !important;
+}
+
+html.dark [class~="border-blue-100"],
+html.dark [class~="border-blue-100/50"],
+html.dark [class~="border-blue-100/40"] {
+    border-color: rgba(79, 140, 255, 0.24) !important;
 }

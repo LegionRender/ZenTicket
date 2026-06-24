@@ -68,5 +68,21 @@ service cloud.firestore {
       allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid) || resource.data.userId == "guest";
       allow delete: if isAdmin();
     }
+
+    // OCR operations written by Cloud Functions.
+    match /ocr_jobs/{jobId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /ocr_retry_queue/{queueId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /ocr_alerts/{alertId} {
+      allow read, update, delete: if isAdmin();
+      allow create: if isAdmin();
+    }
   }
 }

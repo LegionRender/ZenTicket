@@ -118,9 +118,9 @@ export default function VaultScreen({ invoices, onTabChange }: VaultScreenProps)
   return (
     <div className="max-w-6xl mx-auto space-y-8 font-body text-left mt-2 relative select-none pb-24">
       {/* 1. HEADER SECTION */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/30 pb-5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#1360f8] pb-5">
         <div>
-          <h1 className="font-display font-extrabold text-[28px] text-slate-900 tracking-tight">Gastos</h1>
+          <h1 className="font-display font-extrabold text-[28px] text-[#1360f8] tracking-tight">Gastos</h1>
           <p className="text-sm text-slate-500 mt-1 font-medium">Monitorea la acumulación de tus facturas SAT y distribución de gastos corporativos.</p>
         </div>
         <div className="flex items-center gap-3">
@@ -335,21 +335,7 @@ export default function VaultScreen({ invoices, onTabChange }: VaultScreenProps)
 
       </div>
 
-      {/* 6. FLOATING ACTION BUTTON (FAB) FOR MOBILE - GO TO CAMERA CAPTURE */}
-      {onTabChange && (
-        <button
-          id="GastosFABButton"
-          type="button"
-          onClick={() => {
-            onTabChange("capturar");
-            toast.info("Abre o arrastra un ticket para procesarlo por OCR.", "Capturando");
-          }}
-          className="fixed bottom-24 right-5 z-55 w-14 h-14 bg-[#0B53F4] text-white rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(11,83,244,0.35)] hover:bg-[#0747D1] active:scale-95 cursor-pointer transition duration-150 relative"
-          title="Capturar nuevo ticket"
-        >
-          <Plus className="w-6.5 h-6.5 stroke-[3] text-white" />
-        </button>
-      )}
+
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { getApiUrl } from "./api-client";
+
 /**
  * Fetches SMTP configuration and server diagnostic status metrics.
  */
@@ -19,7 +21,7 @@ const createMockResponse = (data: any): Response => {
  */
 export const getConfigStatus = async (): Promise<Response> => {
   try {
-    const response = await fetch("/api/config/status");
+    const response = await fetch(getApiUrl("/api/config/status"));
     if (response.ok) {
       return response;
     }

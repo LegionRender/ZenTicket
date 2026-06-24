@@ -83,7 +83,7 @@ function getInvoiceCategoryStyles(category: string) {
 }
 import { useToast } from "@/shared/feedback/Toast";
 import { db } from "@/services/firebase/firebase";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, limit, onSnapshot, query, orderBy } from "firebase/firestore";
 
 interface AdminScreenProps {
   connectors: Connector[];
@@ -141,7 +141,11 @@ export default function AdminScreen({
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [assigningTicketId, setAssigningTicketId] = useState<string | null>(null);
   const [activeTrainings, setActiveTrainings] = useState<any[]>([]);
+  const [ocrJobs, setOcrJobs] = useState<any[]>([]);
+  const [ocrAlerts, setOcrAlerts] = useState<any[]>([]);
+  const [ocrQueue, setOcrQueue] = useState<any[]>([]);
   const [trainingSyncError, setTrainingSyncError] = useState<string | null>(null);
+  const [ocrSyncError, setOcrSyncError] = useState<string | null>(null);
   const [trackerTab, setTrackerTab] = useState<"activos" | "aprendidos">("aprendidos");
 
   // See All modal state variables
@@ -173,6 +177,46 @@ export default function AdminScreen({
       }
     );
     return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribers = [
+      onSnapshot(
+        query(collection(db, "ocr_jobs"), orderBy("createdAt", "desc"), limit(12)),
+        (snapshot) => {
+          setOcrJobs(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+          setOcrSyncError(null);
+        },
+        (err) => {
+          setOcrJobs([]);
+          setOcrSyncError(err?.code === "permission-denied" ? "Sin permisos para leer jobs OCR." : "No se pudo sincronizar jobs OCR.");
+        }
+      ),
+      onSnapshot(
+        query(collection(db, "ocr_alerts"), orderBy("createdAt", "desc"), limit(8)),
+        (snapshot) => {
+          setOcrAlerts(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+          setOcrSyncError(null);
+        },
+        (err) => {
+          setOcrAlerts([]);
+          setOcrSyncError(err?.code === "permission-denied" ? "Sin permisos para leer alertas OCR." : "No se pudo sincronizar alertas OCR.");
+        }
+      ),
+      onSnapshot(
+        query(collection(db, "ocr_retry_queue"), orderBy("createdAt", "desc"), limit(8)),
+        (snapshot) => {
+          setOcrQueue(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+          setOcrSyncError(null);
+        },
+        (err) => {
+          setOcrQueue([]);
+          setOcrSyncError(err?.code === "permission-denied" ? "Sin permisos para leer cola OCR." : "No se pudo sincronizar cola OCR.");
+        }
+      ),
+    ];
+
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, []);
 
   const toggleExpandConnector = (id: string) => {
@@ -427,6 +471,11 @@ export default function AdminScreen({
     return logsList.slice(-8); // Keep last 8 entries
   };
 
+  const recentOcrFailures = ocrJobs.filter((job) => job.status === "queued" || job.status === "failed");
+  const recentOcrSuccess = ocrJobs.filter((job) => job.status === "succeeded");
+  const criticalOcrAlerts = ocrAlerts.filter((alert) => alert.severity === "critical" && !alert.read);
+  const pendingOcrQueue = ocrQueue.filter((item) => item.status === "pending" || item.status === "processing");
+
   return (
     <div className="max-w-6xl mx-auto space-y-8 font-sans text-left mt-2 relative select-none pb-24">
 
@@ -492,6 +541,105 @@ export default function AdminScreen({
           </div>
         </div>
       )}
+
+      <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-4">
+          <div>
+            <span className="text-[10px] font-black text-[#0B53F4] uppercase tracking-widest font-mono">OCR Production Control</span>
+            <h3 className="text-lg font-black text-slate-900 tracking-tight mt-1">Gemini, fallback, cola y alertas</h3>
+          </div>
+          <div className="grid grid-cols-4 gap-2 text-center min-w-full lg:min-w-[520px]">
+            <div className="rounded-2xl bg-emerald-50 border border-emerald-100 px-3 py-2">
+              <span className="block text-lg font-black text-emerald-700">{recentOcrSuccess.length}</span>
+              <span className="text-[9px] font-bold text-emerald-700 uppercase">OK</span>
+            </div>
+            <div className="rounded-2xl bg-rose-50 border border-rose-100 px-3 py-2">
+              <span className="block text-lg font-black text-rose-700">{recentOcrFailures.length}</span>
+              <span className="text-[9px] font-bold text-rose-700 uppercase">Fallos</span>
+            </div>
+            <div className="rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2">
+              <span className="block text-lg font-black text-amber-700">{pendingOcrQueue.length}</span>
+              <span className="text-[9px] font-bold text-amber-700 uppercase">Cola</span>
+            </div>
+            <div className="rounded-2xl bg-slate-50 border border-slate-200 px-3 py-2">
+              <span className="block text-lg font-black text-slate-800">{criticalOcrAlerts.length}</span>
+              <span className="text-[9px] font-bold text-slate-600 uppercase">Alertas</span>
+            </div>
+          </div>
+        </div>
+
+        {ocrSyncError && (
+          <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">
+            {ocrSyncError}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Bell className="w-4 h-4 text-rose-600" />
+              <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Alertas de saldo/cuota</span>
+            </div>
+            <div className="space-y-2 max-h-44 overflow-y-auto">
+              {ocrAlerts.length === 0 ? (
+                <p className="text-xs text-slate-400 font-semibold">Sin alertas recientes.</p>
+              ) : ocrAlerts.slice(0, 4).map((alert) => (
+                <div key={alert.id} className="rounded-xl bg-white border border-slate-200 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-[9px] font-black uppercase ${alert.severity === "critical" ? "text-rose-600" : "text-amber-600"}`}>
+                      {alert.code || alert.type || "ocr_alert"}
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-400">{alert.provider || "provider"}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-medium leading-snug mt-1">{alert.message}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <RefreshCw className="w-4 h-4 text-amber-600" />
+              <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Cola de reintentos</span>
+            </div>
+            <div className="space-y-2 max-h-44 overflow-y-auto">
+              {ocrQueue.length === 0 ? (
+                <p className="text-xs text-slate-400 font-semibold">Sin tickets pendientes.</p>
+              ) : ocrQueue.slice(0, 4).map((item) => (
+                <div key={item.id} className="rounded-xl bg-white border border-slate-200 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[9px] font-black uppercase text-amber-700">{item.status}</span>
+                    <span className="text-[9px] font-mono text-slate-400">{item.attempts || 0}/{item.maxAttempts || 3}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-medium leading-snug mt-1">{item.lastError || "Pendiente de reintento"}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Server className="w-4 h-4 text-[#0B53F4]" />
+              <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Ultimos jobs OCR</span>
+            </div>
+            <div className="space-y-2 max-h-44 overflow-y-auto">
+              {ocrJobs.length === 0 ? (
+                <p className="text-xs text-slate-400 font-semibold">Aun no hay jobs OCR registrados.</p>
+              ) : ocrJobs.slice(0, 4).map((job) => (
+                <div key={job.id} className="rounded-xl bg-white border border-slate-200 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-[9px] font-black uppercase ${job.status === "succeeded" ? "text-emerald-700" : job.status === "processing" ? "text-[#0B53F4]" : "text-rose-700"}`}>
+                      {job.status}
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-400">{job.provider || job.providerErrorCode || "sin proveedor"}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-medium leading-snug mt-1">{job.lastError || job.model || "Procesado correctamente"}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
       
       {/* 1. TOP HEADER BRANDED ROW */}
       <div className="flex bg-white border-b border-slate-100 px-5 py-4 items-center justify-between sticky top-0 z-30 font-sans -mx-4 -mt-6 sm:-mx-8 sm:-mt-8 rounded-t-3xl mb-3 shadow-xs">
@@ -732,10 +880,10 @@ export default function AdminScreen({
             onClick={async () => {
               await onUpdateLearningBudgetLimit(tempBudgetLimit);
             }}
-            className="group shrink-0 flex items-center justify-between gap-1.5 py-2 px-3.5 border border-[#0B53F4]/20 bg-[#F1F3FE]/45 hover:bg-[#F1F3FE]/80 hover:border-[#0B53F4]/40 text-[#0B53F4] hover:text-[#0747D1] font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none"
+            className="group shrink-0 flex items-center justify-between gap-1.5 py-2 px-3.5 zt-btn-secondary-blue font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none"
           >
             <span>Guardar Límite</span>
-            <ChevronRight className="w-3.5 h-3.5 text-[#0B53F4]/60 group-hover:text-[#0747D1] transition-transform duration-150 transform group-hover:translate-x-0.5" />
+            <ChevronRight className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-all duration-150 transform group-hover:translate-x-0.5" />
           </button>
         </div>
       </div>
