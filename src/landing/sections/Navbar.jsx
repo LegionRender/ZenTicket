@@ -180,14 +180,25 @@ const Navbar = ({ onCtaClick, onLoginClick }) => {
         <AnimatePresence>
           {open && (
             <motion.div
+              drag="y"
+              dragConstraints={{ top: -300, bottom: 0 }}
+              dragElastic={{ top: 0.1, bottom: 0 }}
+              onDragEnd={(event, info) => {
+                if (info.offset.y < -50 || info.velocity.y < -300) {
+                  setOpen(false);
+                }
+              }}
               initial={{ opacity: 0, y: -10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -10, scale: 0.98 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className={`lg:hidden absolute left-6 right-6 border border-white/[0.08] bg-[#040712]/50 backdrop-blur-xl rounded-2xl p-5 shadow-2xl z-50 text-left transition-all duration-300 ${
+              className={`lg:hidden absolute left-6 right-6 border border-white/[0.04] bg-[#040712]/50 backdrop-blur-xl rounded-2xl p-5 shadow-2xl z-50 text-left transition-all duration-300 cursor-grab active:cursor-grabbing ${
                 scrolled ? "top-[64px]" : "top-[80px]"
               }`}
             >
+              {/* Drag handle to dismiss */}
+              <div className="w-12 h-1 bg-white/15 rounded-full mx-auto mb-4 pointer-events-none" />
+
               <ul className="flex flex-col gap-3 text-white">
                 {navItems.map((it) => {
                   const isActive = it.id === activeSection;
@@ -202,8 +213,8 @@ const Navbar = ({ onCtaClick, onLoginClick }) => {
                         }}
                         className={`flex items-center gap-3 px-4 py-3 rounded-xl text-[14.5px] font-semibold transition duration-150 ${
                           isActive
-                            ? "bg-[#0b53f4] text-white shadow-md shadow-[#0b53f4]/25"
-                            : "bg-[#0a0f26]/60 text-white/90 border border-white/[0.06] hover:bg-[#0a0f26]/85 hover:border-white/10"
+                            ? "bg-[#0b53f4]/55 text-white border border-[#0b53f4]/35 shadow-sm shadow-[#0b53f4]/10"
+                            : "bg-[#0a0f26]/20 text-white/90 border border-white/[0.04] hover:bg-[#0a0f26]/30"
                         }`}
                       >
                         <Icon className="w-5 h-5 shrink-0" />
@@ -218,7 +229,7 @@ const Navbar = ({ onCtaClick, onLoginClick }) => {
                       setOpen(false);
                       onLoginClick?.();
                     }}
-                    className="w-full py-3.5 bg-[#0b53f4] hover:bg-[#0847d1] text-white text-[14.5px] font-bold rounded-xl transition duration-150 cursor-pointer flex items-center justify-center gap-2 border-none font-sans shadow-md shadow-[#0b53f4]/25"
+                    className="w-full py-3.5 bg-[#0b53f4]/55 hover:bg-[#0b53f4]/75 text-white text-[14.5px] font-bold rounded-xl transition duration-150 cursor-pointer flex items-center justify-center gap-2 border border-[#0b53f4]/35 font-sans shadow-sm shadow-[#0b53f4]/10"
                   >
                     <LogIn className="w-5 h-5 shrink-0" strokeWidth={1.5} />
                     <span>Iniciar sesión</span>
