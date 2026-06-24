@@ -2142,11 +2142,18 @@ export default function ScannerAndSimulator({
 
                     {/* Trigger Button */}
                     {!isSolvingContingency && (
-                      <div className="pt-2">
+                      <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedContingencyTicket(null)}
+                          className="w-full sm:w-1/3 bg-transparent hover:bg-slate-100 text-slate-700 border border-slate-250 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98 leading-none"
+                        >
+                          <span>Cancelar</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleSolveContingency(selectedContingencyTicket)}
-                          className="w-full bg-[#0B53F4] hover:bg-[#0747D1] text-white py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-[#0B53F4]/10 cursor-pointer flex items-center justify-center gap-2 active:scale-98 leading-none"
+                          className="flex-1 bg-[#0B53F4] hover:bg-[#0747D1] text-white py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-[#0B53F4]/10 cursor-pointer flex items-center justify-center gap-2 active:scale-98 leading-none"
                         >
                           <Zap className="w-4 h-4 fill-white animate-bounce" />
                           <span>Solucionar Problema Automáticamente</span>

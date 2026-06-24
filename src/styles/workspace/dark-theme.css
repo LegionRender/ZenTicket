@@ -591,3 +591,82 @@ html.dark [class~="border-blue-100/50"],
 html.dark [class~="border-blue-100/40"] {
     border-color: rgba(79, 140, 255, 0.24) !important;
 }
+
+/* ========================================================================== */
+/* ADMIN ALERTS, AMBER CONTAINERS AND MITIGATION STRATEGY CARDS OVERRIDES    */
+/* ========================================================================== */
+
+/* Amber containers and alert boxes (like Buzón de Alertas Admin) */
+html.dark [class~="bg-amber-50/75"] {
+    background-color: rgba(245, 158, 11, 0.04) !important;
+}
+html.dark [class~="bg-amber-50"] {
+    background-color: rgba(245, 158, 11, 0.06) !important;
+}
+html.dark [class~="bg-amber-500/5"] {
+    background-color: rgba(245, 158, 11, 0.08) !important;
+}
+html.dark [class~="border-amber-200"] {
+    border-color: rgba(245, 158, 11, 0.25) !important;
+}
+html.dark [class~="border-amber-100"] {
+    border-color: rgba(245, 158, 11, 0.15) !important;
+}
+html.dark [class~="border-amber-200/25"] {
+    border-color: rgba(245, 158, 11, 0.12) !important;
+}
+html.dark .text-amber-800,
+html.dark .text-amber-900,
+html.dark .text-amber-955 {
+    color: #fef3c7 !important;
+}
+html.dark .text-amber-900.uppercase {
+    color: #fbbf24 !important;
+}
+
+/* Selected mitigation strategy cards in Contingency Panel */
+html.dark [class~="bg-indigo-50/70"] {
+    background-color: rgba(99, 102, 241, 0.15) !important;
+}
+html.dark [class~="bg-sky-50/70"] {
+    background-color: rgba(14, 165, 233, 0.15) !important;
+}
+html.dark [class~="bg-amber-50/70"] {
+    background-color: rgba(245, 158, 11, 0.15) !important;
+}
+html.dark [class~="bg-orange-50/70"] {
+    background-color: rgba(249, 115, 22, 0.15) !important;
+}
+
+html.dark .text-indigo-900,
+html.dark .text-indigo-950 {
+    color: #e0e7ff !important;
+}
+html.dark .text-sky-900,
+html.dark .text-sky-950 {
+    color: #e0f2fe !important;
+}
+html.dark .text-amber-900,
+html.dark .text-amber-950 {
+    color: #fef3c7 !important;
+}
+html.dark .text-orange-900,
+html.dark .text-orange-955 {
+    color: #ffedd5 !important;
+}
+
+/* Non-selected strategies border */
+html.dark .border-slate-205 {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Secondary Cancel button styling inside dark mode */
+html.dark button.border-slate-250 {
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    color: #94a3b8 !important;
+}
+html.dark button.border-slate-250:hover {
+    background-color: rgba(255, 255, 255, 0.04) !important;
+    color: #f1f5f9 !important;
+}
+
