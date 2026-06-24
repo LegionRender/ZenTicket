@@ -1493,11 +1493,6 @@ export default function ScannerAndSimulator({
                                 const fc = n.ticket;
                                 if (fc) {
                                   setSelectedContingencyTicket(fc as Ticket);
-                                  toast.info(`Direccionando a Contingencia IA para resolver ${fc.nombreEmisor}...`, "Mitigación Activada");
-                                  setTimeout(() => {
-                                    const cel = document.getElementById("ai-contingency-panel-card");
-                                    if (cel) cel.scrollIntoView({ behavior: "smooth" });
-                                  }, 100);
                                 } else {
                                   toast.info("No se encontró el ticket asociado.");
                                 }
@@ -1707,12 +1702,6 @@ return list.map(n => {
                                 const fc = n.ticket;
                                 if (fc) {
                                   setSelectedContingencyTicket(fc as Ticket);
-                                  toast.info(`Direccionando a Contingencia IA para resolver ${fc.nombreEmisor}...`, "Mitigación Activada");
-                                  
-                                  setTimeout(() => {
-                                    const cel = document.getElementById("ai-contingency-panel-card");
-                                    if (cel) cel.scrollIntoView({ behavior: "smooth" });
-                                  }, 130);
                                 } else {
                                   toast.info("No se encontró el ticket asociado.");
                                 }
@@ -1969,9 +1958,24 @@ return list.map(n => {
                   })()}
                 </div>
 
-                {/* Selected ticket workspace details */}
-                {selectedContingencyTicket && (
-                  <div className="bg-slate-50 dark:bg-[#0d0f1c] border border-slate-200 dark:border-slate-800/60 rounded-3xl p-5 space-y-5 animate-fadeIn">
+                {/* Selected ticket workspace details in Centered Modal overlay */}
+                <AnimatePresence>
+                  {selectedContingencyTicket && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => !isSolvingContingency && setSelectedContingencyTicket(null)}
+                        className="absolute inset-0 bg-slate-900/35 backdrop-blur-md cursor-zoom-out"
+                      />
+
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                        className="bg-white dark:bg-[#0b0d19] border border-slate-200/80 dark:border-slate-800/80 rounded-3xl p-6 shadow-xl relative max-w-2xl w-full z-10 flex flex-col max-h-[90vh] overflow-y-auto space-y-5 text-left"
+                      >
                     {/* Ticket Info header */}
                     <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800/60 pb-3">
                       <div>
@@ -2171,8 +2175,10 @@ return list.map(n => {
                         </button>
                       </div>
                     )}
-                  </div>
-                )}
+                      </motion.div>
+                    </div>
+                  )}
+                </AnimatePresence>
               </div>
 
             </>
