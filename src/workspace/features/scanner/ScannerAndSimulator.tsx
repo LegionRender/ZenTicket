@@ -1463,10 +1463,16 @@ export default function ScannerAndSimulator({
                             const isImp = n.criticality === "importante";
                             
                             const cardStyle = isCrit 
-                              ? "border-rose-100/60 dark:border-rose-500/10 bg-rose-50/10 dark:bg-rose-500/5 text-slate-700 dark:text-slate-200" 
+                              ? "border-rose-200 dark:border-rose-500/20 bg-rose-50/10 dark:bg-[#0d0f1c]" 
                               : isImp 
-                                ? "border-amber-100/60 dark:border-amber-500/10 bg-amber-50/10 dark:bg-amber-500/5 text-slate-700 dark:text-slate-200" 
-                                : "border-slate-150/60 dark:border-slate-800/60 bg-slate-50/40 dark:bg-slate-900/20 text-slate-700 dark:text-slate-200";
+                                ? "border-amber-200 dark:border-amber-500/20 bg-amber-50/10 dark:bg-[#0d0f1c]" 
+                                : "border-slate-200 dark:border-blue-500/20 bg-slate-50/45 dark:bg-[#0d0f1c]";
+
+                            const accentStyle = isCrit
+                              ? "border-l-4 border-l-rose-500"
+                              : isImp
+                                ? "border-l-4 border-l-amber-500"
+                                : "border-l-4 border-l-[#0B53F4] dark:border-l-blue-550";
 
                             const badgeStyle = isCrit
                               ? "bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-100/50 dark:border-rose-500/10"
@@ -1505,10 +1511,10 @@ export default function ScannerAndSimulator({
                             return (
                               <div 
                                 key={n.id} 
-                                className={`border ${cardStyle} rounded-2xl p-4.5 space-y-3 transition duration-200 hover:scale-[1.005] hover:shadow-2xs relative ${
+                                className={`border ${cardStyle} ${accentStyle} rounded-2xl p-4.5 space-y-3 transition duration-200 hover:scale-[1.005] hover:shadow-2xs relative ${
                                   !n.read 
-                                    ? "border-l-4 border-l-[#0B53F4] shadow-3xs" 
-                                    : "opacity-90"
+                                    ? "shadow-3xs" 
+                                    : "opacity-80"
                                 }`}
                               >
                                 <div className="flex justify-between items-start gap-4">
@@ -1662,16 +1668,21 @@ export default function ScannerAndSimulator({
                               </div>
                             );
                           }
-
-                          return list.map(n => {
+return list.map(n => {
                             const isCrit = n.criticality === "critica";
                             const isImp = n.criticality === "importante";
                             
                             const cardStyle = isCrit 
-                              ? "border-rose-100/60 dark:border-rose-500/10 bg-rose-50/10 dark:bg-rose-500/5 text-slate-700 dark:text-slate-200" 
+                              ? "border-rose-200 dark:border-rose-500/20 bg-rose-50/10 dark:bg-[#0d0f1c]" 
                               : isImp 
-                                ? "border-amber-100/60 dark:border-amber-500/10 bg-amber-50/10 dark:bg-amber-500/5 text-slate-700 dark:text-slate-200" 
-                                : "border-slate-150/60 dark:border-slate-800/60 bg-slate-50/40 dark:bg-slate-900/20 text-slate-700 dark:text-slate-200";
+                                ? "border-amber-200 dark:border-amber-500/20 bg-amber-50/10 dark:bg-[#0d0f1c]" 
+                                : "border-slate-200 dark:border-blue-500/20 bg-slate-50/45 dark:bg-[#0d0f1c]";
+
+                            const accentStyle = isCrit
+                              ? "border-l-4 border-l-rose-500"
+                              : isImp
+                                ? "border-l-4 border-l-amber-500"
+                                : "border-l-4 border-l-[#0B53F4] dark:border-l-blue-550";
 
                             const badgeStyle = isCrit
                               ? "bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-100/50 dark:border-rose-500/10"
@@ -1715,10 +1726,10 @@ export default function ScannerAndSimulator({
                             return (
                                <div 
                                  key={n.id} 
-                                 className={`border ${cardStyle} rounded-2xl p-4.5 space-y-3 transition duration-200 hover:scale-[1.005] hover:shadow-2xs relative text-left ${
+                                 className={`border ${cardStyle} ${accentStyle} rounded-2xl p-4.5 space-y-3 transition duration-200 hover:scale-[1.005] hover:shadow-2xs relative text-left ${
                                    !n.read 
-                                     ? "border-l-4 border-l-[#0B53F4] shadow-3xs" 
-                                     : "opacity-90"
+                                     ? "shadow-3xs" 
+                                     : "opacity-80"
                                  }`}
                                >
                                  <div className="flex justify-between items-start gap-4">
