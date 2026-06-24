@@ -1438,6 +1438,7 @@ export default function ScannerAndSimulator({
                 <div className="space-y-3.5 pr-1">
                   {(() => {
                     const list = operationalNotifications.filter(n => {
+                      if (n.read) return false;
                       if (activeNotificationTab === "todas") return true;
                       if (activeNotificationTab === "pendientes") return n.criticality === "critica";
                       return n.category === activeNotificationTab;
@@ -1537,14 +1538,12 @@ export default function ScannerAndSimulator({
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          const confirmed = window.confirm(`Archivar la alerta "${n.title}"?`);
-                                          if (!confirmed) return;
                                           setReadNotifIds(prev => prev.includes(n.id) ? prev : [...prev, n.id]);
-                                          toast.success("Notificación archivada.");
+                                          toast.success("Notificación marcada como vista.");
                                         }}
                                         className="text-[9.5px] font-bold text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 bg-transparent hover:bg-slate-100/50 dark:hover:bg-slate-800/50 px-2.5 py-1.5 rounded-lg cursor-pointer transition grow sm:grow-0 text-center select-none"
                                       >
-                                        Archivar
+                                        Visto
                                       </button>
                                     )}
                                     <button
@@ -1651,6 +1650,7 @@ export default function ScannerAndSimulator({
                       <div className="flex-1 overflow-y-auto pt-4 pr-1 space-y-3.5 max-h-[50vh]">
                         {(() => {
                           const list = operationalNotifications.filter(n => {
+                            if (n.read) return false;
                             if (activeNotificationTab === "todas") return true;
                             if (activeNotificationTab === "pendientes") return n.criticality === "critica";
                             return n.category === activeNotificationTab;
@@ -1747,11 +1747,11 @@ return list.map(n => {
                                          type="button"
                                          onClick={() => {
                                            setReadNotifIds(prev => prev.includes(n.id) ? prev : [...prev, n.id]);
-                                           toast.success("Notificación archivada.");
+                                           toast.success("Notificación marcada como vista.");
                                          }}
                                          className="text-[9.5px] font-bold text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 bg-transparent hover:bg-slate-100/50 dark:hover:bg-slate-800/50 px-2.5 py-1.5 rounded-lg cursor-pointer transition grow sm:grow-0 text-center select-none"
                                        >
-                                         Archivar
+                                         Visto
                                        </button>
                                      )}
                                      <button
