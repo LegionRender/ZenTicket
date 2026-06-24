@@ -553,87 +553,87 @@ export default function AdminScreen({
               <span className="block text-lg font-black text-emerald-700">{recentOcrSuccess.length}</span>
               <span className="text-[9px] font-bold text-emerald-700 uppercase">OK</span>
             </div>
-            <div className="rounded-2xl bg-rose-50 border border-rose-100 px-3 py-2">
-              <span className="block text-lg font-black text-rose-700">{recentOcrFailures.length}</span>
-              <span className="text-[9px] font-bold text-rose-700 uppercase">Fallos</span>
+            <div className="rounded-2xl bg-rose-50 dark:bg-rose-950/15 border border-rose-100 dark:border-rose-500/10 px-3 py-2">
+              <span className="block text-lg font-black text-rose-700 dark:text-rose-450">{recentOcrFailures.length}</span>
+              <span className="text-[9px] font-bold text-rose-700 dark:text-rose-450 uppercase">Fallos</span>
             </div>
-            <div className="rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2">
-              <span className="block text-lg font-black text-amber-700">{pendingOcrQueue.length}</span>
-              <span className="text-[9px] font-bold text-amber-700 uppercase">Cola</span>
+            <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/15 border border-amber-100 dark:border-amber-500/10 px-3 py-2">
+              <span className="block text-lg font-black text-amber-700 dark:text-amber-400">{pendingOcrQueue.length}</span>
+              <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400 uppercase">Cola</span>
             </div>
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 px-3 py-2">
-              <span className="block text-lg font-black text-slate-800">{criticalOcrAlerts.length}</span>
-              <span className="text-[9px] font-bold text-slate-600 uppercase">Alertas</span>
+            <div className="rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 px-3 py-2">
+              <span className="block text-lg font-black text-slate-800 dark:text-slate-200">{criticalOcrAlerts.length}</span>
+              <span className="text-[9px] font-bold text-slate-600 dark:text-slate-400 uppercase">Alertas</span>
             </div>
           </div>
         </div>
 
         {ocrSyncError && (
-          <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">
+          <div className="mb-4 rounded-2xl border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-950/10 px-4 py-3 text-xs font-bold text-rose-700 dark:text-rose-400">
             {ocrSyncError}
           </div>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-805 bg-slate-50/60 dark:bg-slate-900/40 p-4">
             <div className="flex items-center gap-2 mb-3">
               <Bell className="w-4 h-4 text-rose-600" />
-              <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Alertas de saldo/cuota</span>
+              <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Alertas de saldo/cuota</span>
             </div>
             <div className="space-y-2 max-h-44 overflow-y-auto">
               {ocrAlerts.length === 0 ? (
                 <p className="text-xs text-slate-400 font-semibold">Sin alertas recientes.</p>
               ) : ocrAlerts.slice(0, 4).map((alert) => (
-                <div key={alert.id} className="rounded-xl bg-white border border-slate-200 px-3 py-2">
+                <div key={alert.id} className="rounded-xl bg-white dark:bg-[#0b0d19] border border-slate-200 dark:border-slate-800/80 px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className={`text-[9px] font-black uppercase ${alert.severity === "critical" ? "text-rose-600" : "text-amber-600"}`}>
                       {alert.code || alert.type || "ocr_alert"}
                     </span>
                     <span className="text-[9px] font-mono text-slate-400">{alert.provider || "provider"}</span>
                   </div>
-                  <p className="text-[11px] text-slate-600 font-medium leading-snug mt-1">{alert.message}</p>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-350 font-medium leading-snug mt-1">{alert.message}</p>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-805 bg-slate-50/60 dark:bg-slate-900/40 p-4">
             <div className="flex items-center gap-2 mb-3">
               <RefreshCw className="w-4 h-4 text-amber-600" />
-              <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Cola de reintentos</span>
+              <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Cola de reintentos</span>
             </div>
             <div className="space-y-2 max-h-44 overflow-y-auto">
               {ocrQueue.length === 0 ? (
                 <p className="text-xs text-slate-400 font-semibold">Sin tickets pendientes.</p>
               ) : ocrQueue.slice(0, 4).map((item) => (
-                <div key={item.id} className="rounded-xl bg-white border border-slate-200 px-3 py-2">
+                <div key={item.id} className="rounded-xl bg-white dark:bg-[#0b0d19] border border-slate-200 dark:border-slate-800/80 px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[9px] font-black uppercase text-amber-700">{item.status}</span>
                     <span className="text-[9px] font-mono text-slate-400">{item.attempts || 0}/{item.maxAttempts || 3}</span>
                   </div>
-                  <p className="text-[11px] text-slate-600 font-medium leading-snug mt-1">{item.lastError || "Pendiente de reintento"}</p>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-350 font-medium leading-snug mt-1">{item.lastError || "Pendiente de reintento"}</p>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-805 bg-slate-50/60 dark:bg-slate-900/40 p-4">
             <div className="flex items-center gap-2 mb-3">
               <Server className="w-4 h-4 text-[#0B53F4]" />
-              <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Ultimos jobs OCR</span>
+              <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Ultimos jobs OCR</span>
             </div>
             <div className="space-y-2 max-h-44 overflow-y-auto">
               {ocrJobs.length === 0 ? (
                 <p className="text-xs text-slate-400 font-semibold">Aun no hay jobs OCR registrados.</p>
               ) : ocrJobs.slice(0, 4).map((job) => (
-                <div key={job.id} className="rounded-xl bg-white border border-slate-200 px-3 py-2">
+                <div key={job.id} className="rounded-xl bg-white dark:bg-[#0b0d19] border border-slate-200 dark:border-slate-800/80 px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className={`text-[9px] font-black uppercase ${job.status === "succeeded" ? "text-emerald-700" : job.status === "processing" ? "text-[#0B53F4]" : "text-rose-700"}`}>
                       {job.status}
                     </span>
                     <span className="text-[9px] font-mono text-slate-400">{job.provider || job.providerErrorCode || "sin proveedor"}</span>
                   </div>
-                  <p className="text-[11px] text-slate-600 font-medium leading-snug mt-1">{job.lastError || job.model || "Procesado correctamente"}</p>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-350 font-medium leading-snug mt-1">{job.lastError || job.model || "Procesado correctamente"}</p>
                 </div>
               ))}
             </div>
@@ -754,14 +754,14 @@ export default function AdminScreen({
 
       {/* SECCIÓN NUEVA: ALERTAS DE CONTROL DE PRESUPUESTO IA (Solo si hay tickets retenidos) */}
       {reviewTicketsList.length > 0 && (
-        <div className="bg-amber-50/75 border border-amber-200 rounded-3xl p-5 space-y-3.5 shadow-[0_4px_20px_rgba(245,158,11,0.03)] text-left">
+        <div className="bg-amber-50/75 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-500/20 rounded-3xl p-5 space-y-3.5 shadow-[0_4px_20px_rgba(245,158,11,0.03)] text-left">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-600 shrink-0">
               <AlertTriangle className="w-4 h-4 animate-pulse" />
             </div>
             <div>
-              <span className="text-[10px] uppercase font-black text-amber-800 tracking-wider block">Buzón de Alertas Admin</span>
-              <h4 className="text-xs font-black text-slate-800 leading-none">
+              <span className="text-[10px] uppercase font-black text-amber-800 dark:text-amber-400 tracking-wider block">Buzón de Alertas Admin</span>
+              <h4 className="text-xs font-black text-slate-800 dark:text-slate-200 leading-none">
                 {reviewTicketsList.length} ticket(s) retenidos por exceder tope de aprendizaje
               </h4>
             </div>
@@ -769,28 +769,28 @@ export default function AdminScreen({
 
           <div className="space-y-3">
             {reviewTicketsList.map((ticket) => (
-              <div key={ticket.id} className="bg-white rounded-2xl p-4 border border-amber-100 flex flex-col gap-3 shadow-xs">
+              <div key={ticket.id} className="bg-white dark:bg-[#0b0d19] rounded-2xl p-4 border border-amber-100 dark:border-amber-500/10 flex flex-col gap-3 shadow-xs">
                 <div className="flex justify-between items-start">
                   <div>
-                    <span className="text-xs font-extrabold text-slate-800 block uppercase">{ticket.nombreEmisor}</span>
-                    <span className="text-[10px] text-slate-450 block mt-0.5 font-semibold">
+                    <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200 block uppercase">{ticket.nombreEmisor}</span>
+                    <span className="text-[10px] text-slate-450 dark:text-slate-400 block mt-0.5 font-semibold">
                       RFC Emisor: {ticket.rfcEmisor} • Ticket #{ticket.folio || "S/D"}
                     </span>
                   </div>
-                  <span className="text-sm font-black text-slate-800 font-mono leading-none">
+                  <span className="text-sm font-black text-slate-800 dark:text-slate-200 font-mono leading-none">
                     ${(ticket.total || 0).toFixed(2)} MXN
                   </span>
                 </div>
 
-                <div className="text-[10.5px] text-amber-955 bg-amber-500/5 p-2.5 rounded-xl border border-amber-200/25 leading-relaxed font-semibold">
-                  <span className="font-extrabold text-[9px] uppercase tracking-wider block mb-0.5 text-amber-800">Causa de Retención:</span>
+                <div className="text-[10.5px] text-amber-955 dark:text-amber-300 bg-amber-500/5 dark:bg-amber-950/20 p-2.5 rounded-xl border border-amber-200/25 dark:border-amber-500/20 leading-relaxed font-semibold">
+                  <span className="font-extrabold text-[9px] uppercase tracking-wider block mb-0.5 text-amber-800 dark:text-amber-400">Causa de Retención:</span>
                   {ticket.errorMsg}
                 </div>
 
                 {assigningTicketId === ticket.id ? (
-                  <div className="space-y-2.5 p-2.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                  <div className="space-y-2.5 p-2.5 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-2xl">
                     <div className="flex justify-between items-center mb-1">
-                      <span className="text-[9.5px] font-black text-slate-500 block uppercase tracking-wider">Asociar conector existente:</span>
+                      <span className="text-[9.5px] font-black text-slate-500 dark:text-slate-400 block uppercase tracking-wider">Asociar conector existente:</span>
                       <button 
                         type="button" 
                         onClick={() => setAssigningTicketId(null)}
@@ -805,7 +805,7 @@ export default function AdminScreen({
                           key={c.id}
                           type="button; button"
                           onClick={() => handleAssignExistingConnector(ticket, c.id!)}
-                          className="p-1 px-2 border border-slate-200 hover:border-[#0B53F4] text-[10px] rounded-lg bg-white font-semibold text-slate-700 hover:text-[#0B53F4] truncate text-left transition cursor-pointer"
+                          className="p-1 px-2 border border-slate-200 dark:border-slate-800 hover:border-[#0B53F4] text-[10px] rounded-lg bg-white dark:bg-[#0b0d19] font-semibold text-slate-700 dark:text-slate-350 hover:text-[#0B53F4] truncate text-left transition cursor-pointer"
                         >
                           📌 {c.nombre}
                         </button>
@@ -825,14 +825,14 @@ export default function AdminScreen({
                     <button
                       type="button"
                       onClick={() => setAssigningTicketId(ticket.id!)}
-                      className="flex-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold py-2.5 rounded-xl transition cursor-pointer"
+                      className="flex-1 bg-white dark:bg-[#0b0d19] hover:bg-slate-50 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-350 text-[10px] font-bold py-2.5 rounded-xl transition cursor-pointer"
                     >
                       Asociar con Portal
                     </button>
                     <button
                       type="button"
                       onClick={() => handleRejectUnderReview(ticket)}
-                      className="px-3 bg-rose-50 text-rose-700 hover:bg-rose-100 text-[10px] font-extrabold py-2.5 rounded-xl transition cursor-pointer"
+                      className="px-3 bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-[10px] font-extrabold py-2.5 rounded-xl transition cursor-pointer"
                     >
                       Rechazar
                     </button>
@@ -1485,14 +1485,14 @@ export default function AdminScreen({
             </div>
 
             {trainingSyncError && (
-              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3.5 text-left">
+              <div className="mb-4 rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-950/10 p-3.5 text-left">
                 <div className="flex items-start gap-2.5">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                   <div className="min-w-0">
-                    <p className="text-[11px] font-black uppercase tracking-wider text-amber-900">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-amber-900 dark:text-amber-400">
                       Sincronizacion de entrenamientos limitada
                     </p>
-                    <p className="mt-1 text-[11px] font-semibold leading-relaxed text-amber-800">
+                    <p className="mt-1 text-[11px] font-semibold leading-relaxed text-amber-800 dark:text-amber-300">
                       {trainingSyncError} Revisa reglas de Firestore para <span className="font-mono">automation_trainings</span> o valida el rol admin del usuario.
                     </p>
                   </div>
