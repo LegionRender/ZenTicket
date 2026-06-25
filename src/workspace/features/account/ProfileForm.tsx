@@ -26,6 +26,7 @@ import applePayLogo from "@/assets/logos pagos/apple-pay-logo.png";
 import bbvaLogo from "@/assets/logos pagos/bbva-logo.png";
 import googlePayLogo from "@/assets/logos pagos/google-pay-logo.png";
 import paypalLogo from "@/assets/logos pagos/paypal-logo-2.png";
+import spinLogo from "@/assets/logos pagos/SPIN-BY-OXXO.png";
 
 interface ProfileFormProps {
   initialProfile: any; // Allow flexible properties like planStartDate, autoRenew
@@ -173,6 +174,7 @@ export default function ProfileForm({
     if (card.brand === "PAYPAL") return paypalLogo;
     if (card.brand === "APPLEPAY") return applePayLogo;
     if (card.brand === "GOOGLEPAY") return googlePayLogo;
+    if (card.brand === "SPINBYOXXO") return spinLogo;
 
     let bankName = card.bankName || "";
     if (!bankName) {
@@ -196,11 +198,11 @@ export default function ProfileForm({
 
   const renderVisualBrandBlock = (card: any, size: "sm" | "md" = "md") => {
     const logoSrc = getCardLogo(card);
-    const sizeClasses = size === "sm" ? "w-10 h-6 text-[8px]" : "w-12 h-8 text-[10px]";
+    const sizeClasses = size === "sm" ? "w-10 h-6 text-[8px]" : "w-12 h-8 text-[10px]" ;
     
     if (logoSrc) {
       return (
-        <div className={`${sizeClasses} bg-white rounded-lg p-1 border border-slate-200 shadow-3xs flex items-center justify-center shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg p-1 border border-slate-200 shadow-3xs flex items-center justify-center shrink-0`}>
           <img 
             src={logoSrc} 
             className="w-full h-full object-contain select-none" 
@@ -212,55 +214,55 @@ export default function ProfileForm({
 
     if (card.brand === "VISA") {
       return (
-        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-[#010915] font-serif font-extrabold italic tracking-wider select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-[#010915] font-serif font-extrabold italic tracking-wider select-none shadow-sm shrink-0`}>
           VISA
         </div>
       );
     }
     if (card.brand === "AMEX") {
       return (
-        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 ${size === "sm" ? "text-[7.5px]" : "text-[8.5px]"} text-[#00829B] font-mono font-black tracking-widest select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 ${size === "sm" ? "text-[7.5px]" : "text-[8.5px]"} text-[#00829B] font-mono font-black tracking-widest select-none shadow-sm shrink-0`}>
           AMEX
         </div>
       );
     }
     if (card.brand === "MERCADOPAGO") {
       return (
-        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-[#00A6EA] font-sans font-black select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-[#00A6EA] font-sans font-black select-none shadow-sm shrink-0`}>
           MP
         </div>
       );
     }
     if (card.brand === "APPLEPAY") {
       return (
-        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-black font-sans font-black select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-black font-sans font-black select-none shadow-sm shrink-0`}>
            Pay
         </div>
       );
     }
     if (card.brand === "GOOGLEPAY") {
       return (
-        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-[#202124] font-sans font-black select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-[#202124] font-sans font-black select-none shadow-sm shrink-0`}>
           G Pay
         </div>
       );
     }
     if (card.brand === "SPINBYOXXO") {
       return (
-        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-[#5D2D91] font-sans font-black select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-[#5D2D91] font-sans font-black select-none shadow-sm shrink-0`}>
           SPIN
         </div>
       );
     }
     if (card.brand === "PAYPAL") {
       return (
-        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-[#003087] font-sans font-black italic select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-[#003087] font-sans font-black italic select-none shadow-sm shrink-0`}>
           PayPal
         </div>
       );
     }
     return (
-      <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-rose-600 font-sans font-black italic select-none shadow-sm relative overflow-hidden shrink-0`}>
+      <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-rose-600 font-sans font-black italic select-none shadow-sm relative overflow-hidden shrink-0`}>
         <span className="relative z-10 text-[9px] uppercase tracking-tighter">MC</span>
       </div>
     );
@@ -1656,7 +1658,9 @@ export default function ProfileForm({
                         onClick={() => handleDigitalWalletPayment("Stripe")}
                         className="bg-[#635BFF] hover:bg-[#5b52ea] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55 col-span-1 sm:col-span-2 shadow-md shadow-[#635BFF]/15"
                       >
-                        <img src={stripeLogo} className="h-5 w-auto object-contain bg-white rounded py-0.5 px-1.5 shadow-3xs" alt="Stripe" />
+                        <div style={{ backgroundColor: '#ffffff' }} className="h-6 px-2 rounded flex items-center justify-center shrink-0">
+                          <img src={stripeLogo} className="h-4 w-auto object-contain" alt="Stripe" />
+                        </div>
                         <span>Pagar con Tarjeta (Stripe Checkout)</span>
                       </button>
 
@@ -1667,7 +1671,9 @@ export default function ProfileForm({
                         onClick={() => handleDigitalWalletPayment("Google Pay")}
                         className="bg-black hover:bg-zinc-900 duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] border border-zinc-800 disabled:opacity-55"
                       >
-                        <img src={googlePayLogo} className="h-5 w-auto object-contain" alt="Google Pay" />
+                        <div style={{ backgroundColor: '#ffffff' }} className="h-6 px-2 rounded flex items-center justify-center shrink-0">
+                          <img src={googlePayLogo} className="h-4 w-auto object-contain" alt="Google Pay" />
+                        </div>
                         <span>Pagar con Google Pay</span>
                       </button>
 
@@ -1678,7 +1684,9 @@ export default function ProfileForm({
                         onClick={() => handleDigitalWalletPayment("Apple Pay")}
                         className="bg-zinc-900 hover:bg-black duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] border border-zinc-800 disabled:opacity-55"
                       >
-                        <img src={applePayLogo} className="h-5 w-auto object-contain invert" alt="Apple Pay" />
+                        <div style={{ backgroundColor: '#ffffff' }} className="h-6 px-2 rounded flex items-center justify-center shrink-0">
+                          <img src={applePayLogo} className="h-4.5 w-auto object-contain" alt="Apple Pay" />
+                        </div>
                         <span>Pagar con Apple Pay</span>
                       </button>
 
@@ -1689,7 +1697,9 @@ export default function ProfileForm({
                         onClick={() => handleDigitalWalletPayment("PayPal")}
                         className="bg-[#003087] hover:bg-[#002466] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
                       >
-                        <img src={paypalLogo} className="h-5 w-auto object-contain bg-white rounded p-0.5 px-1.5 shadow-3xs" alt="PayPal" />
+                        <div style={{ backgroundColor: '#ffffff' }} className="h-6 px-2 rounded flex items-center justify-center shrink-0">
+                          <img src={paypalLogo} className="h-4 w-auto object-contain" alt="PayPal" />
+                        </div>
                         <span>Continuar con PayPal</span>
                       </button>
 
@@ -1700,7 +1710,9 @@ export default function ProfileForm({
                         onClick={() => handleDigitalWalletPayment("Mercado Pago")}
                         className="bg-[#2b3a8e] hover:bg-[#1f2a6a] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
                       >
-                        <img src={mercadoPagoLogo} className="h-5 w-auto object-contain bg-white rounded p-0.5 px-1.5 shadow-3xs" alt="Mercado Pago" />
+                        <div style={{ backgroundColor: '#ffffff' }} className="h-6 px-2 rounded flex items-center justify-center shrink-0">
+                          <img src={mercadoPagoLogo} className="h-4 w-auto object-contain" alt="Mercado Pago" />
+                        </div>
                         <span>Pagar con Mercado Pago</span>
                       </button>
 
@@ -2682,12 +2694,30 @@ export default function ProfileForm({
                     onClick={() => setAddingMethodStep("card")}
                     className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#0B53F4] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-[#0B53F4] flex items-center justify-center transition shrink-0">
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 text-[#0B53F4] flex items-center justify-center transition shrink-0">
                       <CreditCard className="w-5 h-5" />
                     </div>
                     <div>
                       <span className="text-xs font-black text-slate-850 block">Tarjeta Bancaria</span>
                       <span className="text-[9px] text-slate-400 font-bold block">Crédito o Débito</span>
+                    </div>
+                  </button>
+
+                  {/* Stripe Checkout */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddingCard(false);
+                      handleDigitalWalletPayment("Stripe");
+                    }}
+                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#635BFF] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+                  >
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
+                      <img src={stripeLogo} className="w-7.5 h-7.5 object-contain" alt="Stripe" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-black text-slate-850 block">Stripe Checkout</span>
+                      <span className="text-[9px] text-slate-400 font-bold block">Pago seguro con tarjeta</span>
                     </div>
                   </button>
 
@@ -2700,7 +2730,7 @@ export default function ProfileForm({
                     }}
                     className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#00A6EA] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center transition shrink-0">
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
                       <img src={mercadoPagoLogo} className="w-7 h-7 object-contain" alt="Mercado Pago" />
                     </div>
                     <div>
@@ -2718,7 +2748,7 @@ export default function ProfileForm({
                     }}
                     className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-black hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center transition shrink-0">
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
                       <img src={applePayLogo} className="w-8 h-8 object-contain" alt="Apple Pay" />
                     </div>
                     <div>
@@ -2736,7 +2766,7 @@ export default function ProfileForm({
                     }}
                     className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#202124] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center transition shrink-0">
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
                       <img src={googlePayLogo} className="w-8 h-8 object-contain" alt="Google Pay" />
                     </div>
                     <div>
@@ -2754,8 +2784,8 @@ export default function ProfileForm({
                     }}
                     className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#5D2D91] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group col-span-1 sm:col-span-2"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-[#5D2D91] flex items-center justify-center font-sans font-black text-xs transition shrink-0">
-                      SPIN
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
+                      <img src={spinLogo} className="w-8 h-8 object-contain" alt="Spin by OXXO" />
                     </div>
                     <div>
                       <span className="text-xs font-black text-slate-850 block">Spin by OXXO</span>
