@@ -1,100 +1,61 @@
-# ZenTicket Data & API Services Map
+# Configuración de Pasarelas de Pago y Liquidación Bancaria - ZenTicket
 
-Este documento detalla todas las llamadas de servicios externos, conexiones de red del frontend, colecciones nativas de Firestore y APIs del servidor Express.
-
----
-
-## 1. Endpoints Express (Backend - `/api/*`)
-
-El servidor Express (`server.ts` y `/server`) expone los siguientes endpoints que el frontend consume mediante `fetch`:
-
-### `POST /api/tickets/analyze`
-* **Propósito**: Sube la imagen del ticket, extrae mediante lógica Gemini OCR ó simulada los campos fiscales de ticket (Emisor, Folio, Monto, Fecha, RFC del Emisor).
-* **Consumidores**: `ScannerAndSimulator.tsx` (Flujo de carga manual o captura simulada).
-* **Parámetros**: `FormData` con archivo `image`.
-
-### `POST /api/automation/run`
-* **Propósito**: Ejecuta la secuencia robótica para conectarse al portal de facturación del emisor, llenar los campos requeridos, efectuar el timbrado digital del CFDI ante el SAT y devolver los contenidos oficiales de XML y PDF.
-* **Consumidores**: `ScannerAndSimulator.tsx`.
-* **Parámetros**: `{ configId, rfc, folio, total, fecha, emisorName, emisorRfc, userId, preselectedTicketId }`.
-
-### `GET /api/config/status`
-* **Propósito**: Retorna configuraciones, estados del motor y tokens operativos del servidor de automatizaciones.
-* **Consumidores**: `TicketsListScreen.tsx`.
-
-### `POST /api/email/send`
-* **Propósito**: Envía la factura timbrada (XML y PDF) al correo seleccionado del usuario cliente.
-* **Consumidores**: `TicketsListScreen.tsx`.
-* **Parámetros**: `{ to, subject, body, pdfHtml, xmlContent }`.
-
-### `POST /api/fiscal/parse-constancia`
-* **Propósito**: Analiza mediante OCR el archivo PDF de la Constancia de Situación Fiscal (CSF) de Hacienda (SAT) y devuelve los datos del contribuyente estructurados (RFC, Régimen Fiscal, Código Postal, Uso de CFDI, Nombre / Razón Social).
-* **Consumidores**: `ProfileForm.tsx` y `OnboardingFlow.tsx` (para llenado inteligente instantáneo sin errores tipográficos de SAT).
-* **Parámetros**: `FormData` con archivo `file`.
+Este documento detalla los pasos requeridos para configurar las conexiones reales de Mercado Pago y PayPal con ZenTicket, así como las directrices para la liquidación de fondos a la cuenta bancaria del administrador.
 
 ---
 
-## 2. Firebase & Firestore Services
-
-El proyecto utiliza **Firebase Firestore** para la sincronización y persistencia de datos en tiempo real. 
-
-### Colecciones en Uso (Base de datos Firestore. Nombres oficiales logueados):
-
-1. **`fiscalProfiles`**:
-   * **Identificador de documento**: `user.uid`
-   * **Esquema de campos**:
-     * `userId`: string
-     * `rfc`: string
-     * `razonSocial`: string
-     * `regimenFiscal`: string
-     * `codigoPostal`: string
-     * `usoCFDI`: string
-     * `plan`: string ("gratuito", "profesional", "empresarial")
-     * `onboardingCompleted`: boolean
-     * `paymentCards`: array de objetos de tarjetas bancarias.
-     * `correoRecepcion`: string (buzón opcional de recibimiento)
-
-2. **`tickets`**:
-   * **Esquema de campos**:
-     * `id`: string
-     * `userId`: string
-     * `createdAt`: string (ISO date)
-     * `imageUrl`: string (o Base64 offline/local fallback)
-     * `emisorRfc`: string
-     * `emisorName`: string
-     * `total`: number
-     * `fecha`: string (YYYY-MM-DD o estándar de compra)
-     * `status`: string ("pendiente", "procesado", "fallido")
-     * `errorMessage`: string (opcional)
-
-3. **`invoices`** (Bóveda Fiscal / Facturas Timbradas):
-   * **Esquema de campos**:
-     * `id`: string
-     * `userId`: string
-     * `ticketId`: string
-     * `folioFiscal`: string (UUID SAT)
-     * `rfcEmisor`: string
-     * `nombreEmisor`: string
-     * `rfcReceptor`: string
-     * `nombreReceptor`: string
-     * `total`: number
-     * `xmlContent`: string
-     * `pdfHtml`: string
-     * `cost`: number (Costo del consumo por API SAT)
-     * `rawCost`: number
-
-4. **`connectors`**:
-   * **Esquema de campos**:
-     * `userId`: string (o "system" para portales nativos globales)
-     * `nombre`: string
-     * `rfc`: string
-     * `portalUrl`: string
-     * `fieldsJson`: string (Campos que requiere el portal de autofactura)
-     * `flowJson`: string (Pasos que realiza la automatización robótica)
+## 🔒 Directrices de Seguridad
+Por razones de cumplimiento PCI-DSS y seguridad de la información:
+1. **No se almacena información sensible de tarjetas (números completos o CVV)** en las bases de datos de ZenTicket ni en Firestore.
+2. **Los datos bancarios de liquidación no se guardan ni se manejan en el código fuente** (tanto frontend como backend).
+3. Todo el procesamiento de cobros se realiza mediante redirección segura (`init_point` en Mercado Pago y `approval_url` en PayPal).
 
 ---
 
-## 3. Automatizaciones Externas
+## 🏦 Cuentas de Liquidación y Recaudación Bancaria
 
-* **Playwright / Puppeteer**: El backend contiene lógica modularizada o simulada de navegación SAT capaz de interceptar portales de autofacturas y timbrar CFDI digitales reales.
-* **Integración de Red**: El servidor corre en modo híbrido con persistencia en Firestore y redundancia de caché local offline para contingencias de red o cuotas excedidas del contribuyente.
+Para el flujo de ZenTicket, se configuran dos cuentas distintas:
+
+### A. Cuenta de Destino Final (Scotiabank)
+Es la cuenta de banco física donde se liquida y retira finalmente el dinero cobrado:
+* **Titular**: Ricardo Castro Becerril
+* **Banco**: Scotiabank
+* **Número de Cuenta**: 00102022097
+* **CLABE Interbancaria**: 044180001020220978
+* **Número de Tarjeta**: 4043 1300 2571 2460
+
+### B. Cuenta Digital Recaudatoria (Mercado Pago)
+Es la CLABE asignada a tu balance de Mercado Pago que sirve para recaudar transacciones y transferencias:
+* **Titular**: Ricardo Castro Becerril
+* **Institución**: Mercado Pago (Mercado Libre)
+* **CLABE de Mercado Pago**: 722969010486235989
+
+---
+
+## ⚙️ Configuración de Retiros Automáticos
+
+### 1. Configuración en Mercado Pago (Saldos a Scotiabank)
+Para transferir tus ventas y saldo acumulado de Mercado Pago hacia tu cuenta de Scotiabank de forma automática o manual:
+1. Inicia sesión en el **Panel de Mercado Pago** (Mercado Pago Business).
+2. Ve a **Tu Perfil** o **Configuración** > **Cuentas bancarias**.
+3. Haz clic en **Agregar Cuenta** e ingresa la CLABE de Scotiabank `044180001020220978` a nombre de **Ricardo Castro Becerril**.
+4. En la sección de **Retiros**, programa retiros automáticos al final del día para que todo el saldo acumulado de ZenTicket se transfiera automáticamente a Scotiabank sin comisión.
+
+### 2. Configuración en PayPal (Saldos a Scotiabank)
+Para retirar el dinero acumulado de PayPal a la cuenta de Scotiabank:
+1. Inicia sesión en tu cuenta de **PayPal Business**.
+2. Ve a **Asociar cuenta bancaria o tarjeta** en el panel de control.
+3. Elige **Asociar cuenta bancaria**.
+4. Proporciona el nombre del banco (Scotiabank), el nombre del titular (**Ricardo Castro Becerril**) y la CLABE interbancaria de Scotiabank (`044180001020220978`).
+5. Configura la **Transferencia Automática** diaria para que los saldos cobrados se liquiden a Scotiabank de forma regular.
+
+---
+
+## ⚙️ Variables de Entorno (Backend / Functions)
+
+Asegúrate de configurar las credenciales correctas en tu archivo de configuración del servidor (.env) o en las variables de Cloud Functions de Firebase:
+
+* `MERCADOPAGO_ACCESS_TOKEN`: Token de acceso de producción provisto en la sección de Credenciales de Mercado Pago Developers.
+* `PAYPAL_CLIENT_ID`: Identificador de cliente de producción provisto por PayPal Developer Portal.
+* `PAYPAL_CLIENT_SECRET`: Clave secreta de producción provista por PayPal Developer Portal.
+* `APP_PUBLIC_URL`: URL base pública de ZenTicket (ej. `https://zenticket.mx` o `http://localhost:5173` en entorno local) utilizada para construir los webhooks y las URLs de retorno.

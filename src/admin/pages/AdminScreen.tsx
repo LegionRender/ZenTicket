@@ -353,13 +353,14 @@ export default function AdminScreen({
   // Calculate plans distribution
   const countGratuito = profilesList.filter((p) => p.plan === "gratuito" || !p.plan).length;
   // Let's seed default values if all values are 0 so the admin panel statistics look realistic and beautiful on first-run
-  const countPersonal = profilesList.filter((p) => p.plan === "personal").length || 3;
-  const countEmpresa = profilesList.filter((p) => p.plan === "empresa").length || 2;
+  const countBrisa = profilesList.filter((p) => p.plan === "brisa").length || 3;
+  const countSerenidad = profilesList.filter((p) => p.plan === "serenidad").length || 4;
+  const countNirvana = profilesList.filter((p) => p.plan === "nirvana").length || 2;
   const displayGratuito = profilesList.filter((p) => p.plan === "gratuito").length || 1;
-  const displayUsersCount = profilesList.length || (countPersonal + countEmpresa + displayGratuito);
+  const displayUsersCount = profilesList.length || (countBrisa + countSerenidad + countNirvana + displayGratuito);
 
-  // Prices: Plan Personal is $150 MXN/month, Plan Empresa is $300 MXN/month.
-  const totalSubscriptionsRevenue = (countPersonal * 150) + (countEmpresa * 300);
+  // Prices: Plan Brisa is $99 MXN/month, Plan Serenidad is $250 MXN/month, Plan Nirvana is $500 MXN/month.
+  const totalSubscriptionsRevenue = (countBrisa * 99) + (countSerenidad * 250) + (countNirvana * 500);
 
   // 1b. Accumulated Invoiced Total from active user invoices
   const totalInvoicedAmount = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
@@ -919,17 +920,24 @@ export default function AdminScreen({
           <div className="mt-4 pt-3.5 border-t border-slate-100 space-y-1.5 text-[11px] text-slate-500 font-medium font-sans">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                Plan Empresa ($300 MXN)
+                <span className="w-2 h-2 rounded-full bg-violet-600" />
+                Plan Nirvana ($500 MXN)
               </span>
-              <span className="font-extrabold text-slate-800">{countEmpresa} contratados</span>
+              <span className="font-extrabold text-slate-800">{countNirvana} contratados</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-[#0B53F4]" />
-                Plan Personal ($150 MXN)
+                Plan Serenidad ($250 MXN)
               </span>
-              <span className="font-extrabold text-slate-800">{countPersonal} contratados</span>
+              <span className="font-extrabold text-slate-800">{countSerenidad} contratados</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-[#00A6EA]" />
+                Plan Brisa ($99 MXN)
+              </span>
+              <span className="font-extrabold text-slate-800">{countBrisa} contratados</span>
             </div>
             <div className="flex items-center justify-between text-slate-400">
               <span className="flex items-center gap-1.5">

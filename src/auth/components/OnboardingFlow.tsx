@@ -81,7 +81,9 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Step 2: Plan
-  const [plan, setPlan] = useState<"gratuito" | "personal" | "empresa">(fiscalProfile?.plan || "gratuito");
+  const [plan, setPlan] = useState<"gratuito" | "brisa" | "serenidad" | "nirvana">(
+    fiscalProfile?.plan === "personal" ? "brisa" : fiscalProfile?.plan === "empresa" ? "serenidad" : (fiscalProfile?.plan || "gratuito")
+  );
 
   // Step 3: Fiscal
   const [rfc, setRfc] = useState<string>(hasValidRfc ? fiscalProfile.rfc : "");
@@ -523,12 +525,12 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                   
                   {/* Plan Gratuito */}
                   <div 
                     onClick={() => setPlan("gratuito")}
-                    className={`border rounded-3xl p-6 flex flex-col justify-between transition-all duration-300 cursor-pointer text-left relative ${
+                    className={`border rounded-3xl p-5 flex flex-col justify-between transition-all duration-300 cursor-pointer text-left relative ${
                       plan === "gratuito" 
                         ? "border-[#0B53F4] bg-blue-50/20 shadow-[0_15px_30px_-6px_rgba(11,83,244,0.04)] scale-[1.01]" 
                         : "border-slate-250 bg-white hover:border-slate-350"
@@ -546,123 +548,186 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                         )}
                       </div>
                       <div>
-                        <h3 className="font-display font-black text-lg text-[#0b1020]">Plan Gratuito</h3>
-                        <p className="text-[11px] text-slate-400 mt-1 leading-normal">Para timbrar tickets aislados o probar.</p>
+                        <h3 className="font-display font-black text-base text-[#0b1020]">Plan Gratuito</h3>
+                        <p className="text-[10px] text-slate-400 mt-1 leading-normal">Ideal para probar ZenTicket y automatizar las primeras facturas sin compromiso.</p>
                       </div>
                       <div className="py-1">
-                        <span className="text-3xl font-black font-display text-[#0b1020]">$0</span>
+                        <span className="text-2xl font-black font-display text-[#0b1020]">$0</span>
                         <span className="text-xs text-slate-500 font-semibold"> MXN/mes</span>
                       </div>
                       <div className="h-px bg-slate-100" />
-                      <ul className="text-[11px] text-slate-600 space-y-2">
+                      <ul className="text-[10px] text-slate-600 space-y-2">
                         <li className="flex items-center gap-2">
-                          <Check className="w-3.5 h-3.5 text-[#0B53F4] shrink-0" />
-                          <span>Hasta 5 tickets / mes</span>
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>5 facturas generadas al mes</span>
                         </li>
-                        <li className="flex items-center gap-2 text-slate-400">
-                          <span>• Acceso a soporte general</span>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>Escaneo desde imagen/archivo</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>Historial básico de tickets</span>
                         </li>
                       </ul>
                     </div>
                   </div>
 
-                  {/* Plan Personal */}
+                  {/* Plan Brisa */}
                   <div 
-                    onClick={() => setPlan("personal")}
-                    className={`border rounded-3xl p-6 flex flex-col justify-between transition-all duration-300 cursor-pointer text-left relative ${
-                      plan === "personal" 
+                    onClick={() => setPlan("brisa")}
+                    className={`border rounded-3xl p-5 flex flex-col justify-between transition-all duration-300 cursor-pointer text-left relative ${
+                      plan === "brisa" 
                         ? "border-[#0B53F4] bg-blue-50/20 shadow-[0_15px_30px_-6px_rgba(11,83,244,0.04)] scale-[1.01]" 
                         : "border-slate-250 bg-white hover:border-slate-350"
                     }`}
                   >
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0B53F4] px-3 py-1 rounded-full text-white font-black text-[8px] tracking-widest uppercase shadow-xs">
-                      Más Elegido
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-start">
+                        <span className="bg-blue-50 text-blue-600 font-black text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-md">
+                          Inicial
+                        </span>
+                        {plan === "brisa" && (
+                          <div className="bg-[#0B53F4] text-white p-1 rounded-full">
+                            <Check className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <h3 className="font-display font-black text-base text-[#0b1020]">Plan Brisa</h3>
+                        <p className="text-[10px] text-slate-400 mt-1 leading-normal">Para profesionales y personas físicas que facturan ocasionalmente.</p>
+                      </div>
+                      <div className="py-1">
+                        <span className="text-2xl font-black font-display text-[#0b1020]">$99</span>
+                        <span className="text-xs text-slate-500 font-semibold"> MXN/mes</span>
+                      </div>
+                      <div className="h-px bg-slate-100" />
+                      <ul className="text-[10px] text-slate-600 space-y-2">
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>10 facturas generadas al mes</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>Todo lo del plan Gratuito</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>Envío automático al correo</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Plan Serenidad */}
+                  <div 
+                    onClick={() => setPlan("serenidad")}
+                    className={`border rounded-3xl p-5 flex flex-col justify-between transition-all duration-300 cursor-pointer text-left relative ${
+                      plan === "serenidad" 
+                        ? "border-[#0B53F4] bg-blue-50/20 shadow-[0_15px_30px_-6px_rgba(11,83,244,0.04)] scale-[1.01]" 
+                        : "border-slate-250 bg-white hover:border-slate-350"
+                    }`}
+                  >
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0B53F4] px-3.5 py-0.5 rounded-full text-white font-black text-[8px] tracking-widest uppercase shadow-xs">
+                      Recomendado
                     </div>
 
                     <div className="space-y-4">
                       <div className="flex justify-between items-start">
-                        <span className="bg-blue-100 text-[#0B53F4] font-black text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-md">
+                        <span className="bg-[#EBF1FF] text-[#0B53F4] font-black text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-md">
                           Profesional
                         </span>
-                        {plan === "personal" && (
+                        {plan === "serenidad" && (
                           <div className="bg-[#0B53F4] text-white p-1 rounded-full">
                             <Check className="w-3.5 h-3.5" />
                           </div>
                         )}
                       </div>
                       <div>
-                        <h3 className="font-display font-black text-lg text-[#0b1020]">Plan Personal</h3>
-                        <p className="text-[11px] text-slate-400 mt-1 leading-normal">Óptimo para contratistas y profesionistas.</p>
+                        <h3 className="font-display font-black text-base text-[#0b1020]">Plan Serenidad</h3>
+                        <p className="text-[10px] text-slate-400 mt-1 leading-normal">Para freelancers, profesionistas y usuarios que facturan cada semana.</p>
                       </div>
                       <div className="py-1">
-                        <span className="text-3xl font-black font-display text-[#0b1020]">$150</span>
+                        <span className="text-2xl font-black font-display text-[#0b1020]">$250</span>
                         <span className="text-xs text-slate-500 font-semibold"> MXN/mes</span>
                       </div>
                       <div className="h-px bg-slate-100" />
-                      <ul className="text-[11px] text-slate-600 space-y-2">
+                      <ul className="text-[10px] text-slate-600 space-y-2">
                         <li className="flex items-center gap-2">
-                          <Check className="w-3.5 h-3.5 text-[#0B53F4] shrink-0" />
-                          <span>Hasta 20 tickets / mes</span>
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>30 facturas generadas al mes</span>
                         </li>
                         <li className="flex items-center gap-2">
-                          <Check className="w-3.5 h-3.5 text-[#0B53F4] shrink-0" />
-                          <span>Carga masiva Inteligente</span>
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>Todo lo del plan Brisa</span>
                         </li>
                         <li className="flex items-center gap-2">
-                          <Check className="w-3.5 h-3.5 text-[#0B53F4] shrink-0" />
-                          <span>Soporte Prioritario</span>
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>Panel de gastos y seguimiento</span>
                         </li>
                       </ul>
                     </div>
                   </div>
 
-                  {/* Plan Empresa */}
+                  {/* Plan Nirvana */}
                   <div 
-                    onClick={() => setPlan("empresa")}
-                    className={`border rounded-3xl p-6 flex flex-col justify-between transition-all duration-300 cursor-pointer text-left relative ${
-                      plan === "empresa" 
+                    onClick={() => setPlan("nirvana")}
+                    className={`border rounded-3xl p-5 flex flex-col justify-between transition-all duration-300 cursor-pointer text-left relative ${
+                      plan === "nirvana" 
                         ? "border-[#0B53F4] bg-blue-50/20 shadow-[0_15px_30px_-6px_rgba(11,83,244,0.04)] scale-[1.01]" 
                         : "border-slate-250 bg-white hover:border-slate-350"
                     }`}
                   >
                     <div className="space-y-4">
                       <div className="flex justify-between items-start">
-                        <span className="bg-amber-100 text-amber-700 font-black text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-md">
+                        <span className="bg-amber-105 text-amber-700 font-black text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-md bg-amber-50">
                           Corporativo
                         </span>
-                        {plan === "empresa" && (
+                        {plan === "nirvana" && (
                           <div className="bg-[#0B53F4] text-white p-1 rounded-full">
                             <Check className="w-3.5 h-3.5" />
                           </div>
                         )}
                       </div>
                       <div>
-                        <h3 className="font-display font-black text-lg text-[#0b1020]">Plan Empresa</h3>
-                        <p className="text-[11px] text-slate-400 mt-1 leading-normal">Para PyMEs o despachos contables.</p>
+                        <h3 className="font-display font-black text-base text-[#0b1020]">Plan Nirvana</h3>
+                        <p className="text-[10px] text-slate-400 mt-1 leading-normal">Para usuarios de alto volumen o equipos que necesitan automatización total.</p>
                       </div>
                       <div className="py-1">
-                        <span className="text-3xl font-black font-display text-[#0b1020]">$300</span>
+                        <span className="text-2xl font-black font-display text-[#0b1020]">$500</span>
                         <span className="text-xs text-slate-500 font-semibold"> MXN/mes</span>
                       </div>
                       <div className="h-px bg-slate-100" />
-                      <ul className="text-[11px] text-slate-600 space-y-2">
+                      <ul className="text-[10px] text-slate-600 space-y-2">
                         <li className="flex items-center gap-2">
-                          <Check className="w-3.5 h-3.5 text-[#0B53F4] shrink-0" />
-                          <span>Hasta 60 tickets / mes</span>
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>100 facturas generadas al mes</span>
                         </li>
                         <li className="flex items-center gap-2">
-                          <Check className="w-3.5 h-3.5 text-[#0B53F4] shrink-0" />
-                          <span>API + Multi-usuario</span>
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>Todo lo del plan Serenidad</span>
                         </li>
                         <li className="flex items-center gap-2">
-                          <Check className="w-3.5 h-3.5 text-[#0B53F4] shrink-0" />
-                          <span>SLA Sincronizado SAT</span>
+                          <Check className="w-3 h-3 text-[#0B53F4] shrink-0" />
+                          <span>Exportación masiva y Soporte VIP</span>
                         </li>
                       </ul>
                     </div>
                   </div>
 
                 </div>
+
+                {plan !== "gratuito" && (
+                  <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-left flex items-start gap-2.5 max-w-3xl mx-auto animate-fade-in">
+                    <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-xs font-black text-amber-800 uppercase tracking-wider">Requiere Activación de Pago</h4>
+                      <p className="text-[10.5px] text-amber-700 leading-relaxed font-semibold mt-0.5">
+                        Has seleccionado un plan de pago. Para poder timbrar tus facturas del SAT, deberás activar tu suscripción mediante Mercado Pago o PayPal en la pestaña de Cuenta una vez completes el registro.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
 

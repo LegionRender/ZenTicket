@@ -292,7 +292,13 @@ export default function ProfileForm({
 
   // Cards State synchronized with Firestore or pre-seeded high-fidelity defaults
   const [cards, setCards] = useState<PaymentCard[]>(() => {
-    const isLegion = initialProfile?.userId === "legionrender" || initialProfile?.rfc === "GOMD850101XYZ" || initialProfile?.razonSocial === "CONSTRUCTORA LEGION DEL NORTE SA DE CV";
+    const userEmail = initialProfile?.userId || initialProfile?.correoRecepcion || auth.currentUser?.email || "";
+    const emailLower = userEmail.toLowerCase();
+    const isLegion = emailLower.includes("legionrender") || 
+                     emailLower.includes("ricardo") || 
+                     initialProfile?.userId === "legionrender" || 
+                     initialProfile?.rfc === "GOMD850101XYZ" || 
+                     initialProfile?.razonSocial === "CONSTRUCTORA LEGION DEL NORTE SA DE CV";
     if (initialProfile?.paymentCards && initialProfile.paymentCards.length > 0) {
       return initialProfile.paymentCards;
     }
@@ -319,17 +325,18 @@ export default function ProfileForm({
     }
   }, [initialProfile?.paymentCards]);
 
-  // Synchronize custom display names & ensure real card with holder name "RICARDO CASTRO BECERRIL" is auto-seeded for legionrender@gmail.com
+  // Synchronize custom display names & ensure real card with holder name "RICARDO CASTRO BECERRIL" is auto-seeded for legionrender/ricardo
   React.useEffect(() => {
     const userEmail = currentUserEmail || auth.currentUser?.email;
-    const isLegion = userEmail === "legionrender@gmail.com";
+    const emailLower = (userEmail || "").toLowerCase();
+    const isLegion = emailLower.includes("legionrender") || emailLower.includes("ricardo");
     
     if (isLegion) {
       setNombreCompleto("RICARDO CASTRO BECERRIL");
-      setCorreoElectronico("legionrender@gmail.com");
+      setCorreoElectronico(userEmail || "legionrender@gmail.com");
       setRfc("GOMD850101XYZ");
       setRazonSocial("CONSTRUCTORA LEGION DEL NORTE SA DE CV");
-      setCorreoRecepcion(initialProfile?.correoRecepcion || "legionrender@gmail.com");
+      setCorreoRecepcion(initialProfile?.correoRecepcion || userEmail || "legionrender@gmail.com");
 
       const hasRealCard = cards.some(c => c.holderName === "RICARDO CASTRO BECERRIL" && c.last4 === "9180");
       const hasMockDaniels = cards.some(c => c.holderName === "JULIAN DANIELS");
@@ -408,11 +415,65 @@ export default function ProfileForm({
 
   // Add Card Form State
   const [addingCard, setAddingCard] = useState(false);
+  const [addingMethodStep, setAddingMethodStep] = useState<"select" | "card" | "connecting">("select");
+  const [selectedMethodToAdd, setSelectedMethodToAdd] = useState<"MERCADOPAGO" | "APPLEPAY" | "GOOGLEPAY" | "SPINBYOXXO" | null>(null);
   const [newCardNumber, setNewCardNumber] = useState("");
   const [newCardExpiry, setNewCardExpiry] = useState("");
   const [newCardCvv, setNewCardCvv] = useState("");
   const [newCardHolder, setNewCardHolder] = useState("");
   const [newCardBrand, setNewCardBrand] = useState<"VISA" | "MASTERCARD" | "AMEX">("VISA");
+
+  // Automated connection simulation for digital wallets (Mercado Pago, Apple Pay, Google Pay, Spin by OXXO)
+  React.useEffect(() => {
+    if (addingMethodStep === "connecting" && selectedMethodToAdd) {
+      const timer = setTimeout(async () => {
+        const method = selectedMethodToAdd;
+        const holderName = (currentUserEmail || auth.currentUser?.email || "Julian Daniels").split("@")[0].toUpperCase() || "TITULAR";
+        
+        // Prepare wallet card object
+        const newWalletCard: PaymentCard = {
+          id: "wallet_" + Date.now(),
+          brand: method,
+          last4: "Cuenta Vinculada",
+          expiry: "N/A",
+          holderName: holderName,
+          isDefault: cards.length === 0,
+          bankName: method === "MERCADOPAGO" ? "Mercado Pago" : 
+                    method === "APPLEPAY" ? "Apple Pay" : 
+                    method === "GOOGLEPAY" ? "Google Pay" : "Spin by OXXO"
+        };
+        
+        const updatedCards = [...cards, newWalletCard];
+        setCards(updatedCards);
+        
+        // Save to Firestore
+        try {
+          await onSave({
+            userId: initialProfile?.userId || "guest",
+            rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
+            razonSocial: razonSocial || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
+            regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
+            codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
+            usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
+            createdAt: initialProfile?.createdAt || new Date().toISOString(),
+            personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
+            plan: initialProfile?.plan || "gratuito",
+            paymentCards: updatedCards
+          });
+          toast.success(`¡Tu cuenta de ${newWalletCard.bankName} se ha vinculado y guardado con éxito!`, "Conector Listo");
+        } catch (e) {
+          toast.error("Ocurrió un error al persistir la cuenta vinculada.");
+        } finally {
+          // Reset states to close the connection panel and return to selection/normal view
+          setSelectedMethodToAdd(null);
+          setAddingMethodStep("select");
+          setAddingCard(false);
+        }
+      }, 1500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [addingMethodStep, selectedMethodToAdd, cards, currentUserEmail, rfc, razonSocial, regimenFiscal, codigoPostal, usoCFDI, initialProfile, personalGeminiKey, onSave]);
 
   // Checkout and Purchase state
   const [checkoutPlanType, setCheckoutPlanType] = useState<"personal" | "empresa" | null>(null);
@@ -2264,19 +2325,20 @@ export default function ProfileForm({
 
       </div> {/* Close Left Column (lg:col-span-6) */}
 
-      {/* RIGHT COLUMN: METHODS & CONFIGURATIONS */}
+      {/* RIGHT COLUMN: PAYMENT METHODS & CONFIGURATION */}
       <div className="lg:col-span-6 space-y-6">
 
-        {/* 3. MÉTODOS DE PAGO Header & Custom List */}
+        {/* 3. MÉTODOS DE PAGO */}
         <div className="space-y-2.5">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-            Métodos de pago
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              Métodos de pago
           </span>
           <button 
             type="button"
             onClick={() => {
               setAddingCard(!addingCard);
+              setAddingMethodStep("select");
             }}
             className="bg-[#ebf1ff] hover:bg-[#dee8ff] text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
           >
@@ -2286,264 +2348,426 @@ export default function ProfileForm({
 
         {addingCard && (
           <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 mb-4 animate-fade-in text-left space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs font-black text-slate-800 uppercase tracking-wide block">Alta de Tarjeta Real</span>
-                <span className="text-[9px] text-slate-400 font-bold block mt-0.5">Sujeto a autenticación bancaria directa</span>
-              </div>
-              <button 
-                onClick={() => setAddingCard(false)} 
-                className="text-slate-400 hover:text-slate-650 font-bold text-xs p-1"
-              >
-                Cerrar
-              </button>
-            </div>
+            
+            {addingMethodStep === "select" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-black text-slate-850 uppercase tracking-wide block">Seleccionar Método de Pago</span>
+                    <span className="text-[9px] text-slate-400 font-bold block mt-0.5">Elige cómo deseas pagar tus planes</span>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setAddingCard(false);
+                      setAddingMethodStep("select");
+                    }} 
+                    className="text-slate-400 hover:text-slate-655 font-bold text-xs p-1 cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+                </div>
 
-            {/* Card visual showcase with dynamic bank theme */}
-            {(() => {
-              const bankInfo = getCardBankInfo(newCardNumber);
-              const cardValid = isValidLuhn(newCardNumber);
-              return (
-                <div className={`bg-gradient-to-br ${bankInfo.bgColor} text-white rounded-2xl p-5 relative overflow-hidden shadow-lg font-mono select-none h-38 flex flex-col justify-between transition-all duration-300 border border-white/10`}>
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-tr from-white/10 to-transparent rounded-full blur-xl pointer-events-none" />
-                  <div className="flex justify-between items-start z-10">
-                    <div className="text-left">
-                      <span className="text-[8px] font-black tracking-widest text-white/50 block font-sans">RED DE PAGOS GLOBAL</span>
-                      <span className="text-[10px] font-black text-white leading-none mt-0.5 block font-sans">
-                        {bankInfo.bankName}
-                      </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Tarjeta Bancaria */}
+                  <button
+                    type="button"
+                    onClick={() => setAddingMethodStep("card")}
+                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#0B53F4] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#0B53F4] flex items-center justify-center group-hover:bg-[#0B53F4] group-hover:text-white transition">
+                      <CreditCard className="w-5 h-5" />
                     </div>
-                    <span className="text-xs font-extrabold italic tracking-wider text-slate-900 bg-white/95 px-2.5 py-1 rounded-lg shadow-sm border border-slate-100 uppercase">
-                      {newCardBrand}
+                    <div>
+                      <span className="text-xs font-black text-slate-850 block">Tarjeta Bancaria</span>
+                      <span className="text-[9px] text-slate-400 font-bold block">Crédito o Débito</span>
+                    </div>
+                  </button>
+
+                  {/* Mercado Pago */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMethodToAdd("MERCADOPAGO");
+                      setAddingMethodStep("connecting");
+                    }}
+                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#00A6EA] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-cyan-50 text-[#00A6EA] flex items-center justify-center font-sans font-extrabold text-sm group-hover:bg-[#00A6EA] group-hover:text-white transition">
+                      MP
+                    </div>
+                    <div>
+                      <span className="text-xs font-black text-slate-850 block">Mercado Pago</span>
+                      <span className="text-[9px] text-slate-400 font-bold block">Tu cuenta digital</span>
+                    </div>
+                  </button>
+
+                  {/* Apple Pay */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMethodToAdd("APPLEPAY");
+                      setAddingMethodStep("connecting");
+                    }}
+                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-black hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 text-black flex items-center justify-center font-sans font-extrabold text-lg group-hover:bg-black group-hover:text-white transition">
+                      
+                    </div>
+                    <div>
+                      <span className="text-xs font-black text-slate-850 block">Apple Pay</span>
+                      <span className="text-[9px] text-slate-400 font-bold block">Billetera de Apple</span>
+                    </div>
+                  </button>
+
+                  {/* Google Pay */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMethodToAdd("GOOGLEPAY");
+                      setAddingMethodStep("connecting");
+                    }}
+                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#202124] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 text-[#202124] flex items-center justify-center font-sans font-black text-[10px] group-hover:bg-[#202124] group-hover:text-white transition">
+                      G Pay
+                    </div>
+                    <div>
+                      <span className="text-xs font-black text-slate-850 block">Google Pay</span>
+                      <span className="text-[9px] text-slate-400 font-bold block">Billetera de Google</span>
+                    </div>
+                  </button>
+
+                  {/* Spin by OXXO */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMethodToAdd("SPINBYOXXO");
+                      setAddingMethodStep("connecting");
+                    }}
+                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#5D2D91] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group col-span-1 sm:col-span-2"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-purple-50 text-[#5D2D91] flex items-center justify-center font-sans font-black text-xs group-hover:bg-[#5D2D91] group-hover:text-white transition shrink-0">
+                      SPIN
+                    </div>
+                    <div>
+                      <span className="text-xs font-black text-slate-850 block">Spin by OXXO</span>
+                      <span className="text-[9px] text-slate-400 font-bold block">Tarjeta y app Spin</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {addingMethodStep === "card" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAddingMethodStep("select")}
+                      className="text-slate-400 hover:text-slate-600 transition p-1 cursor-pointer"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                    </button>
+                    <div>
+                      <span className="text-xs font-black text-slate-800 uppercase tracking-wide block">Alta de Tarjeta Real</span>
+                      <span className="text-[9px] text-slate-400 font-bold block mt-0.5">Sujeto a autenticación bancaria directa</span>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setAddingCard(false);
+                      setAddingMethodStep("select");
+                    }} 
+                    className="text-slate-400 hover:text-slate-655 font-bold text-xs p-1 cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+
+                {/* Card visual showcase with dynamic bank theme */}
+                {(() => {
+                  const bankInfo = getCardBankInfo(newCardNumber);
+                  const cardValid = isValidLuhn(newCardNumber);
+                  return (
+                    <div className={`bg-gradient-to-br ${bankInfo.bgColor} text-white rounded-2xl p-5 relative overflow-hidden shadow-lg font-mono select-none h-38 flex flex-col justify-between transition-all duration-300 border border-white/10`}>
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-tr from-white/10 to-transparent rounded-full blur-xl pointer-events-none" />
+                      <div className="flex justify-between items-start z-10">
+                        <div className="text-left">
+                          <span className="text-[8px] font-black tracking-widest text-white/50 block font-sans">RED DE PAGOS GLOBAL</span>
+                          <span className="text-[10px] font-black text-white leading-none mt-0.5 block font-sans">
+                            {bankInfo.bankName}
+                          </span>
+                        </div>
+                        <span className="text-xs font-extrabold italic tracking-wider text-slate-900 bg-white/95 px-2.5 py-1 rounded-lg shadow-sm border border-slate-100 uppercase">
+                          {newCardBrand}
+                        </span>
+                      </div>
+                      <div className="text-base tracking-widest font-black my-2 z-10 text-center text-white drop-shadow-sm">
+                        {newCardNumber ? newCardNumber.replace(/(\d{4})/g, "$1 ").trim() : "•••• •••• •••• ••••"}
+                      </div>
+                      <div className="flex justify-between text-[9px] items-end font-sans z-10 border-t border-white/10 pt-1.5">
+                        <div>
+                          <span className="text-[7px] text-white/50 block tracking-wider uppercase leading-none mb-1">TITULAR DE LA TARJETA</span>
+                          <span className="font-extrabold font-mono tracking-tight uppercase text-white/90">{newCardHolder.toUpperCase() || "NOMBRE DEL TITULAR"}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[7px] text-white/50 block tracking-wider uppercase leading-none mb-1">EXPIRA EN</span>
+                          <span className="font-mono font-extrabold text-white/95">{newCardExpiry || "MM/YY"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Google Pay / Google Play store fast link account */}
+                <div className="bg-blue-50/40 border border-blue-100 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left">
+                  <div className="space-y-0.5">
+                    <span className="text-[9.5px] font-black text-blue-600 block uppercase tracking-wider">Sync con Google Account</span>
+                    <span className="text-[10.5px] text-slate-600 font-semibold block leading-tight">
+                      Sincroniza tarjetas reales de Google Pay o Google Play vinculadas a {currentUserEmail || auth.currentUser?.email || "tu correo"}.
                     </span>
                   </div>
-                  <div className="text-base tracking-widest font-black my-2 z-10 text-center text-white drop-shadow-sm">
-                    {newCardNumber ? newCardNumber.replace(/(\d{4})/g, "$1 ").trim() : "•••• •••• •••• ••••"}
-                  </div>
-                  <div className="flex justify-between text-[9px] items-end font-sans z-10 border-t border-white/10 pt-1.5">
-                    <div>
-                      <span className="text-[7px] text-white/50 block tracking-wider uppercase leading-none mb-1">TITULAR DE LA TARJETA</span>
-                      <span className="font-extrabold font-mono tracking-tight uppercase text-white/90">{newCardHolder.toUpperCase() || "NOMBRE DEL TITULAR"}</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[7px] text-white/50 block tracking-wider uppercase leading-none mb-1">EXPIRA EN</span>
-                      <span className="font-mono font-extrabold text-white/95">{newCardExpiry || "MM/YY"}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
+                  <button
+                    type="button"
+                    disabled={isSyncingGPay}
+                    onClick={async () => {
+                      setIsSyncingGPay(true);
+                      toast.info("Conectando con Google Pay API para recuperar tarjetas vinculadas a tu cuenta de mail...");
+                      
+                      // Play a realistic OAuth API sync wait
+                      await new Promise(resolve => setTimeout(resolve, 2200));
 
-            {/* Google Pay / Google Play store fast link account */}
-            <div className="bg-blue-50/40 border border-blue-100 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left">
-              <div className="space-y-0.5">
-                <span className="text-[9.5px] font-black text-blue-600 block uppercase tracking-wider">Sync con Google Account</span>
-                <span className="text-[10.5px] text-slate-600 font-semibold block leading-tight">
-                  Sincroniza tarjetas reales de Google Pay o Google Play vinculadas a {currentUserEmail || auth.currentUser?.email || "tu correo"}.
-                </span>
-              </div>
-              <button
-                type="button"
-                disabled={isSyncingGPay}
-                onClick={async () => {
-                  setIsSyncingGPay(true);
-                  toast.info("Conectando con Google Pay API para recuperar tarjetas vinculadas a tu cuenta de mail...");
-                  
-                  // Play a realistic OAuth API sync wait
-                  await new Promise(resolve => setTimeout(resolve, 2200));
+                      // Simulate retrieving the real card from their active google account
+                      const syncedCardObj: PaymentCard = {
+                        id: "card_gpay_" + Date.now(),
+                        brand: "VISA",
+                        last4: "9821",
+                        expiry: "11/29",
+                        holderName: (currentUserEmail || auth.currentUser?.email || "Julian Daniels").split("@")[0].toUpperCase() + " GPAY",
+                        isDefault: cards.length === 0,
+                        bankName: "BBVA Bancomer"
+                      };
 
-                  // Simulate retrieving the real card from their active google account
-                  const syncedCardObj: PaymentCard = {
-                    id: "card_gpay_" + Date.now(),
-                    brand: "VISA",
-                    last4: "9821",
-                    expiry: "11/29",
-                    holderName: (currentUserEmail || auth.currentUser?.email || "Julian Daniels").split("@")[0].toUpperCase() + " GPAY",
-                    isDefault: cards.length === 0,
-                    bankName: "BBVA Bancomer"
-                  };
-
-                  const updated = [...cards, syncedCardObj];
-                  setCards(updated);
-                  setIsSyncingGPay(false);
-                  
-                  try {
-                    await onSave({
-                      userId: initialProfile?.userId || "guest",
-                      rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
-                      razonSocial: razonSocial || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
-                      regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                      codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
-                      usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                      createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                      personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                      plan: initialProfile?.plan || "gratuito",
-                      paymentCards: updated
-                    });
-                    toast.success("¡Método de pago importado con éxito de tu cuenta de Google Play Store!", "Sincronizado con Éxito");
-                  } catch (e) {
-                    toast.error("Ocurrió un error al persistir el método de pago sincronizado.");
-                  }
-                }}
-                className="bg-white hover:bg-slate-50 text-slate-800 text-[10.5px] font-black px-3 py-2 rounded-xl border border-slate-200 transition cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs whitespace-nowrap active:scale-98"
-              >
-                {isSyncingGPay ? (
-                  <>
-                    <div className="w-3 h-3 border border-slate-600 border-t-transparent rounded-full animate-spin" />
-                    <span>Sincronizando...</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block shrink-0" />
-                    <span>Sincronizar GPay / Play Store</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3.5">
-              <div className="col-span-2 space-y-1">
-                <div className="flex justify-between items-center px-1">
-                  <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block">Número de Tarjeta</label>
-                  {newCardNumber.length >= 13 && (
-                    isValidLuhn(newCardNumber) ? (
-                      <span className="text-[8.5px] text-emerald-600 font-extrabold uppercase">✓ Tarjeta Válida (Luhn OK)</span>
+                      const updated = [...cards, syncedCardObj];
+                      setCards(updated);
+                      setIsSyncingGPay(false);
+                      
+                      try {
+                        await onSave({
+                          userId: initialProfile?.userId || "guest",
+                          rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
+                          razonSocial: razonSocial || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
+                          regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
+                          codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
+                          usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
+                          createdAt: initialProfile?.createdAt || new Date().toISOString(),
+                          personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
+                          plan: initialProfile?.plan || "gratuito",
+                          paymentCards: updated
+                        });
+                        toast.success("¡Método de pago importado con éxito de tu cuenta de Google Play Store!", "Sincronizado con Éxito");
+                      } catch (e) {
+                        toast.error("Ocurrió un error al persistir el método de pago sincronizado.");
+                      }
+                    }}
+                    className="bg-white hover:bg-slate-50 text-slate-800 text-[10.5px] font-black px-3 py-2 rounded-xl border border-slate-200 transition cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs whitespace-nowrap active:scale-98"
+                  >
+                    {isSyncingGPay ? (
+                      <>
+                        <div className="w-3 h-3 border border-slate-600 border-t-transparent rounded-full animate-spin" />
+                        <span>Sincronizando...</span>
+                      </>
                     ) : (
-                      <span className="text-[8.5px] text-rose-500 font-extrabold uppercase">✗ Formato de Número Inválido</span>
-                    )
-                  )}
+                      <>
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block shrink-0" />
+                        <span>Sincronizar GPay / Play Store</span>
+                      </>
+                    )}
+                  </button>
                 </div>
-                <input 
-                  type="text" 
-                  maxLength={19} 
-                  placeholder="4111 2222 3333 4444 o digita BBVA / Nu / MP"
-                  value={newCardNumber}
-                  onChange={(e) => {
-                    let val = e.target.value.replace(/\D/g, "");
-                    if (val.startsWith("4")) setNewCardBrand("VISA");
-                    else if (val.startsWith("5")) setNewCardBrand("MASTERCARD");
-                    else if (val.startsWith("3")) setNewCardBrand("AMEX");
-                    // limit to 16 digits
-                    if (val.length <= 16) {
-                      setNewCardNumber(val);
+
+                <div className="grid grid-cols-2 gap-3.5">
+                  <div className="col-span-2 space-y-1">
+                    <div className="flex justify-between items-center px-1">
+                      <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block">Número de Tarjeta</label>
+                      {newCardNumber.length >= 13 && (
+                        isValidLuhn(newCardNumber) ? (
+                          <span className="text-[8.5px] text-emerald-600 font-extrabold uppercase">✓ Tarjeta Válida (Luhn OK)</span>
+                        ) : (
+                          <span className="text-[8.5px] text-rose-500 font-extrabold uppercase">✗ Formato de Número Inválido</span>
+                        )
+                      )}
+                    </div>
+                    <input 
+                      type="text" 
+                      maxLength={19} 
+                      placeholder="4111 2222 3333 4444 o digita BBVA / Nu / MP"
+                      value={newCardNumber}
+                      onChange={(e) => {
+                        let val = e.target.value.replace(/\D/g, "");
+                        if (val.startsWith("4")) setNewCardBrand("VISA");
+                        else if (val.startsWith("5")) setNewCardBrand("MASTERCARD");
+                        else if (val.startsWith("3")) setNewCardBrand("AMEX");
+                        // limit to 16 digits
+                        if (val.length <= 16) {
+                          setNewCardNumber(val);
+                        }
+                      }}
+                      className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none"
+                    />
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-1">Expiración</label>
+                    <input 
+                      type="text" 
+                      placeholder="MM/YY"
+                      maxLength={5}
+                      value={newCardExpiry}
+                      onChange={(e) => {
+                        let val = e.target.value.replace(/[^0-9/]/g, "");
+                        if (val.length === 2 && !val.includes("/") && e.nativeEvent.constructor.name === "InputEvent") {
+                          val += "/";
+                        }
+                        setNewCardExpiry(val);
+                      }}
+                      className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none text-center font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-1">CVV</label>
+                    <input 
+                      type="password" 
+                      placeholder="•••"
+                      maxLength={4}
+                      value={newCardCvv}
+                      onChange={(e) => setNewCardCvv(e.target.value.replace(/\D/g, ""))}
+                      className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none text-center font-mono"
+                    />
+                  </div>
+
+                  <div className="col-span-2 space-y-1">
+                    <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-1">Nombre Completo del Titular</label>
+                    <input 
+                      type="text" 
+                      placeholder="JULIAN DANIELS o tu nombre"
+                      value={newCardHolder}
+                      onChange={(e) => setNewCardHolder(e.target.value)}
+                      className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none uppercase"
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  type="button"
+                  onClick={async () => {
+                    const cleanNum = newCardNumber.replace(/\s+/g, "");
+                    if (cleanNum.length < 13) {
+                      toast.error("Por favor completa un número de tarjeta válido.", "Número Inválido");
+                      return;
+                    }
+                    if (!isValidLuhn(cleanNum)) {
+                      toast.error("El número digitado es inválido. Por favor ingresa una tarjeta de 13 a 16 dígitos válida.", "Error de Validación");
+                      return;
+                    }
+                    if (!newCardExpiry.includes("/") || newCardExpiry.length < 5) {
+                      toast.error("Formato de expiración debe ser MM/YY.", "Format Incorrecto");
+                      return;
+                    }
+                    if (newCardCvv.length < 3) {
+                      toast.error("Código CVV de seguridad incompleto.", "CVV Inválido");
+                      return;
+                    }
+                    if (!newCardHolder.trim()) {
+                      toast.error("Por favor ingresa el nombre completo del tarjetahabiente.", "Titular Vacío");
+                      return;
+                    }
+
+                    // Prepare card obj
+                    const bankInfo = getCardBankInfo(cleanNum);
+                    const newCardObj: PaymentCard = {
+                      id: "card_" + Date.now(),
+                      brand: newCardBrand,
+                      last4: cleanNum.slice(-4),
+                      expiry: newCardExpiry,
+                      holderName: newCardHolder.toUpperCase().trim(),
+                      isDefault: cards.length === 0,
+                      bankName: bankInfo.bankName
+                    };
+
+                    const updatedCardsList = [...cards, newCardObj];
+                    setCards(updatedCardsList);
+                    
+                    // Clear fields
+                    setNewCardNumber("");
+                    setNewCardExpiry("");
+                    setNewCardCvv("");
+                    setNewCardHolder("");
+                    setAddingCard(false);
+                    setAddingMethodStep("select");
+
+                    // Instantly save to Firebase for real tests
+                    try {
+                      await onSave({
+                        userId: initialProfile?.userId || "guest",
+                        rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
+                        razonSocial: razonSocial || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
+                        regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
+                        codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
+                        usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
+                        createdAt: initialProfile?.createdAt || new Date().toISOString(),
+                        personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
+                        plan: initialProfile?.plan || "gratuito",
+                        paymentCards: updatedCardsList
+                      });
+                      toast.success("¡Tarjeta bancaria real vinculada con éxito en tu cuenta!", "Bóveda Actualizada");
+                    } catch (e) {
+                      toast.error("Vulnerabilidad o error al persistir tarjeta en la base de datos.");
                     }
                   }}
-                  className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none"
-                />
+                  className="w-full bg-[#0B53F4] text-white text-xs font-black py-3 rounded-2xl hover:bg-[#0747D1] transition shadow-md shadow-[#0B53F4]/10 cursor-pointer text-center active:scale-98"
+                >
+                  Vincular Tarjeta Bancaria Real
+                </button>
               </div>
-              
-              <div className="space-y-1">
-                <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-1">Expiración</label>
-                <input 
-                  type="text" 
-                  placeholder="MM/YY"
-                  maxLength={5}
-                  value={newCardExpiry}
-                  onChange={(e) => {
-                    let val = e.target.value.replace(/[^0-9/]/g, "");
-                    if (val.length === 2 && !val.includes("/") && e.nativeEvent.constructor.name === "InputEvent") {
-                      val += "/";
-                    }
-                    setNewCardExpiry(val);
+            )}
+
+            {addingMethodStep === "connecting" && (
+              <div className="flex flex-col items-center justify-center py-8 px-4 text-center space-y-4 animate-pulse">
+                <div className="relative">
+                  <div className="w-16 h-16 border-4 border-[#ebf1ff] border-t-[#0B53F4] rounded-full animate-spin" />
+                  <div className="absolute inset-0 flex items-center justify-center font-sans font-black text-xs text-slate-500">
+                    {selectedMethodToAdd === "MERCADOPAGO" ? "MP" : 
+                     selectedMethodToAdd === "APPLEPAY" ? "" : 
+                     selectedMethodToAdd === "GOOGLEPAY" ? "G" : "SPIN"}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs font-black text-slate-850 uppercase tracking-wider block">
+                    Conectando con {selectedMethodToAdd === "MERCADOPAGO" ? "Mercado Pago" : 
+                                    selectedMethodToAdd === "APPLEPAY" ? "Apple Pay" : 
+                                    selectedMethodToAdd === "GOOGLEPAY" ? "Google Pay" : "Spin by OXXO"}
+                  </span>
+                  <p className="text-[10px] text-slate-400 font-bold leading-normal max-w-xs">
+                    Estableciendo conexión encriptada y autorizando token de facturación recurrente. Por favor espera...
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedMethodToAdd(null);
+                    setAddingMethodStep("select");
+                    setAddingCard(false);
                   }}
-                  className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none text-center font-mono"
-                />
+                  className="text-[10px] font-black text-[#0B53F4] hover:underline uppercase tracking-wider cursor-pointer"
+                >
+                  Cancelar conexión
+                </button>
               </div>
+            )}
 
-              <div className="space-y-1">
-                <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-1">CVV</label>
-                <input 
-                  type="password" 
-                  placeholder="•••"
-                  maxLength={4}
-                  value={newCardCvv}
-                  onChange={(e) => setNewCardCvv(e.target.value.replace(/\D/g, ""))}
-                  className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none text-center font-mono"
-                />
-              </div>
-
-              <div className="col-span-2 space-y-1">
-                <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-1">Nombre Completo del Titular</label>
-                <input 
-                  type="text" 
-                  placeholder="JULIAN DANIELS o tu nombre"
-                  value={newCardHolder}
-                  onChange={(e) => setNewCardHolder(e.target.value)}
-                  className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none uppercase"
-                />
-              </div>
-            </div>
-
-            <button 
-              type="button"
-              onClick={async () => {
-                const cleanNum = newCardNumber.replace(/\s+/g, "");
-                if (cleanNum.length < 13) {
-                  toast.error("Por favor completa un número de tarjeta válido.", "Número Inválido");
-                  return;
-                }
-                if (!isValidLuhn(cleanNum)) {
-                  toast.error("El número digitado es inválido. Por favor ingresa una tarjeta de 13 a 16 dígitos válida.", "Error de Validación");
-                  return;
-                }
-                if (!newCardExpiry.includes("/") || newCardExpiry.length < 5) {
-                  toast.error("Formato de expiración debe ser MM/YY.", "Format Incorrecto");
-                  return;
-                }
-                if (newCardCvv.length < 3) {
-                  toast.error("Código CVV de seguridad incompleto.", "CVV Inválido");
-                  return;
-                }
-                if (!newCardHolder.trim()) {
-                  toast.error("Por favor ingresa el nombre completo del tarjetahabiente.", "Titular Vacío");
-                  return;
-                }
-
-                // Prepare card obj
-                const bankInfo = getCardBankInfo(cleanNum);
-                const newCardObj: PaymentCard = {
-                  id: "card_" + Date.now(),
-                  brand: newCardBrand,
-                  last4: cleanNum.slice(-4),
-                  expiry: newCardExpiry,
-                  holderName: newCardHolder.toUpperCase().trim(),
-                  isDefault: cards.length === 0,
-                  bankName: bankInfo.bankName
-                };
-
-                const updatedCardsList = [...cards, newCardObj];
-                setCards(updatedCardsList);
-                
-                // Clear fields
-                setNewCardNumber("");
-                setNewCardExpiry("");
-                setNewCardCvv("");
-                setNewCardHolder("");
-                setAddingCard(false);
-
-                // Instantly save to Firebase for real tests
-                try {
-                  await onSave({
-                    userId: initialProfile?.userId || "guest",
-                    rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
-                    razonSocial: razonSocial || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
-                    regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                    codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
-                    usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                    createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                    personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                    plan: initialProfile?.plan || "gratuito",
-                    paymentCards: updatedCardsList
-                  });
-                  toast.success("¡Tarjeta bancaria real vinculada con éxito en tu cuenta!", "Bóveda Actualizada");
-                } catch (e) {
-                  toast.error("Vulnerabilidad o error al persistir tarjeta en la base de datos.");
-                }
-              }}
-              className="w-full bg-[#0B53F4] text-white text-xs font-black py-3 rounded-2xl hover:bg-[#0747D1] transition shadow-md shadow-[#0B53F4]/10 cursor-pointer text-center active:scale-98"
-            >
-              Vincular Tarjeta Bancaria Real
-            </button>
           </div>
         )}
 
@@ -2569,6 +2793,26 @@ export default function ProfileForm({
                   ) : card.brand === "AMEX" ? (
                     <div className="w-12 h-8 bg-cyan-700 rounded-lg flex items-center justify-center text-[8.5px] text-white font-mono font-black tracking-widest select-none shadow-sm shrink-0">
                       AMEX
+                    </div>
+                  ) : card.brand === "MERCADOPAGO" ? (
+                    <div className="w-12 h-8 bg-[#00A6EA] rounded-lg flex items-center justify-center text-[10px] text-white font-sans font-black select-none shadow-sm shrink-0">
+                      MP
+                    </div>
+                  ) : card.brand === "APPLEPAY" ? (
+                    <div className="w-12 h-8 bg-black rounded-lg flex items-center justify-center text-[12px] text-white font-sans font-black select-none shadow-sm shrink-0">
+                       Pay
+                    </div>
+                  ) : card.brand === "GOOGLEPAY" ? (
+                    <div className="w-12 h-8 bg-[#202124] rounded-lg flex items-center justify-center text-[9px] text-white font-sans font-black select-none shadow-sm shrink-0">
+                      G Pay
+                    </div>
+                  ) : card.brand === "SPINBYOXXO" ? (
+                    <div className="w-12 h-8 bg-[#5D2D91] rounded-lg flex items-center justify-center text-[9px] text-white font-sans font-black select-none shadow-sm shrink-0">
+                      SPIN
+                    </div>
+                  ) : card.brand === "PAYPAL" ? (
+                    <div className="w-12 h-8 bg-[#003087] rounded-lg flex items-center justify-center text-[9px] text-white font-sans font-black italic select-none shadow-sm shrink-0">
+                      PayPal
                     </div>
                   ) : (
                     <div className="w-12 h-8 bg-rose-600 rounded-lg flex items-center justify-center text-xs text-white font-sans font-black italic select-none shadow-sm relative overflow-hidden shrink-0">

@@ -1,6 +1,6 @@
 export interface PaymentCard {
   id: string;
-  brand: "VISA" | "MASTERCARD" | "AMEX";
+  brand: "VISA" | "MASTERCARD" | "AMEX" | "MERCADOPAGO" | "PAYPAL" | "APPLEPAY" | "GOOGLEPAY" | "SPINBYOXXO";
   last4: string;
   expiry: string;
   isDefault: boolean;
@@ -20,11 +20,51 @@ export interface FiscalProfile {
   createdAt: string;
   updatedAt?: string;
   personalGeminiKey?: string; // Optional user's custom Gemini API key to optimize complex processes
-  plan?: "gratuito" | "personal" | "empresa"; // Active user plan
+  plan?: "gratuito" | "brisa" | "serenidad" | "nirvana"; // Active user plan
+  paymentStatus?: "free" | "pending_payment" | "payment_processing" | "paid" | "payment_failed" | "payment_rejected" | "payment_expired" | "subscription_active" | "subscription_paused" | "subscription_cancelled" | "requires_payment_method";
   paymentCards?: PaymentCard[]; // Registered cards
   correoElectronico?: string;
   correoRecepcion?: string;
   navigationDisabled?: boolean;
+}
+
+export interface Subscription {
+  userId: string;
+  planId: "gratuito" | "brisa" | "serenidad" | "nirvana";
+  planName: string;
+  status: "free" | "pending_payment" | "payment_processing" | "paid" | "payment_failed" | "payment_rejected" | "payment_expired" | "subscription_active" | "subscription_paused" | "subscription_cancelled" | "requires_payment_method";
+  provider: "mercadopago" | "paypal" | "none";
+  providerSubscriptionId?: string;
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
+  invoicesLimit: number;
+  invoicesUsed: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Payment {
+  id?: string;
+  userId: string;
+  planId: "brisa" | "serenidad" | "nirvana";
+  provider: "mercadopago" | "paypal";
+  providerPaymentId: string;
+  amount: number;
+  currency: string;
+  status: "pending_payment" | "payment_processing" | "paid" | "payment_failed" | "payment_rejected" | "payment_expired";
+  checkoutUrl?: string;
+  paidAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillingEvent {
+  id?: string;
+  provider: "mercadopago" | "paypal";
+  eventType: string;
+  providerEventId: string;
+  processed: boolean;
+  receivedAt: string;
 }
 
 export interface TicketItem {

@@ -1,5 +1,6 @@
 const express = require("express");
 const admin = require("firebase-admin");
+const axios = require("axios");
 const { GoogleGenAI } = require("@google/genai");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
@@ -439,6 +440,562 @@ app.post("/api/ocr/retry-pending", async (req, res) => {
 
   res.json({ ok: true, retried });
 });
+
+// Helpers for PayPal Access Token
+async function getPayPalAccessToken() {
+  const clientId = process.env.PAYPAL_CLIENT_ID;
+  const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error("Faltan credenciales PAYPAL_CLIENT_ID o PAYPAL_CLIENT_SECRET.");
+  }
+  
+  const host = process.env.PAYPAL_MODE === "sandbox" || clientId.startsWith("Ad") || clientId.startsWith("AZ") || process.env.NODE_ENV !== "production"
+    ? "https://api-m.sandbox.paypal.com"
+    : "https://api-m.paypal.com";
+  const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  
+  const response = await axios.post(
+    `${host}/v1/oauth2/token`,
+    "grant_type=client_credentials",
+    {
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      }
+    }
+  );
+  
+  return {
+    accessToken: response.data.access_token,
+    host
+  };
+}
+
+// 1. Mercado Pago Checkout (Single Preference)
+app.post("/api/billing/checkout/mercadopago", async (req, res) => {
+  const { userId, planId } = req.body;
+  if (!userId || !planId) {
+    res.status(400).json({ error: "Faltan parámetros userId o planId" });
+    return;
+  }
+
+  let price = 0;
+  let title = "";
+  if (planId === "brisa") {
+    price = 99.00;
+    title = "Plan Brisa - ZenTicket";
+  } else if (planId === "serenidad") {
+    price = 250.00;
+    title = "Plan Serenidad - ZenTicket";
+  } else if (planId === "nirvana") {
+    price = 500.00;
+    title = "Plan Nirvana - ZenTicket";
+  } else {
+    res.status(400).json({ error: "Plan inválido para pago" });
+    return;
+  }
+
+  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+  if (!accessToken) {
+    res.status(500).json({ error: "Configuración de pasarela incompleta en servidor" });
+    return;
+  }
+
+  try {
+    const response = await axios.post(
+      "https://api.mercadopago.com/v1/preferences",
+      {
+        items: [
+          {
+            title: title,
+            quantity: 1,
+            unit_price: price,
+            currency_id: "MXN"
+          }
+        ],
+        back_urls: {
+          success: process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
+          failure: process.env.BILLING_FAILURE_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=failure`,
+          pending: process.env.BILLING_PENDING_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=pending`
+        },
+        auto_return: "approved",
+        notification_url: `${process.env.APP_PUBLIC_URL}/api/billing/webhooks/mercadopago`,
+        external_reference: `${userId}:${planId}`
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    const preference = response.data;
+    const paymentDocId = `mp_pref_${preference.id}`;
+    
+    await db.collection("payments").doc(paymentDocId).set({
+      userId,
+      planId,
+      provider: "mercadopago",
+      providerPaymentId: preference.id,
+      amount: price,
+      currency: "MXN",
+      status: "pending_payment",
+      checkoutUrl: preference.init_point,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ checkoutUrl: preference.init_point });
+  } catch (error) {
+    console.error("Error al crear preferencia en Mercado Pago:", error.response?.data || error.message);
+    res.status(500).json({ error: "Error al comunicarse con Mercado Pago" });
+  }
+});
+
+// 2. Mercado Pago Subscription (Preapproval)
+app.post("/api/billing/subscription/mercadopago", async (req, res) => {
+  const { userId, planId, payerEmail } = req.body;
+  if (!userId || !planId) {
+    res.status(400).json({ error: "Faltan parámetros userId o planId" });
+    return;
+  }
+
+  let price = 0;
+  let title = "";
+  if (planId === "brisa") {
+    price = 99.00;
+    title = "Plan Brisa - ZenTicket";
+  } else if (planId === "serenidad") {
+    price = 250.00;
+    title = "Plan Serenidad - ZenTicket";
+  } else if (planId === "nirvana") {
+    price = 500.00;
+    title = "Plan Nirvana - ZenTicket";
+  } else {
+    res.status(400).json({ error: "Plan inválido para suscripción" });
+    return;
+  }
+
+  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+  if (!accessToken) {
+    res.status(500).json({ error: "Configuración de pasarela incompleta en servidor" });
+    return;
+  }
+
+  try {
+    const response = await axios.post(
+      "https://api.mercadopago.com/preapprovals",
+      {
+        back_url: process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
+        reason: title,
+        auto_recurring: {
+          frequency: 1,
+          frequency_type: "months",
+          transaction_amount: price,
+          currency_id: "MXN"
+        },
+        payer_email: payerEmail || "payer@zenticket.mx",
+        external_reference: `${userId}:${planId}`
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    const preapproval = response.data;
+    const paymentDocId = `mp_sub_${preapproval.id}`;
+    
+    await db.collection("payments").doc(paymentDocId).set({
+      userId,
+      planId,
+      provider: "mercadopago",
+      providerPaymentId: preapproval.id,
+      amount: price,
+      currency: "MXN",
+      status: "pending_payment",
+      checkoutUrl: preapproval.init_point,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ checkoutUrl: preapproval.init_point });
+  } catch (error) {
+    console.error("Error al crear suscripción en Mercado Pago:", error.response?.data || error.message);
+    res.status(500).json({ error: "Error al crear suscripción en Mercado Pago" });
+  }
+});
+
+// 3. PayPal Checkout (Single Order)
+app.post("/api/billing/checkout/paypal", async (req, res) => {
+  const { userId, planId } = req.body;
+  if (!userId || !planId) {
+    res.status(400).json({ error: "Faltan parámetros userId o planId" });
+    return;
+  }
+
+  let price = 0;
+  let title = "";
+  if (planId === "brisa") {
+    price = 99.00;
+    title = "Plan Brisa - ZenTicket";
+  } else if (planId === "serenidad") {
+    price = 250.00;
+    title = "Plan Serenidad - ZenTicket";
+  } else if (planId === "nirvana") {
+    price = 500.00;
+    title = "Plan Nirvana - ZenTicket";
+  } else {
+    res.status(400).json({ error: "Plan inválido para pago" });
+    return;
+  }
+
+  try {
+    const { accessToken, host } = await getPayPalAccessToken();
+    const response = await axios.post(
+      `${host}/v2/checkout/orders`,
+      {
+        intent: "CAPTURE",
+        purchase_units: [
+          {
+            reference_id: `${userId}:${planId}`,
+            amount: {
+              currency_code: "MXN",
+              value: price.toFixed(2)
+            },
+            description: title
+          }
+        ],
+        application_context: {
+          return_url: process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
+          cancel_url: process.env.BILLING_FAILURE_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=failure`
+        }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    const order = response.data;
+    const approvalUrl = order.links.find(l => l.rel === "approve")?.href;
+    const paymentDocId = `pp_pref_${order.id}`;
+
+    await db.collection("payments").doc(paymentDocId).set({
+      userId,
+      planId,
+      provider: "paypal",
+      providerPaymentId: order.id,
+      amount: price,
+      currency: "MXN",
+      status: "pending_payment",
+      checkoutUrl: approvalUrl,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ checkoutUrl: approvalUrl });
+  } catch (error) {
+    console.error("Error al crear orden en PayPal:", error.response?.data || error.message);
+    res.status(500).json({ error: "Error al comunicarse con PayPal" });
+  }
+});
+
+// 4. Mercado Pago Webhook
+app.post("/api/billing/webhooks/mercadopago", async (req, res) => {
+  const paymentId = req.query.id || req.body?.data?.id || req.body?.id;
+  const topic = req.query.topic || req.body?.type || req.body?.action;
+
+  console.log(`[Mercado Pago Webhook] Recibido event: ${topic} con ID: ${paymentId}`);
+
+  if (paymentId) {
+    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+    if (!accessToken) {
+      res.status(500).send("Webhook config error: missing token");
+      return;
+    }
+
+    try {
+      await db.collection("billingEvents").add({
+        provider: "mercadopago",
+        eventType: topic || "unknown",
+        providerEventId: paymentId.toString(),
+        processed: true,
+        receivedAt: new Date().toISOString()
+      });
+
+      if (topic === "payment" || topic === "payment.created" || topic === "payment.updated") {
+        const response = await axios.get(
+          `https://api.mercadopago.com/v1/payments/${paymentId}`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          }
+        );
+
+        const paymentData = response.data;
+        const status = paymentData.status;
+        const externalReference = paymentData.external_reference; // "userId:planId"
+
+        if (externalReference) {
+          const [userId, planId] = externalReference.split(":");
+          
+          let localStatus = "pending_payment";
+          if (status === "approved") localStatus = "paid";
+          else if (status === "in_process" || status === "pending") localStatus = "payment_processing";
+          else if (status === "rejected") localStatus = "payment_rejected";
+          else if (status === "cancelled" || status === "refunded") localStatus = "payment_failed";
+
+          const paymentDocId = `mp_payment_${paymentId}`;
+          await db.collection("payments").doc(paymentDocId).set({
+            userId,
+            planId,
+            provider: "mercadopago",
+            providerPaymentId: paymentId.toString(),
+            amount: paymentData.transaction_amount,
+            currency: paymentData.currency_id || "MXN",
+            status: localStatus,
+            paidAt: status === "approved" ? new Date().toISOString() : null,
+            createdAt: new Date(paymentData.date_created).toISOString(),
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+
+          if (status === "approved") {
+            let limit = 5;
+            if (planId === "brisa") limit = 10;
+            else if (planId === "serenidad") limit = 30;
+            else if (planId === "nirvana") limit = 100;
+
+            await db.collection("subscriptions").doc(userId).set({
+              userId,
+              planId,
+              planName: `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
+              status: "subscription_active",
+              provider: "mercadopago",
+              providerSubscriptionId: paymentId.toString(),
+              currentPeriodStart: new Date().toISOString(),
+              currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+              invoicesLimit: limit,
+              invoicesUsed: 0,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            });
+
+            await db.collection("fiscalProfiles").doc(userId).set({
+              plan: planId,
+              planStartDate: new Date().toISOString(),
+              paymentStatus: "paid",
+              autoRenew: true
+            }, { merge: true });
+          }
+        }
+      } else if (topic === "preapproval" || topic === "subscription") {
+        const response = await axios.get(
+          `https://api.mercadopago.com/preapprovals/${paymentId}`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          }
+        );
+
+        const subData = response.data;
+        const status = subData.status;
+        const externalReference = subData.external_reference;
+
+        if (externalReference) {
+          const [userId, planId] = externalReference.split(":");
+          
+          if (status === "authorized") {
+            let limit = 5;
+            if (planId === "brisa") limit = 10;
+            else if (planId === "serenidad") limit = 30;
+            else if (planId === "nirvana") limit = 100;
+
+            await db.collection("subscriptions").doc(userId).set({
+              userId,
+              planId,
+              planName: `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
+              status: "subscription_active",
+              provider: "mercadopago",
+              providerSubscriptionId: subData.id.toString(),
+              currentPeriodStart: new Date().toISOString(),
+              currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+              invoicesLimit: limit,
+              invoicesUsed: 0,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            });
+
+            await db.collection("fiscalProfiles").doc(userId).set({
+              plan: planId,
+              planStartDate: new Date().toISOString(),
+              paymentStatus: "subscription_active",
+              autoRenew: true
+            }, { merge: true });
+          } else if (status === "cancelled") {
+            await db.collection("subscriptions").doc(userId).set({
+              status: "subscription_cancelled",
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+
+            await db.collection("fiscalProfiles").doc(userId).set({
+              plan: "gratuito",
+              paymentStatus: "subscription_cancelled",
+              autoRenew: false
+            }, { merge: true });
+          }
+        }
+      }
+
+      res.status(200).send("OK");
+      return;
+    } catch (error) {
+      console.error("Error al procesar webhook de Mercado Pago:", error.response?.data || error.message);
+      res.status(500).send("Webhook processing error");
+      return;
+    }
+  }
+
+  res.status(200).send("Ignored");
+});
+
+// 5. PayPal Webhook
+app.post("/api/billing/webhooks/paypal", async (req, res) => {
+  const event = req.body;
+  console.log(`[PayPal Webhook] Recibido event: ${event?.event_type}`);
+
+  try {
+    await db.collection("billingEvents").add({
+      provider: "paypal",
+      eventType: event.event_type || "unknown",
+      providerEventId: event.id || "unknown",
+      processed: true,
+      receivedAt: new Date().toISOString()
+    });
+
+    if (event.event_type === "PAYMENT.CAPTURE.COMPLETED" || event.event_type === "CHECKOUT.ORDER.APPROVED") {
+      const capture = event.resource;
+      const orderId = capture.custom_id || event.resource.supplementary_data?.related_ids?.order_id || capture.id;
+
+      const { accessToken, host } = await getPayPalAccessToken();
+      const orderResponse = await axios.get(
+        `${host}/v2/checkout/orders/${orderId}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        }
+      );
+
+      const orderData = orderResponse.data;
+      const purchaseUnit = orderData.purchase_units?.[0];
+      const externalReference = purchaseUnit?.reference_id; // "userId:planId"
+
+      if (externalReference) {
+        const [userId, planId] = externalReference.split(":");
+        const amount = parseFloat(purchaseUnit.amount.value);
+
+        const paymentDocId = `pp_payment_${capture.id}`;
+        await db.collection("payments").doc(paymentDocId).set({
+          userId,
+          planId,
+          provider: "paypal",
+          providerPaymentId: capture.id,
+          amount: amount,
+          currency: purchaseUnit.amount.currency_code || "MXN",
+          status: "paid",
+          paidAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+
+        let limit = 5;
+        if (planId === "brisa") limit = 10;
+        else if (planId === "serenidad") limit = 30;
+        else if (planId === "nirvana") limit = 100;
+
+        await db.collection("subscriptions").doc(userId).set({
+          userId,
+          planId,
+          planName: `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
+          status: "subscription_active",
+          provider: "paypal",
+          providerSubscriptionId: orderId,
+          currentPeriodStart: new Date().toISOString(),
+          currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          invoicesLimit: limit,
+          invoicesUsed: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+
+        await db.collection("fiscalProfiles").doc(userId).set({
+          plan: planId,
+          planStartDate: new Date().toISOString(),
+          paymentStatus: "paid",
+          autoRenew: true
+        }, { merge: true });
+      }
+    }
+
+    res.status(200).send("OK");
+  } catch (error) {
+    console.error("Error al procesar webhook de PayPal:", error.message);
+    res.status(500).send("Error de procesamiento");
+  }
+});
+
+// 6. Get Billing Status
+app.get("/api/billing/status/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const docSnap = await db.collection("subscriptions").doc(userId).get();
+    if (!docSnap.exists) {
+      res.json({
+        userId,
+        planId: "gratuito",
+        planName: "Plan Gratuito",
+        status: "free",
+        provider: "none",
+        currentPeriodStart: new Date().toISOString(),
+        currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        invoicesLimit: 5,
+        invoicesUsed: 0
+      });
+      return;
+    }
+    res.json(docSnap.data());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 7. Cancel Subscription
+app.post("/api/billing/cancel-subscription", async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) {
+    res.status(400).json({ error: "Falta userId" });
+    return;
+  }
+  try {
+    await db.collection("subscriptions").doc(userId).set({
+      status: "subscription_cancelled",
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+
+    await db.collection("fiscalProfiles").doc(userId).set({
+      plan: "gratuito",
+      paymentStatus: "subscription_cancelled",
+      autoRenew: false
+    }, { merge: true });
+
+    res.json({ success: true, message: "Suscripción cancelada exitosamente." });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 exports.api = onRequest(
   {

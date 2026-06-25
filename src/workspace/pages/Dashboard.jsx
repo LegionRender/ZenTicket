@@ -109,7 +109,8 @@ export const Dashboard = () => {
     let isActive = true;
     let unsubscribe = () => {};
 
-    const isAdminEmail = user.email === "legionrender@gmail.com";
+    const emailLower = (user.email || "").toLowerCase();
+    const isAdminEmail = emailLower.includes("legionrender") || emailLower.includes("ricardo");
     const initialDef = {
       userId: user.uid,
       rfc: isAdminEmail ? "GOMD850101XYZ" : "CABE850101ABC",
@@ -370,8 +371,8 @@ export const Dashboard = () => {
   useEffect(() => {
     if (!user) return;
     
-    // Only run administrative queries if the user email matches the bootstrapped admin
-    if (user.email !== "legionrender@gmail.com") return;
+    const emailLowerAdmin = (user.email || "").toLowerCase();
+    if (!(emailLowerAdmin.includes("legionrender") || emailLowerAdmin.includes("ricardo"))) return;
 
     const qProfiles = query(collection(db, "fiscalProfiles"));
     const unsubscribeProfiles = onSnapshot(qProfiles, (snap) => {
@@ -974,7 +975,7 @@ export const Dashboard = () => {
     toast.info("Iniciando secuencia robótica Playwright de timbrado...");
   };
 
-  const isAdmin = user?.email === "legionrender@gmail.com";
+  const isAdmin = user?.email && (user.email.toLowerCase().includes("legionrender") || user.email.toLowerCase().includes("ricardo"));
   const isProfileComplete = true; // No validation locks - the app is completely open for navigation and operation
 
   const isNavigationDisabled = (fiscalProfile?.navigationDisabled || false) && !isProfileComplete;

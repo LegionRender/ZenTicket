@@ -758,7 +758,19 @@ export default function ScannerAndSimulator({
 
     // Check plan constraints before initiating SAT automation
     const currentPlanStr = fiscalProfile?.plan || "gratuito";
-    const limit = currentPlanStr === "empresa" ? 60 : currentPlanStr === "personal" ? 20 : 5;
+    
+    // Validate subscription state for paid plans
+    if (currentPlanStr !== "gratuito" && fiscalProfile?.paymentStatus !== "paid" && fiscalProfile?.paymentStatus !== "subscription_active") {
+      toast.error("Tu suscripción de pago no se encuentra activa. Por favor, ve a la sección de Cuenta para activar tu suscripción.", "Suscripción Inactiva");
+      if (onTabChange) onTabChange("cuenta");
+      return;
+    }
+
+    let limit = 5;
+    if (currentPlanStr === "brisa") limit = 10;
+    else if (currentPlanStr === "serenidad") limit = 30;
+    else if (currentPlanStr === "nirvana") limit = 100;
+
     const planStartDateStr = fiscalProfile?.planStartDate || fiscalProfile?.createdAt || new Date().toISOString();
     const planStartDate = new Date(planStartDateStr);
     const cycleInvoices = (invoices || []).filter(inv => {
@@ -769,27 +781,10 @@ export default function ScannerAndSimulator({
     const isExpired = (new Date().getTime() - planStartDate.getTime()) >= 30 * 24 * 60 * 60 * 1000;
 
     if (cycleCount >= limit || isExpired) {
-      if (fiscalProfile?.autoRenew && currentPlanStr !== "gratuito") {
-        // Auto-renew is active and profile has a card
-        const cost = currentPlanStr === "personal" ? 150 : 300;
-        try {
-          if (onSaveProfile) {
-            await onSaveProfile({
-              ...fiscalProfile,
-              planStartDate: new Date().toISOString()
-            });
-            toast.success(`🔄 Tu plan ${currentPlanStr} se renovó de forma automática y se cobraron $${cost} MXN a tu tarjeta.`, "Plan Renovado");
-          }
-        } catch (err) {
-          toast.error("Fallo al renovar tu plan automáticamente de tu tarjeta registrada.");
-          return;
-        }
-      } else {
-        // Manual block
-        setBlockerReason(cycleCount >= limit ? "limit" : "month");
-        setShowRenewalBlocker(true);
-        return;
-      }
+      // Manual block - redirects user to their account/plans tab where they can upgrade/renew
+      setBlockerReason(cycleCount >= limit ? "limit" : "month");
+      setShowRenewalBlocker(true);
+      return;
     }
 
     setActiveStep("automating");
@@ -1096,32 +1091,32 @@ export default function ScannerAndSimulator({
               <ShieldAlert className="w-8 h-8" />
             </div>
             
-            <div className="space-y-2">
+            <div className="space-y-2 font-sans">
               <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">
                 {blockerReason === "limit" ? "Límite de Facturas Alcanzado" : "Mes de Cobertura Vencido"}
               </h3>
               <p className="text-xs text-slate-500 leading-relaxed font-semibold">
                 {blockerReason === "limit"
-                  ? `Has alcanzado el límite de tu plan actual (${fiscalProfile?.plan === "personal" ? "20" : fiscalProfile?.plan === "empresa" ? "60" : "5"} facturas).`
+                  ? `Has alcanzado el límite de tu plan actual (${fiscalProfile?.plan === "brisa" ? "10" : fiscalProfile?.plan === "serenidad" ? "30" : fiscalProfile?.plan === "nirvana" ? "100" : "5"} facturas).`
                   : "Tu cobertura mensual de facturación ha vencido desde tu última fecha de pago."
-                } Para seguir timbrando facturas, debes de renovar tu paquete. ¿Deseas proceder con el pago mensual ahora?
+                } Para seguir timbrando facturas, debes de actualizar o renovar tu paquete desde la sección de facturación.
               </p>
             </div>
 
-            <div className="w-full bg-slate-50 rounded-2.5xl p-4.5 text-left border border-slate-200/50 space-y-3">
+            <div className="w-full bg-slate-50 rounded-2.5xl p-4.5 text-left border border-slate-200/50 space-y-3 font-sans">
               <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block font-mono">
                 DETALLE DE TRANSACCIÓN
               </span>
               <div className="flex justify-between items-center text-xs font-bold">
                 <span className="text-slate-600">Suscripción actual:</span>
                 <span className="text-slate-900 font-extrabold capitalize">
-                  {fiscalProfile?.plan === "personal" ? "Plan Personal (20 facturas)" : fiscalProfile?.plan === "empresa" ? "Plan Empresa (60 facturas)" : "Plan Gratuito (5 facturas)"}
+                  {fiscalProfile?.plan === "brisa" ? "Plan Brisa (10 facturas)" : fiscalProfile?.plan === "serenidad" ? "Plan Serenidad (30 facturas)" : fiscalProfile?.plan === "nirvana" ? "Plan Nirvana (100 facturas)" : "Plan Gratuito (5 facturas)"}
                 </span>
               </div>
-              <div className="flex justify-between items-center text-xs font-bold pt-1.5 border-t border-slate-100">
-                <span className="text-slate-600">Costo mensual:</span>
+              <div className="flex justify-between items-center text-xs font-bold pt-1.5 border-t border-slate-100 font-mono">
+                <span className="text-slate-600 font-sans">Costo mensual:</span>
                 <span className="text-[#0B53F4] font-black text-sm">
-                  {fiscalProfile?.plan === "personal" ? "$150.00 MXN" : fiscalProfile?.plan === "empresa" ? "$300.00 MXN" : "Contratar Plan ($150 - $300 MXN)"}
+                  {fiscalProfile?.plan === "brisa" ? "$99.00 MXN" : fiscalProfile?.plan === "serenidad" ? "$250.00 MXN" : fiscalProfile?.plan === "nirvana" ? "$500.00 MXN" : "Contratar Plan ($99 - $500 MXN)"}
                 </span>
               </div>
             </div>
@@ -1133,42 +1128,10 @@ export default function ScannerAndSimulator({
                   setShowRenewalBlocker(false);
                   if (onTabChange) onTabChange("cuenta");
                 }}
-                className="flex-1 py-3 px-4.5 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] text-xs font-black rounded-xl transition cursor-pointer text-center border-none shadow-2xs"
+                className="w-full py-3 px-4.5 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-black rounded-xl transition cursor-pointer text-center font-bold shadow-md shadow-[#0B53F4]/10"
               >
-                Ver Planes
+                Ver Planes y Facturación
               </button>
-              
-              {fiscalProfile?.plan !== "gratuito" ? (
-                <button
-                  type="button"
-                  disabled={isProcessingRenewalPay}
-                  onClick={handleManualRenewalPay}
-                  className="flex-3 py-3 px-4.5 bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-50 text-white text-xs font-black rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-md shadow-[#0B53F4]/15"
-                >
-                  {isProcessingRenewalPay ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Procesando pago...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CreditCard className="w-4 h-4" />
-                      <span>Renovar Ahora</span>
-                    </>
-                  )}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowRenewalBlocker(false);
-                    if (onTabChange) onTabChange("cuenta");
-                  }}
-                  className="flex-3 py-3 px-4.5 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-black rounded-xl transition cursor-pointer text-center font-bold shadow-md"
-                >
-                  Contratar Plan
-                </button>
-              )}
             </div>
             
             <button
@@ -1294,7 +1257,11 @@ export default function ScannerAndSimulator({
                     <span className="text-[9px] text-blue-200 block mt-0.5 font-bold leading-normal">
                       {(() => {
                         const plan = fiscalProfile?.plan || "gratuito";
-                        const limit = plan === "empresa" ? 60 : plan === "personal" ? 20 : 5;
+                        let limit = 5;
+                        if (plan === "brisa") limit = 10;
+                        else if (plan === "serenidad") limit = 30;
+                        else if (plan === "nirvana") limit = 100;
+
                         const planStartDateStr = fiscalProfile?.planStartDate || fiscalProfile?.createdAt || new Date().toISOString();
                         const planStartDate = new Date(planStartDateStr);
                         const cycleInvoices = (invoices || []).filter(inv => {
