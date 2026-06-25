@@ -12,6 +12,21 @@ import { auth } from "@/services/firebase/firebase";
 import { signOut } from "firebase/auth";
 import { useToast } from "@/shared/feedback/Toast";
 
+// Bank and payment method logos
+import santanderLogo from "@/assets/logos pagos/Banco_Santander_Logotipo.png";
+import hsbcLogo from "@/assets/logos pagos/HSBC_Logo.png";
+import aztecaLogo from "@/assets/logos pagos/Logo_Banco_Azteca.png";
+import banamexLogo from "@/assets/logos pagos/Logo_de_Banamex.png";
+import banorteLogo from "@/assets/logos pagos/Logo_de_Banorte.png";
+import inbursaLogo from "@/assets/logos pagos/Logo_de_Inbursa.png";
+import mercadoPagoLogo from "@/assets/logos pagos/Mercado Pago Logo.png";
+import scotiabankLogo from "@/assets/logos pagos/Scotiabank_logo.png";
+import stripeLogo from "@/assets/logos pagos/Stripe_Logo.png";
+import applePayLogo from "@/assets/logos pagos/apple-pay-logo.png";
+import bbvaLogo from "@/assets/logos pagos/bbva-logo.png";
+import googlePayLogo from "@/assets/logos pagos/google-pay-logo.png";
+import paypalLogo from "@/assets/logos pagos/paypal-logo-2.png";
+
 interface ProfileFormProps {
   initialProfile: any; // Allow flexible properties like planStartDate, autoRenew
   onSave: (profile: any) => Promise<void>;
@@ -151,6 +166,98 @@ export default function ProfileForm({
       return { bankName: "American Express", bgColor: "from-cyan-950 to-slate-900", logoColor: "text-cyan-300", label: "AMEX" };
     }
     return { bankName: "Tarjeta Bancaria", bgColor: "from-slate-900 to-slate-800", logoColor: "text-slate-350", label: "BANCARIA" };
+  };
+
+  const getCardLogo = (card: any) => {
+    if (card.brand === "MERCADOPAGO") return mercadoPagoLogo;
+    if (card.brand === "PAYPAL") return paypalLogo;
+    if (card.brand === "APPLEPAY") return applePayLogo;
+    if (card.brand === "GOOGLEPAY") return googlePayLogo;
+
+    const bankInfo = getCardBankInfo(card.last4 ? "4" + card.last4 : "4");
+    const bank = bankInfo.bankName.toLowerCase();
+    
+    if (bank.includes("bbva")) return bbvaLogo;
+    if (bank.includes("santander")) return santanderLogo;
+    if (bank.includes("banamex") || bank.includes("citibanamex")) return banamexLogo;
+    if (bank.includes("banorte")) return banorteLogo;
+    if (bank.includes("hsbc")) return hsbcLogo;
+    if (bank.includes("scotiabank")) return scotiabankLogo;
+    if (bank.includes("azteca")) return aztecaLogo;
+    if (bank.includes("inbursa")) return inbursaLogo;
+
+    return null;
+  };
+
+  const renderVisualBrandBlock = (card: any, size: "sm" | "md" = "md") => {
+    const logoSrc = getCardLogo(card);
+    const sizeClasses = size === "sm" ? "w-10 h-6 text-[8px]" : "w-12 h-8 text-[10px]";
+    
+    if (logoSrc) {
+      return (
+        <img 
+          src={logoSrc} 
+          className={`${sizeClasses} object-contain bg-white rounded-lg p-1 border border-slate-200 shadow-3xs shrink-0 select-none`} 
+          alt={card.brand} 
+        />
+      );
+    }
+
+    if (card.brand === "VISA") {
+      return (
+        <div className={`${sizeClasses} bg-[#010915] rounded-lg flex items-center justify-center text-white font-serif font-extrabold italic tracking-wider select-none shadow-sm shrink-0`}>
+          VISA
+        </div>
+      );
+    }
+    if (card.brand === "AMEX") {
+      return (
+        <div className={`${sizeClasses} bg-cyan-700 rounded-lg flex items-center justify-center ${size === "sm" ? "text-[7.5px]" : "text-[8.5px]"} text-white font-mono font-black tracking-widest select-none shadow-sm shrink-0`}>
+          AMEX
+        </div>
+      );
+    }
+    if (card.brand === "MERCADOPAGO") {
+      return (
+        <div className={`${sizeClasses} bg-[#00A6EA] rounded-lg flex items-center justify-center text-white font-sans font-black select-none shadow-sm shrink-0`}>
+          MP
+        </div>
+      );
+    }
+    if (card.brand === "APPLEPAY") {
+      return (
+        <div className={`${sizeClasses} bg-black rounded-lg flex items-center justify-center text-white font-sans font-black select-none shadow-sm shrink-0`}>
+           Pay
+        </div>
+      );
+    }
+    if (card.brand === "GOOGLEPAY") {
+      return (
+        <div className={`${sizeClasses} bg-[#202124] rounded-lg flex items-center justify-center text-white font-sans font-black select-none shadow-sm shrink-0`}>
+          G Pay
+        </div>
+      );
+    }
+    if (card.brand === "SPINBYOXXO") {
+      return (
+        <div className={`${sizeClasses} bg-[#5D2D91] rounded-lg flex items-center justify-center text-white font-sans font-black select-none shadow-sm shrink-0`}>
+          SPIN
+        </div>
+      );
+    }
+    if (card.brand === "PAYPAL") {
+      return (
+        <div className={`${sizeClasses} bg-[#003087] rounded-lg flex items-center justify-center text-white font-sans font-black italic select-none shadow-sm shrink-0`}>
+          PayPal
+        </div>
+      );
+    }
+    return (
+      <div className={`${sizeClasses} bg-rose-600 rounded-lg flex items-center justify-center text-white font-sans font-black italic select-none shadow-sm relative overflow-hidden shrink-0`}>
+        <div className="absolute w-6 h-6 rounded-full bg-amber-500/85 -right-1.5 -bottom-1" />
+        <span className="relative z-10 text-[9px] uppercase tracking-tighter">MC</span>
+      </div>
+    );
   };
 
   const isValidLuhn = (cardNumber: string) => {
@@ -1511,9 +1618,7 @@ export default function ProfileForm({
                               }`}
                             >
                               <div className="flex items-center gap-3">
-                                <div className="w-10 h-6 bg-slate-900 rounded flex items-center justify-center text-[8px] text-white font-extrablack italic tracking-tight select-none">
-                                  {card.brand}
-                                </div>
+                                {renderVisualBrandBlock(card, "sm")}
                                 <div className="leading-tight">
                                   <span className="text-xs font-extrabold text-slate-850 block">•••• {card.last4}</span>
                                   <span className="text-[9px] text-slate-400 block font-mono">Expira: {card.expiry}</span>
@@ -1543,9 +1648,9 @@ export default function ProfileForm({
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
                         onClick={() => handleDigitalWalletPayment("Stripe")}
-                        className="bg-[#635BFF] hover:bg-[#5b52ea] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55 col-span-1 sm:col-span-2 shadow-md shadow-[#635BFF]/15"
+                        className="bg-[#635BFF] hover:bg-[#5b52ea] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55 col-span-1 sm:col-span-2 shadow-md shadow-[#635BFF]/15"
                       >
-                        <CreditCard className="w-4 h-4 text-white" />
+                        <img src={stripeLogo} className="h-5 w-auto object-contain bg-white rounded py-0.5 px-1.5 shadow-3xs" alt="Stripe" />
                         <span>Pagar con Tarjeta (Stripe Checkout)</span>
                       </button>
 
@@ -1554,11 +1659,9 @@ export default function ProfileForm({
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
                         onClick={() => handleDigitalWalletPayment("Google Pay")}
-                        className="bg-black hover:bg-zinc-900 duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer select-none active:scale-[0.98] border border-zinc-800 disabled:opacity-55"
+                        className="bg-black hover:bg-zinc-900 duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] border border-zinc-800 disabled:opacity-55"
                       >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-                          <path d="M12.24 10.285V14.4h6.887C18.6 16.513 16 18.257 12.24 18.257c-4.6 0-8.328-3.728-8.328-8.328s3.728-8.328 8.328-8.328c2.057 0 3.943.771 5.388 2.115l3.235-3.235C18.423.857 15.514 0 12.24 0 5.486 0 0 5.486 0 12.24s5.486 12.24 12.24 12.24c6.754 0 12.24-5.486 12.24-12.24 0-.857-.086-1.686-.257-2.457h-11.98z" fill="white"/>
-                        </svg>
+                        <img src={googlePayLogo} className="h-5 w-auto object-contain" alt="Google Pay" />
                         <span>Pagar con Google Pay</span>
                       </button>
 
@@ -1567,9 +1670,9 @@ export default function ProfileForm({
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
                         onClick={() => handleDigitalWalletPayment("Apple Pay")}
-                        className="bg-zinc-900 hover:bg-black duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer select-none active:scale-[0.98] border border-zinc-800 disabled:opacity-55"
+                        className="bg-zinc-900 hover:bg-black duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] border border-zinc-800 disabled:opacity-55"
                       >
-                        <span className="text-sm font-sans"></span>
+                        <img src={applePayLogo} className="h-5 w-auto object-contain invert" alt="Apple Pay" />
                         <span>Pagar con Apple Pay</span>
                       </button>
 
@@ -1578,9 +1681,9 @@ export default function ProfileForm({
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
                         onClick={() => handleDigitalWalletPayment("PayPal")}
-                        className="bg-[#003087] hover:bg-[#002466] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
+                        className="bg-[#003087] hover:bg-[#002466] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
                       >
-                        <span className="font-sans italic font-black">P<span className="text-sky-400">P</span></span>
+                        <img src={paypalLogo} className="h-5 w-auto object-contain bg-white rounded p-0.5 px-1.5 shadow-3xs" alt="PayPal" />
                         <span>Continuar con PayPal</span>
                       </button>
 
@@ -1589,9 +1692,9 @@ export default function ProfileForm({
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
                         onClick={() => handleDigitalWalletPayment("Mercado Pago")}
-                        className="bg-[#2b3a8e] hover:bg-[#1f2a6a] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
+                        className="bg-[#2b3a8e] hover:bg-[#1f2a6a] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
                       >
-                        <span className="font-extrabold text-sky-400">MP</span>
+                        <img src={mercadoPagoLogo} className="h-5 w-auto object-contain bg-white rounded p-0.5 px-1.5 shadow-3xs" alt="Mercado Pago" />
                         <span>Pagar con Mercado Pago</span>
                       </button>
 
@@ -2985,40 +3088,7 @@ export default function ProfileForm({
                   title="Haz click para ver detalles y comprar planes"
                 >
                   {/* Visual Brand Block */}
-                  {card.brand === "VISA" ? (
-                    <div className="w-12 h-8 bg-[#010915] rounded-lg flex items-center justify-center text-[10px] text-white font-serif font-extrabold italic tracking-wider select-none shadow-sm shrink-0">
-                      VISA
-                    </div>
-                  ) : card.brand === "AMEX" ? (
-                    <div className="w-12 h-8 bg-cyan-700 rounded-lg flex items-center justify-center text-[8.5px] text-white font-mono font-black tracking-widest select-none shadow-sm shrink-0">
-                      AMEX
-                    </div>
-                  ) : card.brand === "MERCADOPAGO" ? (
-                    <div className="w-12 h-8 bg-[#00A6EA] rounded-lg flex items-center justify-center text-[10px] text-white font-sans font-black select-none shadow-sm shrink-0">
-                      MP
-                    </div>
-                  ) : card.brand === "APPLEPAY" ? (
-                    <div className="w-12 h-8 bg-black rounded-lg flex items-center justify-center text-[12px] text-white font-sans font-black select-none shadow-sm shrink-0">
-                       Pay
-                    </div>
-                  ) : card.brand === "GOOGLEPAY" ? (
-                    <div className="w-12 h-8 bg-[#202124] rounded-lg flex items-center justify-center text-[9px] text-white font-sans font-black select-none shadow-sm shrink-0">
-                      G Pay
-                    </div>
-                  ) : card.brand === "SPINBYOXXO" ? (
-                    <div className="w-12 h-8 bg-[#5D2D91] rounded-lg flex items-center justify-center text-[9px] text-white font-sans font-black select-none shadow-sm shrink-0">
-                      SPIN
-                    </div>
-                  ) : card.brand === "PAYPAL" ? (
-                    <div className="w-12 h-8 bg-[#003087] rounded-lg flex items-center justify-center text-[9px] text-white font-sans font-black italic select-none shadow-sm shrink-0">
-                      PayPal
-                    </div>
-                  ) : (
-                    <div className="w-12 h-8 bg-rose-600 rounded-lg flex items-center justify-center text-xs text-white font-sans font-black italic select-none shadow-sm relative overflow-hidden shrink-0">
-                      <div className="absolute w-6 h-6 rounded-full bg-amber-500/85 -right-1.5 -bottom-1" />
-                      <span className="relative z-10 text-[9px] uppercase tracking-tighter">MC</span>
-                    </div>
-                  )}
+                  {renderVisualBrandBlock(card, "md")}
 
                   <div className="text-left leading-none">
                     <span className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
