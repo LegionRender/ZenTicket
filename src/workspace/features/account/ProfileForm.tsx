@@ -174,10 +174,15 @@ export default function ProfileForm({
     if (card.brand === "APPLEPAY") return applePayLogo;
     if (card.brand === "GOOGLEPAY") return googlePayLogo;
 
-    const bankInfo = getCardBankInfo(card.last4 ? "4" + card.last4 : "4");
-    const bank = bankInfo.bankName.toLowerCase();
+    let bankName = card.bankName || "";
+    if (!bankName) {
+      const bankInfo = getCardBankInfo(card.last4 ? "4" + card.last4 : "4");
+      bankName = bankInfo.bankName;
+    }
     
-    if (bank.includes("bbva")) return bbvaLogo;
+    const bank = bankName.toLowerCase();
+    
+    if (bank.includes("bbva") || bank.includes("bancomer")) return bbvaLogo;
     if (bank.includes("santander")) return santanderLogo;
     if (bank.includes("banamex") || bank.includes("citibanamex")) return banamexLogo;
     if (bank.includes("banorte")) return banorteLogo;
@@ -195,66 +200,67 @@ export default function ProfileForm({
     
     if (logoSrc) {
       return (
-        <img 
-          src={logoSrc} 
-          className={`${sizeClasses} object-contain bg-white rounded-lg p-1 border border-slate-200 shadow-3xs shrink-0 select-none`} 
-          alt={card.brand} 
-        />
+        <div className={`${sizeClasses} bg-white rounded-lg p-1 border border-slate-200 shadow-3xs flex items-center justify-center shrink-0`}>
+          <img 
+            src={logoSrc} 
+            className="w-full h-full object-contain select-none" 
+            alt={card.brand} 
+          />
+        </div>
       );
     }
 
     if (card.brand === "VISA") {
       return (
-        <div className={`${sizeClasses} bg-[#010915] rounded-lg flex items-center justify-center text-white font-serif font-extrabold italic tracking-wider select-none shadow-sm shrink-0`}>
+        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-[#010915] font-serif font-extrabold italic tracking-wider select-none shadow-sm shrink-0`}>
           VISA
         </div>
       );
     }
     if (card.brand === "AMEX") {
       return (
-        <div className={`${sizeClasses} bg-cyan-700 rounded-lg flex items-center justify-center ${size === "sm" ? "text-[7.5px]" : "text-[8.5px]"} text-white font-mono font-black tracking-widest select-none shadow-sm shrink-0`}>
+        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 ${size === "sm" ? "text-[7.5px]" : "text-[8.5px]"} text-[#00829B] font-mono font-black tracking-widest select-none shadow-sm shrink-0`}>
           AMEX
         </div>
       );
     }
     if (card.brand === "MERCADOPAGO") {
       return (
-        <div className={`${sizeClasses} bg-[#00A6EA] rounded-lg flex items-center justify-center text-white font-sans font-black select-none shadow-sm shrink-0`}>
+        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-[#00A6EA] font-sans font-black select-none shadow-sm shrink-0`}>
           MP
         </div>
       );
     }
     if (card.brand === "APPLEPAY") {
       return (
-        <div className={`${sizeClasses} bg-black rounded-lg flex items-center justify-center text-white font-sans font-black select-none shadow-sm shrink-0`}>
+        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-black font-sans font-black select-none shadow-sm shrink-0`}>
            Pay
         </div>
       );
     }
     if (card.brand === "GOOGLEPAY") {
       return (
-        <div className={`${sizeClasses} bg-[#202124] rounded-lg flex items-center justify-center text-white font-sans font-black select-none shadow-sm shrink-0`}>
+        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-[#202124] font-sans font-black select-none shadow-sm shrink-0`}>
           G Pay
         </div>
       );
     }
     if (card.brand === "SPINBYOXXO") {
       return (
-        <div className={`${sizeClasses} bg-[#5D2D91] rounded-lg flex items-center justify-center text-white font-sans font-black select-none shadow-sm shrink-0`}>
+        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-[#5D2D91] font-sans font-black select-none shadow-sm shrink-0`}>
           SPIN
         </div>
       );
     }
     if (card.brand === "PAYPAL") {
       return (
-        <div className={`${sizeClasses} bg-[#003087] rounded-lg flex items-center justify-center text-white font-sans font-black italic select-none shadow-sm shrink-0`}>
+        <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-[#003087] font-sans font-black italic select-none shadow-sm shrink-0`}>
           PayPal
         </div>
       );
     }
     return (
-      <div className={`${sizeClasses} bg-rose-600 rounded-lg flex items-center justify-center text-white font-sans font-black italic select-none shadow-sm relative overflow-hidden shrink-0`}>
-        <div className="absolute w-6 h-6 rounded-full bg-amber-500/85 -right-1.5 -bottom-1" />
+      <div className={`${sizeClasses} bg-white rounded-lg flex items-center justify-center border border-slate-200 text-rose-600 font-sans font-black italic select-none shadow-sm relative overflow-hidden shrink-0`}>
         <span className="relative z-10 text-[9px] uppercase tracking-tighter">MC</span>
       </div>
     );
@@ -2676,7 +2682,7 @@ export default function ProfileForm({
                     onClick={() => setAddingMethodStep("card")}
                     className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#0B53F4] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#0B53F4] flex items-center justify-center group-hover:bg-[#0B53F4] group-hover:text-white transition">
+                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-[#0B53F4] flex items-center justify-center transition shrink-0">
                       <CreditCard className="w-5 h-5" />
                     </div>
                     <div>
@@ -2694,8 +2700,8 @@ export default function ProfileForm({
                     }}
                     className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#00A6EA] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-cyan-50 text-[#00A6EA] flex items-center justify-center font-sans font-extrabold text-sm group-hover:bg-[#00A6EA] group-hover:text-white transition">
-                      MP
+                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center transition shrink-0">
+                      <img src={mercadoPagoLogo} className="w-7 h-7 object-contain" alt="Mercado Pago" />
                     </div>
                     <div>
                       <span className="text-xs font-black text-slate-850 block">Mercado Pago</span>
@@ -2712,8 +2718,8 @@ export default function ProfileForm({
                     }}
                     className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-black hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-slate-100 text-black flex items-center justify-center font-sans font-extrabold text-lg group-hover:bg-black group-hover:text-white transition">
-                      
+                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center transition shrink-0">
+                      <img src={applePayLogo} className="w-8 h-8 object-contain" alt="Apple Pay" />
                     </div>
                     <div>
                       <span className="text-xs font-black text-slate-850 block">Apple Pay</span>
@@ -2730,8 +2736,8 @@ export default function ProfileForm({
                     }}
                     className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#202124] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-slate-100 text-[#202124] flex items-center justify-center font-sans font-black text-[10px] group-hover:bg-[#202124] group-hover:text-white transition">
-                      G Pay
+                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center transition shrink-0">
+                      <img src={googlePayLogo} className="w-8 h-8 object-contain" alt="Google Pay" />
                     </div>
                     <div>
                       <span className="text-xs font-black text-slate-850 block">Google Pay</span>
@@ -2748,7 +2754,7 @@ export default function ProfileForm({
                     }}
                     className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#5D2D91] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group col-span-1 sm:col-span-2"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-purple-50 text-[#5D2D91] flex items-center justify-center font-sans font-black text-xs group-hover:bg-[#5D2D91] group-hover:text-white transition shrink-0">
+                    <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-[#5D2D91] flex items-center justify-center font-sans font-black text-xs transition shrink-0">
                       SPIN
                     </div>
                     <div>
