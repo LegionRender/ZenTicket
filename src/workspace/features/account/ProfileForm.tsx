@@ -719,7 +719,7 @@ export default function ProfileForm({
   // Add Card Form State
   const [addingCard, setAddingCard] = useState(false);
   const [addingMethodStep, setAddingMethodStep] = useState<"select" | "card" | "connecting">("select");
-  const [selectedMethodToAdd, setSelectedMethodToAdd] = useState<"MERCADOPAGO" | "APPLEPAY" | "GOOGLEPAY" | "SPINBYOXXO" | null>(null);
+  const [selectedMethodToAdd, setSelectedMethodToAdd] = useState<"MERCADOPAGO" | "APPLEPAY" | "GOOGLEPAY" | "SPINBYOXXO" | "PAYPAL" | null>(null);
   const [newCardNumber, setNewCardNumber] = useState("");
   const [newCardExpiry, setNewCardExpiry] = useState("");
   const [newCardCvv, setNewCardCvv] = useState("");
@@ -743,7 +743,8 @@ export default function ProfileForm({
           isDefault: cards.length === 0,
           bankName: method === "MERCADOPAGO" ? "Mercado Pago" : 
                     method === "APPLEPAY" ? "Apple Pay" : 
-                    method === "GOOGLEPAY" ? "Google Pay" : "Spin by OXXO"
+                    method === "GOOGLEPAY" ? "Google Pay" : 
+                    method === "PAYPAL" ? "PayPal" : "Spin by OXXO"
         };
         
         const updatedCards = [...cards, newWalletCard];
@@ -2721,6 +2722,24 @@ export default function ProfileForm({
                     </div>
                   </button>
 
+                  {/* PayPal */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMethodToAdd("PAYPAL");
+                      setAddingMethodStep("connecting");
+                    }}
+                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#0070ba] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+                  >
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
+                      <img src={paypalLogo} className="w-8 h-8 object-contain" alt="PayPal" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-black text-slate-850 block">PayPal</span>
+                      <span className="text-[9px] text-slate-400 font-bold block">Pago rápido y seguro</span>
+                    </div>
+                  </button>
+
                   {/* Mercado Pago */}
                   <button
                     type="button"
@@ -2782,7 +2801,7 @@ export default function ProfileForm({
                       setSelectedMethodToAdd("SPINBYOXXO");
                       setAddingMethodStep("connecting");
                     }}
-                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#5D2D91] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group col-span-1 sm:col-span-2"
+                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#5D2D91] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
                   >
                     <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
                       <img src={spinLogo} className="w-8 h-8 object-contain" alt="Spin by OXXO" />
@@ -3079,14 +3098,16 @@ export default function ProfileForm({
                   <div className="absolute inset-0 flex items-center justify-center font-sans font-black text-xs text-slate-500">
                     {selectedMethodToAdd === "MERCADOPAGO" ? "MP" : 
                      selectedMethodToAdd === "APPLEPAY" ? "" : 
-                     selectedMethodToAdd === "GOOGLEPAY" ? "G" : "SPIN"}
+                     selectedMethodToAdd === "GOOGLEPAY" ? "G" : 
+                     selectedMethodToAdd === "PAYPAL" ? "PP" : "SPIN"}
                   </div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs font-black text-slate-850 uppercase tracking-wider block">
                     Conectando con {selectedMethodToAdd === "MERCADOPAGO" ? "Mercado Pago" : 
                                     selectedMethodToAdd === "APPLEPAY" ? "Apple Pay" : 
-                                    selectedMethodToAdd === "GOOGLEPAY" ? "Google Pay" : "Spin by OXXO"}
+                                    selectedMethodToAdd === "GOOGLEPAY" ? "Google Pay" : 
+                                    selectedMethodToAdd === "PAYPAL" ? "PayPal" : "Spin by OXXO"}
                   </span>
                   <p className="text-[10px] text-slate-400 font-bold leading-normal max-w-xs">
                     Estableciendo conexión encriptada y autorizando token de facturación recurrente. Por favor espera...

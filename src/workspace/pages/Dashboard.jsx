@@ -425,6 +425,7 @@ export const Dashboard = () => {
     }
 
     const matchedOldUserIds = new Set();
+    let recoveryToastId = null;
 
     try {
       // Query fiscal profiles to find any records with matching email, phone, or RFC belonging to another user
@@ -454,7 +455,7 @@ export const Dashboard = () => {
         return;
       }
 
-      const recoveryToastId = toast.loading("Sincronizando y recuperando historial de cuenta detectado...");
+      recoveryToastId = toast.loading("Sincronizando y recuperando historial de cuenta detectado...");
 
       let totalTicketsMigrated = 0;
       let totalInvoicesMigrated = 0;
@@ -468,50 +469,73 @@ export const Dashboard = () => {
         }
 
         // Migrate tickets
-        const qTickets = query(collection(db, "tickets"), where("userId", "==", oldUid));
-        const snapTickets = await getDocs(qTickets);
-        for (const tDoc of snapTickets.docs) {
-          await setDoc(doc(db, "tickets", tDoc.id), { userId: user.uid }, { merge: true });
-          totalTicketsMigrated++;
+        try {
+          const qTickets = query(collection(db, "tickets"), where("userId", "==", oldUid));
+          const snapTickets = await getDocs(qTickets);
+          for (const tDoc of snapTickets.docs) {
+            await setDoc(doc(db, "tickets", tDoc.id), { userId: user.uid }, { merge: true });
+            totalTicketsMigrated++;
+          }
+        } catch (ticketErr) {
+          console.warn(`Could not migrate tickets for user ${oldUid}:`, ticketErr);
         }
 
         // Migrate invoices
-        const qInvoices = query(collection(db, "invoices"), where("userId", "==", oldUid));
-        const snapInvoices = await getDocs(qInvoices);
-        for (const iDoc of snapInvoices.docs) {
-          await setDoc(doc(db, "invoices", iDoc.id), { userId: user.uid }, { merge: true });
-          totalInvoicesMigrated++;
+        try {
+          const qInvoices = query(collection(db, "invoices"), where("userId", "==", oldUid));
+          const snapInvoices = await getDocs(qInvoices);
+          for (const iDoc of snapInvoices.docs) {
+            await setDoc(doc(db, "invoices", iDoc.id), { userId: user.uid }, { merge: true });
+            totalInvoicesMigrated++;
+          }
+        } catch (invoiceErr) {
+          console.warn(`Could not migrate invoices for user ${oldUid}:`, invoiceErr);
         }
 
         // Migrate connectors
-        const qConnectors = query(collection(db, "connectors"), where("userId", "==", oldUid));
-        const snapConnectors = await getDocs(qConnectors);
-        for (const cDoc of snapConnectors.docs) {
-          await setDoc(doc(db, "connectors", cDoc.id), { userId: user.uid }, { merge: true });
-          totalConnectorsMigrated++;
+        try {
+          const qConnectors = query(collection(db, "connectors"), where("userId", "==", oldUid));
+          const snapConnectors = await getDocs(qConnectors);
+          for (const cDoc of snapConnectors.docs) {
+            await setDoc(doc(db, "connectors", cDoc.id), { userId: user.uid }, { merge: true });
+            totalConnectorsMigrated++;
+          }
+        } catch (connErr) {
+          console.warn(`Could not migrate connectors for user ${oldUid}:`, connErr);
         }
 
         // Migrate automation trainings
-        const qTrainings = query(collection(db, "automation_trainings"), where("userId", "==", oldUid));
-        const snapTrainings = await getDocs(qTrainings);
-        for (const trDoc of snapTrainings.docs) {
-          await setDoc(doc(db, "automation_trainings", trDoc.id), { userId: user.uid }, { merge: true });
+        try {
+          const qTrainings = query(collection(db, "automation_trainings"), where("userId", "==", oldUid));
+          const snapTrainings = await getDocs(qTrainings);
+          for (const trDoc of snapTrainings.docs) {
+            await setDoc(doc(db, "automation_trainings", trDoc.id), { userId: user.uid }, { merge: true });
+          }
+        } catch (trainErr) {
+          console.warn(`Could not migrate automation trainings for user ${oldUid}:`, trainErr);
         }
       }
 
       if (recoveredProfileData) {
-        const currentProfileRef = doc(db, "fiscalProfiles", user.uid);
-        await setDoc(currentProfileRef, {
-          ...recoveredProfileData,
-          userId: user.uid,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
+        try {
+          const currentProfileRef = doc(db, "fiscalProfiles", user.uid);
+          await setDoc(currentProfileRef, {
+            ...recoveredProfileData,
+            userId: user.uid,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        } catch (profileWriteErr) {
+          console.warn(`Could not merge profile data for user ${user.uid}:`, profileWriteErr);
+        }
       }
 
-      toast.dismiss(recoveryToastId);
       toast.success(`🎉 ¡Memoria sincronizada! Recuperamos ${totalTicketsMigrated} tickets, ${totalInvoicesMigrated} CFDI y ${totalConnectorsMigrated} conectores de tu historial previo.`);
     } catch (err) {
       console.error("Error in historical recovery:", err);
+    } finally {
+      if (recoveryToastId) {
+        toast.dismiss(recoveryToastId);
+      }
     }
   };
 
