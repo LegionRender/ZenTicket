@@ -490,6 +490,12 @@ app.post("/api/billing/checkout/mercadopago", async (req, res) => {
   } else if (planId === "nirvana") {
     price = 500.00;
     title = "Plan Nirvana - ZenTicket";
+  } else if (planId === "personal") {
+    price = 150.00;
+    title = "Plan Personal - ZenTicket";
+  } else if (planId === "empresa") {
+    price = 300.00;
+    title = "Plan Empresa - ZenTicket";
   } else {
     res.status(400).json({ error: "Plan inválido para pago" });
     return;
@@ -572,6 +578,12 @@ app.post("/api/billing/subscription/mercadopago", async (req, res) => {
   } else if (planId === "nirvana") {
     price = 500.00;
     title = "Plan Nirvana - ZenTicket";
+  } else if (planId === "personal") {
+    price = 150.00;
+    title = "Plan Personal - ZenTicket";
+  } else if (planId === "empresa") {
+    price = 300.00;
+    title = "Plan Empresa - ZenTicket";
   } else {
     res.status(400).json({ error: "Plan inválido para suscripción" });
     return;
@@ -648,6 +660,12 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
   } else if (planId === "nirvana") {
     price = 500.00;
     title = "Plan Nirvana - ZenTicket";
+  } else if (planId === "personal") {
+    price = 150.00;
+    title = "Plan Personal - ZenTicket";
+  } else if (planId === "empresa") {
+    price = 300.00;
+    title = "Plan Empresa - ZenTicket";
   } else {
     res.status(400).json({ error: "Plan inválido para pago" });
     return;
@@ -699,7 +717,7 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
       updatedAt: new Date().toISOString()
     });
 
-    res.json({ checkoutUrl: approvalUrl });
+    res.json({ checkoutUrl: approvalUrl, orderId: order.id });
   } catch (error) {
     console.error("Error al crear orden en PayPal:", error.response?.data || error.message);
     res.status(500).json({ error: "Error al comunicarse con PayPal" });
@@ -969,6 +987,11 @@ app.get("/api/billing/status/:userId", async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// Get PayPal Client ID safely for frontend SDK
+app.get("/api/config/paypal-client-id", (req, res) => {
+  res.json({ clientId: process.env.PAYPAL_CLIENT_ID || "" });
 });
 
 // 7. Cancel Subscription

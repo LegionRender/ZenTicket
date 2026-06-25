@@ -66,6 +66,32 @@ function getDeviceModel(): { name: string; os: string } {
   return { name, os };
 }
 
+const loadScript = (src: string): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = (err) => reject(err);
+    document.body.appendChild(script);
+  });
+};
+
+const fetchPayPalClientId = async (): Promise<string> => {
+  try {
+    const res = await fetch("/api/config/paypal-client-id");
+    const data = await res.json();
+    return data.clientId;
+  } catch (err) {
+    console.error("Error fetching PayPal client ID:", err);
+    return "";
+  }
+};
+
 export default function ProfileForm({ 
   initialProfile, 
   onSave, 
@@ -137,8 +163,136 @@ export default function ProfileForm({
   const handleDigitalWalletPayment = async (walletName: string) => {
     if (isProcessingWallet || isProcessingPayment) return;
     setIsProcessingWallet(true);
+
+    if (walletName === "Google Pay") {
+      toast.info("Cargando servicios seguros de Google Pay...", "Google Pay");
+      
+      try {
+        // 1. Load Google Pay and PayPal SDKs
+        await loadScript("https://pay.google.com/gp/p/js/pay.js");
+        
+        const clientId = await fetchPayPalClientId();
+        if (!clientId) {
+          throw new Error("No se pudo obtener el Client ID de PayPal.");
+        }
+        
+        await loadScript(`https://www.sandbox.paypal.com/sdk/js?client-id=${clientId}&currency=MXN&components=googlepay`);
+        
+        if (!(window as any).paypal || !(window as any).paypal.Googlepay) {
+          throw new Error("El SDK de Google Pay de PayPal no se pudo inicializar.");
+        }
+        
+        const googlePay = (window as any).paypal.Googlepay();
+        const gpayConfig = await googlePay.config();
+        
+        // 2. Initialize Google Pay Client
+        const paymentsClient = new (window as any).google.payments.api.PaymentsClient({
+          environment: "TEST" // Sandbox environment
+        });
+        
+        // Check if GPay is eligible
+        const isReadyToPayRequest = {
+          apiVersion: 2,
+          apiVersionMinor: 0,
+          allowedPaymentMethods: gpayConfig.allowedPaymentMethods
+        };
+        
+        const isReady = await paymentsClient.isReadyToPay(isReadyToPayRequest);
+        if (!isReady.result) {
+          throw new Error("Google Pay no está disponible en este dispositivo o navegador.");
+        }
+        
+        // 3. Create PayPal Order
+        toast.info("Generando orden de pago en PayPal...", "Procesando Orden");
+        const checkoutPlan = checkoutPlanType || "brisa"; // Fallback if null
+        
+        const orderRes = await fetch("/api/billing/checkout/paypal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: initialProfile?.userId || "guest",
+            planId: checkoutPlan
+          })
+        });
+        
+        if (!orderRes.ok) {
+          const errData = await orderRes.json();
+          throw new Error(errData.error || "Fallo al crear orden de PayPal");
+        }
+        
+        const orderData = await orderRes.json();
+        const orderId = orderData.orderId;
+        
+        if (!orderId) {
+          throw new Error("No se recibió el ID de orden desde PayPal.");
+        }
+        
+        // 4. Open Google Pay Payment Sheet
+        toast.info("Abriendo ventana segura de Google Pay...", "Google Pay");
+        
+        const price = checkoutPlan === "personal" ? 150.00 : checkoutPlan === "empresa" ? 300.00 : checkoutPlan === "brisa" ? 99.00 : checkoutPlan === "serenidad" ? 250.00 : 500.00;
+        const paymentDataRequest = {
+          apiVersion: 2,
+          apiVersionMinor: 0,
+          allowedPaymentMethods: gpayConfig.allowedPaymentMethods,
+          transactionInfo: {
+            totalPriceStatus: "FINAL",
+            totalPrice: price.toFixed(2),
+            currencyCode: "MXN",
+            countryCode: "MX"
+          },
+          merchantInfo: {
+            merchantName: "ZenTicket - Ricardo Castro Becerril"
+          }
+        };
+        
+        const paymentData = await paymentsClient.loadPaymentData(paymentDataRequest);
+        
+        // 5. Confirm Order on PayPal
+        toast.info("Capturando fondos y activando suscripción...", "Procesando Cobro");
+        
+        const confirmResult = await googlePay.confirmOrder({
+          orderId: orderId,
+          paymentMethodData: paymentData.paymentMethodData
+        });
+        
+        if (confirmResult.status === "APPROVED") {
+          // Success! Update Firestore and display toast
+          await onSave({
+            userId: initialProfile?.userId || "guest",
+            rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
+            razonSocial: razonSocial?.trim().toUpperCase() || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
+            regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
+            codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
+            usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
+            createdAt: initialProfile?.createdAt || new Date().toISOString(),
+            personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
+            plan: checkoutPlan,
+            planStartDate: new Date().toISOString(),
+            autoRenew: autoRenewChoice,
+            paymentCards: cards
+          });
+          
+          toast.success(
+            `¡Pago aprobado con éxito! Tu suscripción al Plan ${checkoutPlan.toUpperCase()} de ZenTicket está activa y se cobraron $${price} MXN a través de Google Pay.`,
+            "Suscripción Lista"
+          );
+          setCheckoutPlanType(null);
+          setActiveModal(null);
+        } else {
+          throw new Error(`La transacción no fue aprobada (Estado: ${confirmResult.status}).`);
+        }
+      } catch (err: any) {
+        console.error("GPay integration error:", err);
+        toast.error(err.message || "Error al completar el pago con Google Pay. Intente otro método.");
+      } finally {
+        setIsProcessingWallet(false);
+      }
+      return;
+    }
+
+    // Default simulation for other wallets
     const cost = checkoutPlanType === "personal" ? 150 : 300;
-    
     toast.info(`Iniciando conexión segura con ${walletName}... Por favor, autorice la transacción en su cartera digital.`, "Conexión Segura");
 
     // Realistic API interaction timeout
