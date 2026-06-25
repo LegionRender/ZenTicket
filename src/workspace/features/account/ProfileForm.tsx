@@ -1651,44 +1651,21 @@ export default function ProfileForm({
                       O paga al instante con Carteras Digitales
                     </label>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {/* Stripe (Tarjeta de Crédito/Débito) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Stripe Checkout */}
                       <button
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
                         onClick={() => handleDigitalWalletPayment("Stripe")}
-                        className="bg-[#635BFF] hover:bg-[#5b52ea] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55 col-span-1 sm:col-span-2 shadow-md shadow-[#635BFF]/15"
+                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#635BFF] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
                       >
-                        <div style={{ backgroundColor: '#ffffff' }} className="h-6 px-2 rounded flex items-center justify-center shrink-0">
-                          <img src={stripeLogo} className="h-4 w-auto object-contain" alt="Stripe" />
+                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
+                          <img src={stripeLogo} className="w-7.5 h-7.5 object-contain" alt="Stripe" />
                         </div>
-                        <span>Pagar con Tarjeta (Stripe Checkout)</span>
-                      </button>
-
-                      {/* Google Pay */}
-                      <button
-                        type="button"
-                        disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("Google Pay")}
-                        className="bg-black hover:bg-zinc-900 duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] border border-zinc-800 disabled:opacity-55"
-                      >
-                        <div style={{ backgroundColor: '#ffffff' }} className="h-6 px-2 rounded flex items-center justify-center shrink-0">
-                          <img src={googlePayLogo} className="h-4 w-auto object-contain" alt="Google Pay" />
+                        <div>
+                          <span className="text-xs font-black text-slate-850 block">Stripe Checkout</span>
+                          <span className="text-[9px] text-slate-400 font-bold block">Pago seguro con tarjeta</span>
                         </div>
-                        <span>Pagar con Google Pay</span>
-                      </button>
-
-                      {/* Apple Pay */}
-                      <button
-                        type="button"
-                        disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("Apple Pay")}
-                        className="bg-zinc-900 hover:bg-black duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] border border-zinc-800 disabled:opacity-55"
-                      >
-                        <div style={{ backgroundColor: '#ffffff' }} className="h-6 px-2 rounded flex items-center justify-center shrink-0">
-                          <img src={applePayLogo} className="h-4.5 w-auto object-contain" alt="Apple Pay" />
-                        </div>
-                        <span>Pagar con Apple Pay</span>
                       </button>
 
                       {/* PayPal */}
@@ -1696,12 +1673,15 @@ export default function ProfileForm({
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
                         onClick={() => handleDigitalWalletPayment("PayPal")}
-                        className="bg-[#003087] hover:bg-[#002466] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
+                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#0070ba] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
                       >
-                        <div style={{ backgroundColor: '#ffffff' }} className="h-6 px-2 rounded flex items-center justify-center shrink-0">
-                          <img src={paypalLogo} className="h-4 w-auto object-contain" alt="PayPal" />
+                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
+                          <img src={paypalLogo} className="w-8 h-8 object-contain" alt="PayPal" />
                         </div>
-                        <span>Continuar con PayPal</span>
+                        <div>
+                          <span className="text-xs font-black text-slate-850 block">PayPal</span>
+                          <span className="text-[9px] text-slate-400 font-bold block">Pago rápido y seguro</span>
+                        </div>
                       </button>
 
                       {/* Mercado Pago */}
@@ -1709,45 +1689,63 @@ export default function ProfileForm({
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
                         onClick={() => handleDigitalWalletPayment("Mercado Pago")}
-                        className="bg-[#2b3a8e] hover:bg-[#1f2a6a] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
+                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#00A6EA] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
                       >
-                        <div style={{ backgroundColor: '#ffffff' }} className="h-6 px-2 rounded flex items-center justify-center shrink-0">
-                          <img src={mercadoPagoLogo} className="h-4 w-auto object-contain" alt="Mercado Pago" />
+                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
+                          <img src={mercadoPagoLogo} className="w-7 h-7 object-contain" alt="Mercado Pago" />
                         </div>
-                        <span>Pagar con Mercado Pago</span>
+                        <div>
+                          <span className="text-xs font-black text-slate-850 block">Mercado Pago</span>
+                          <span className="text-[9px] text-slate-400 font-bold block">Tu cuenta digital</span>
+                        </div>
                       </button>
 
-                      {/* Amazon Pay */}
+                      {/* Apple Pay */}
                       <button
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("Amazon Pay")}
-                        className="bg-[#fad67d] hover:bg-[#f8c650] duration-150 text-amber-950 font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
+                        onClick={() => handleDigitalWalletPayment("Apple Pay")}
+                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-black hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
                       >
-                        <span className="font-extrabold font-serif italic text-amber-900">a</span>
-                        <span>Pagar con Amazon Pay</span>
+                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
+                          <img src={applePayLogo} className="w-8 h-8 object-contain" alt="Apple Pay" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-black text-slate-850 block">Apple Pay</span>
+                          <span className="text-[9px] text-slate-400 font-bold block">Billetera de Apple</span>
+                        </div>
                       </button>
 
-                      {/* Samsung Wallet */}
+                      {/* Google Pay */}
                       <button
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("Samsung Wallet")}
-                        className="bg-[#002C9B] hover:bg-[#001f6d] duration-150 text-white font-black text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
+                        onClick={() => handleDigitalWalletPayment("Google Pay")}
+                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#202124] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
                       >
-                        <span className="font-sans font-black italic">S</span>
-                        <span>Samsung Wallet</span>
+                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
+                          <img src={googlePayLogo} className="w-8 h-8 object-contain" alt="Google Pay" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-black text-slate-850 block">Google Pay</span>
+                          <span className="text-[9px] text-slate-400 font-bold block">Billetera de Google</span>
+                        </div>
                       </button>
 
-                      {/* Link */}
+                      {/* Spin by OXXO */}
                       <button
                         type="button"
                         disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("Link")}
-                        className="bg-[#00D66F] hover:bg-[#00bd62] duration-150 col-span-1 sm:col-span-2 text-teal-950 font-black text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55"
+                        onClick={() => handleDigitalWalletPayment("Spin by OXXO")}
+                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#5D2D91] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
                       >
-                        <span className="font-serif italic font-black text-emerald-950">link</span>
-                        <span>Pagar al instante con Link</span>
+                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
+                          <img src={spinLogo} className="w-8 h-8 object-contain" alt="Spin by OXXO" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-black text-slate-850 block">Spin by OXXO</span>
+                          <span className="text-[9px] text-slate-400 font-bold block">Tarjeta y app Spin</span>
+                        </div>
                       </button>
                     </div>
                   </div>
