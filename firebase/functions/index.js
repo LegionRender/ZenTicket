@@ -724,6 +724,88 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
   }
 });
 
+// 3.5. Stripe Checkout (Session Creation)
+app.post("/api/billing/checkout/stripe", async (req, res) => {
+  const { userId, planId } = req.body;
+  if (!userId || !planId) {
+    res.status(400).json({ error: "Faltan parámetros userId o planId" });
+    return;
+  }
+
+  let price = 0;
+  let title = "";
+  if (planId === "brisa") {
+    price = 99.00;
+    title = "Plan Brisa - ZenTicket";
+  } else if (planId === "serenidad") {
+    price = 250.00;
+    title = "Plan Serenidad - ZenTicket";
+  } else if (planId === "nirvana") {
+    price = 500.00;
+    title = "Plan Nirvana - ZenTicket";
+  } else if (planId === "personal") {
+    price = 150.00;
+    title = "Plan Personal - ZenTicket";
+  } else if (planId === "empresa") {
+    price = 300.00;
+    title = "Plan Empresa - ZenTicket";
+  } else {
+    res.status(400).json({ error: "Plan inválido para pago" });
+    return;
+  }
+
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuración de pasarela Stripe incompleta en el servidor" });
+    return;
+  }
+
+  try {
+    const response = await axios.post(
+      "https://api.stripe.com/v1/checkout/sessions",
+      new URLSearchParams({
+        "payment_method_types[0]": "card",
+        "line_items[0][price_data][currency]": "mxn",
+        "line_items[0][price_data][product_data][name]": title,
+        "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
+        "line_items[0][quantity]": "1",
+        "mode": "payment",
+        "success_url": process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
+        "cancel_url": process.env.BILLING_FAILURE_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=failure`,
+        "client_reference_id": `${userId}:${planId}`
+      }).toString(),
+      {
+        headers: {
+          Authorization: `Bearer ${stripeSecretKey}`,
+          "Content-Type": "application/x-www-form-urlencoded"
+        }
+      }
+    );
+
+    const session = response.data;
+    const paymentDocId = `stripe_pref_${session.id}`;
+
+    // Register Stripe intent in Firestore
+    await db.collection("payments").doc(paymentDocId).set({
+      userId,
+      planId,
+      provider: "stripe",
+      providerPaymentId: session.id,
+      amount: price,
+      currency: "MXN",
+      status: "pending_payment",
+      checkoutUrl: session.url,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ checkoutUrl: session.url });
+  } catch (error) {
+    console.error("Error al crear sesión en Stripe:", error.response?.data || error.message);
+    res.status(500).json({ error: "Error al comunicarse con Stripe" });
+  }
+});
+
 // 4. Mercado Pago Webhook
 app.post("/api/billing/webhooks/mercadopago", async (req, res) => {
   const paymentId = req.query.id || req.body?.data?.id || req.body?.id;
@@ -787,6 +869,8 @@ app.post("/api/billing/webhooks/mercadopago", async (req, res) => {
             if (planId === "brisa") limit = 10;
             else if (planId === "serenidad") limit = 30;
             else if (planId === "nirvana") limit = 100;
+            else if (planId === "personal") limit = 20;
+            else if (planId === "empresa") limit = 60;
 
             await db.collection("subscriptions").doc(userId).set({
               userId,
@@ -831,6 +915,8 @@ app.post("/api/billing/webhooks/mercadopago", async (req, res) => {
             if (planId === "brisa") limit = 10;
             else if (planId === "serenidad") limit = 30;
             else if (planId === "nirvana") limit = 100;
+            else if (planId === "personal") limit = 20;
+            else if (planId === "empresa") limit = 60;
 
             await db.collection("subscriptions").doc(userId).set({
               userId,
@@ -932,6 +1018,8 @@ app.post("/api/billing/webhooks/paypal", async (req, res) => {
         if (planId === "brisa") limit = 10;
         else if (planId === "serenidad") limit = 30;
         else if (planId === "nirvana") limit = 100;
+        else if (planId === "personal") limit = 20;
+        else if (planId === "empresa") limit = 60;
 
         await db.collection("subscriptions").doc(userId).set({
           userId,
@@ -960,6 +1048,106 @@ app.post("/api/billing/webhooks/paypal", async (req, res) => {
     res.status(200).send("OK");
   } catch (error) {
     console.error("Error al procesar webhook de PayPal:", error.message);
+    res.status(500).send("Error de procesamiento");
+  }
+});
+
+// 5.5. Stripe Webhook
+app.post("/api/billing/webhooks/stripe", async (req, res) => {
+  const event = req.body;
+  console.log(`[Stripe Webhook] Recibido event: ${event?.type}`);
+
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).send("Webhook config error: missing token");
+    return;
+  }
+
+  try {
+    // Record raw event in Firestore
+    await db.collection("billingEvents").add({
+      provider: "stripe",
+      eventType: event.type || "unknown",
+      providerEventId: event.id || "unknown",
+      processed: true,
+      receivedAt: new Date().toISOString()
+    });
+
+    if (event.type === "checkout.session.completed") {
+      const sessionObj = event.data?.object;
+      if (sessionObj && sessionObj.id) {
+        const sessionId = sessionObj.id;
+
+        // Retrieve checkout session from Stripe API to verify payload is authentic
+        const response = await axios.get(
+          `https://api.stripe.com/v1/checkout/sessions/${sessionId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${stripeSecretKey}`
+            }
+          }
+        );
+
+        const session = response.data;
+        const paymentStatus = session.payment_status;
+        const externalReference = session.client_reference_id; // "userId:planId"
+
+        console.log(`[Stripe] Checkout Session retrieve: status=${session.status}, payment_status=${paymentStatus}, ref=${externalReference}`);
+
+        if (paymentStatus === "paid" && externalReference) {
+          const [userId, planId] = externalReference.split(":");
+          const amount = session.amount_total ? session.amount_total / 100 : 0;
+
+          const paymentDocId = `stripe_payment_${session.id}`;
+          await db.collection("payments").doc(paymentDocId).set({
+            userId,
+            planId,
+            provider: "stripe",
+            providerPaymentId: session.id,
+            amount: amount,
+            currency: session.currency?.toUpperCase() || "MXN",
+            status: "paid",
+            paidAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+
+          // Update active subscription
+          let limit = 5;
+          if (planId === "brisa") limit = 10;
+          else if (planId === "serenidad") limit = 30;
+          else if (planId === "nirvana") limit = 100;
+          else if (planId === "personal") limit = 20;
+          else if (planId === "empresa") limit = 60;
+
+          await db.collection("subscriptions").doc(userId).set({
+            userId,
+            planId,
+            planName: planId === "personal" ? "Plan Personal" : planId === "empresa" ? "Plan Empresa" : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
+            status: "subscription_active",
+            provider: "stripe",
+            providerSubscriptionId: session.id,
+            currentPeriodStart: new Date().toISOString(),
+            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            invoicesLimit: limit,
+            invoicesUsed: 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+
+          await db.collection("fiscalProfiles").doc(userId).set({
+            plan: planId,
+            planStartDate: new Date().toISOString(),
+            paymentStatus: "paid",
+            autoRenew: true
+          }, { merge: true });
+        }
+      }
+    }
+
+    res.status(200).send("OK");
+  } catch (error) {
+    console.error("Error al procesar webhook de Stripe:", error.response?.data || error.message);
     res.status(500).send("Error de procesamiento");
   }
 });

@@ -164,6 +164,40 @@ export default function ProfileForm({
     if (isProcessingWallet || isProcessingPayment) return;
     setIsProcessingWallet(true);
 
+    if (walletName === "Stripe") {
+      toast.info("Iniciando conexión segura con Stripe Checkout...", "Stripe Checkout");
+      try {
+        const checkoutPlan = checkoutPlanType || "personal";
+        const response = await fetch("/api/billing/checkout/stripe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: initialProfile?.userId || "guest",
+            planId: checkoutPlan
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || "No se pudo iniciar el flujo de pago con Stripe.");
+        }
+
+        const data = await response.json();
+        if (data.checkoutUrl) {
+          toast.success("Redirigiendo a Stripe Checkout...");
+          window.location.href = data.checkoutUrl;
+        } else {
+          throw new Error("No se recibió la dirección de pago de Stripe.");
+        }
+      } catch (err: any) {
+        console.error("Stripe payment init error:", err);
+        toast.error(err.message || "Error de conexión con Stripe Checkout. Intenta nuevamente.");
+      } finally {
+        setIsProcessingWallet(false);
+      }
+      return;
+    }
+
     if (walletName === "Google Pay") {
       toast.info("Cargando servicios seguros de Google Pay...", "Google Pay");
       
@@ -1504,6 +1538,17 @@ export default function ProfileForm({
                     </label>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {/* Stripe (Tarjeta de Crédito/Débito) */}
+                      <button
+                        type="button"
+                        disabled={isProcessingWallet || isProcessingPayment}
+                        onClick={() => handleDigitalWalletPayment("Stripe")}
+                        className="bg-[#635BFF] hover:bg-[#5b52ea] duration-150 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer select-none active:scale-[0.98] disabled:opacity-55 col-span-1 sm:col-span-2 shadow-md shadow-[#635BFF]/15"
+                      >
+                        <CreditCard className="w-4 h-4 text-white" />
+                        <span>Pagar con Tarjeta (Stripe Checkout)</span>
+                      </button>
+
                       {/* Google Pay */}
                       <button
                         type="button"
