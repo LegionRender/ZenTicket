@@ -1557,7 +1557,7 @@ app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response
     const baseUrl = getSafeBaseUrl(req);
 
     const response = await axios.post(
-      "https://api.mercadopago.com/v1/preferences",
+      "https://api.mercadopago.com/checkout/preferences",
       {
         items: [
           {
@@ -1649,7 +1649,7 @@ app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Resp
     const baseUrl = getSafeBaseUrl(req);
 
     const response = await axios.post(
-      "https://api.mercadopago.com/preapprovals",
+      "https://api.mercadopago.com/preapproval",
       {
         back_url: process.env.BILLING_SUCCESS_URL || `${baseUrl}/workspace?tab=cuenta&status=success`,
         reason: title,
@@ -1976,7 +1976,7 @@ app.post("/api/billing/webhooks/mercadopago", async (req: Request, res: Response
       } else if (topic === "preapproval" || topic === "subscription") {
         // Fetch subscription preapproval details
         const response = await axios.get(
-          `https://api.mercadopago.com/preapprovals/${paymentId}`,
+          `https://api.mercadopago.com/preapproval/${paymentId}`,
           {
             headers: { Authorization: `Bearer ${accessToken}` }
           }
