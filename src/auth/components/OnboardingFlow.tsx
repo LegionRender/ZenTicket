@@ -602,7 +602,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                         <p className="text-[10px] text-slate-400 mt-1 leading-normal">Para profesionales y personas físicas que facturan ocasionalmente.</p>
                       </div>
                       <div className="py-1">
-                        <span className="text-2xl font-black font-display text-[#0b1020]">$5</span>
+                        <span className="text-2xl font-black font-display text-[#0b1020]">$2</span>
                         <span className="text-xs text-slate-500 font-semibold"> MXN/mes</span>
                       </div>
                       <div className="h-px bg-slate-100" />

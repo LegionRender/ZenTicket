@@ -580,7 +580,7 @@ export default function ProfileForm({
         const { plan, wallet } = event.data;
         const targetPlan = plan || checkoutPlanType || "brisa";
         const targetWallet = wallet || localStorage.getItem("pendingCheckoutWallet") || "Stripe";
-        const cost = targetPlan === "brisa" ? 5 : 
+        const cost = targetPlan === "brisa" ? 2 : 
                      targetPlan === "serenidad" ? 250 : 
                      targetPlan === "nirvana" ? 500 : 0;
         
@@ -642,7 +642,7 @@ export default function ProfileForm({
     return "Plan Gratuito";
   };
   const getPlanPrice = (plan?: string) => {
-    if (plan === "brisa") return "$5";
+    if (plan === "brisa") return "$2";
     if (plan === "serenidad") return "$250";
     if (plan === "nirvana") return "$500";
     if (plan === "personal") return "$150";
@@ -1041,7 +1041,7 @@ export default function ProfileForm({
             </div>
             <div className="text-right leading-none shrink-0">
               <span className="text-lg font-black text-[#0B53F4]">
-                {checkoutPlanType === "brisa" ? "$5" : 
+                {checkoutPlanType === "brisa" ? "$2" : 
                  checkoutPlanType === "serenidad" ? "$250" : 
                  checkoutPlanType === "nirvana" ? "$500" : "$0"}
               </span>
@@ -2295,7 +2295,7 @@ export default function ProfileForm({
                       <p className="text-[11px] text-slate-455 dark:text-slate-400 font-semibold mt-0.5">Para personas con consumos bajos.</p>
                     </div>
                     <div className="text-right leading-none">
-                      <span className={`text-base font-extrabold ${selectedPlan === "brisa" ? "text-[#0B53F4]" : "text-slate-900 dark:text-white"}`}>$5</span>
+                      <span className={`text-base font-extrabold ${selectedPlan === "brisa" ? "text-[#0B53F4]" : "text-slate-900 dark:text-white"}`}>$2</span>
                       <span className={`text-[9px] font-black block mt-1 uppercase tracking-wider ${selectedPlan === "brisa" ? "text-[#0B53F4]" : "text-slate-400"}`}>MXN/mes</span>
                     </div>
                   </div>

@@ -1458,10 +1458,10 @@ async function getPayPalAccessToken() {
     throw new Error("Faltan credenciales PAYPAL_CLIENT_ID o PAYPAL_CLIENT_SECRET.");
   }
   
-  // Choose sandbox or live based on clientId prefix or environment config
-  const host = process.env.PAYPAL_MODE === "sandbox" || clientId.startsWith("Ad") || clientId.startsWith("AZ") || process.env.NODE_ENV !== "production"
-    ? "https://api-m.sandbox.paypal.com"
-    : "https://api-m.paypal.com";
+  // Choose sandbox or live based solely on PAYPAL_MODE environment config
+  const host = process.env.PAYPAL_MODE === "live"
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   
   const response = await axios.post(
@@ -1493,6 +1493,104 @@ const getSafeBaseUrl = (req: Request): string => {
   return `${proto}://${host}`;
 };
 
+// Mock Mercado Pago Checkout page
+app.get("/mercadopago-mock-checkout", (req: Request, res: Response) => {
+  const { userId, planId } = req.query;
+  const planName = planId === "brisa" ? "Brisa" : planId === "serenidad" ? "Serenidad" : planId === "nirvana" ? "Nirvana" : "Especial";
+  const cost = planId === "brisa" ? 2 : planId === "serenidad" ? 250 : planId === "nirvana" ? 500 : 0;
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Mercado Pago - Checkout Simulado</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-[#f5f5f5] font-sans flex flex-col justify-between min-h-screen text-slate-800">
+      <header class="bg-[#00A6EA] text-white p-4 shadow-sm flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="bg-white rounded-lg p-1.5 w-10 h-10 flex items-center justify-center">
+            <svg viewBox="0 0 100 100" class="w-8 h-8"><path fill="#00A6EA" d="M10 10h80v80H10z"/></svg>
+          </div>
+          <span class="font-bold text-lg tracking-tight">Mercado Pago</span>
+        </div>
+        <span class="text-xs font-semibold opacity-90">Sandbox de Simulación</span>
+      </header>
+
+      <main class="flex-grow flex items-center justify-center p-6">
+        <div class="bg-white rounded-3xl p-6 shadow-md max-w-sm w-full border border-slate-100 space-y-6 text-center">
+          <div class="w-16 h-16 bg-[#00A6EA]/10 text-[#00A6EA] rounded-full flex items-center justify-center mx-auto">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+
+          <div class="space-y-1.5">
+            <span class="text-[9px] font-black text-[#00A6EA] uppercase tracking-wider block">ZenTicket Suscripciones</span>
+            <h2 class="text-xl font-black text-slate-900">Plan ${planName}</h2>
+            <p class="text-xs text-slate-500 font-semibold">Autorización de cargo recurrente mensual</p>
+          </div>
+
+          <div class="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex justify-between items-center text-left">
+            <div>
+              <span class="text-[9.5px] font-black text-slate-450 uppercase tracking-widest block">Monto a Pagar</span>
+              <span class="text-lg font-black text-slate-800">$${cost}.00 <span class="text-xs font-semibold text-slate-400">MXN</span></span>
+            </div>
+            <span class="text-[10px] bg-[#00A6EA]/15 text-[#00A6EA] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider">Mensual</span>
+          </div>
+
+          <div class="space-y-2.5">
+            <button 
+              id="btn-confirm" 
+              class="w-full bg-[#00A6EA] hover:bg-[#0089C4] text-white text-xs font-black py-3.5 rounded-2xl transition cursor-pointer text-center uppercase tracking-wider shadow-md active:scale-98"
+            >
+              Autorizar Cargo
+            </button>
+            <button 
+              id="btn-cancel" 
+              class="w-full bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs font-bold py-3.5 rounded-2xl transition cursor-pointer text-center"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <footer class="p-4 text-center text-[10px] text-slate-400 font-semibold">
+        Conexión encriptada SSL de 256 bits. Mercado Pago S. de R.L. de C.V.
+      </footer>
+
+      <script>
+        const btnConfirm = document.getElementById('btn-confirm');
+        const btnCancel = document.getElementById('btn-cancel');
+
+        btnConfirm.addEventListener('click', () => {
+          btnConfirm.disabled = true;
+          btnConfirm.innerHTML = '<div class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>Procesando...';
+          
+          setTimeout(() => {
+            if (window.opener) {
+              window.opener.postMessage({
+                type: "wallet_payment_success",
+                plan: "${planId}",
+                wallet: "Mercado Pago"
+              }, "*");
+            }
+            window.close();
+          }, 1500);
+        });
+
+        btnCancel.addEventListener('click', () => {
+          window.close();
+        });
+      </script>
+    </body>
+    </html>
+  `);
+});
+
 // 1. Mercado Pago Checkout (Single Preference)
 app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response) => {
   const { userId, planId } = req.body;
@@ -1504,7 +1602,7 @@ app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 5.00;
+    price = 2.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -1525,7 +1623,25 @@ app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response
 
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
   if (!accessToken) {
-    res.status(500).json({ error: "Configuración de pasarela incompleta en servidor" });
+    const baseUrl = getSafeBaseUrl(req);
+    const mockUrl = `${baseUrl}/mercadopago-mock-checkout?userId=${userId}&planId=${planId}`;
+    
+    // Register simulated payment in Firestore
+    const paymentDocId = `mp_mock_${Date.now()}`;
+    await adminDb.collection("payments").doc(paymentDocId).set({
+      userId,
+      planId,
+      provider: "mercadopago",
+      providerPaymentId: paymentDocId,
+      amount: price,
+      currency: "MXN",
+      status: "pending_payment",
+      checkoutUrl: mockUrl,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ checkoutUrl: mockUrl });
     return;
   }
 
@@ -1595,7 +1711,7 @@ app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Resp
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 5.00;
+    price = 2.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -1616,7 +1732,25 @@ app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Resp
 
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
   if (!accessToken) {
-    res.status(500).json({ error: "Configuración de pasarela incompleta en servidor" });
+    const baseUrl = getSafeBaseUrl(req);
+    const mockUrl = `${baseUrl}/mercadopago-mock-checkout?userId=${userId}&planId=${planId}`;
+    
+    // Register simulated payment in Firestore
+    const paymentDocId = `mp_mock_${Date.now()}`;
+    await adminDb.collection("payments").doc(paymentDocId).set({
+      userId,
+      planId,
+      provider: "mercadopago",
+      providerPaymentId: paymentDocId,
+      amount: price,
+      currency: "MXN",
+      status: "pending_payment",
+      checkoutUrl: mockUrl,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ checkoutUrl: mockUrl });
     return;
   }
 
@@ -1680,7 +1814,7 @@ app.post("/api/billing/checkout/paypal", async (req: Request, res: Response) => 
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 5.00;
+    price = 2.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -1766,8 +1900,8 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 5.00;
-    title = "Plan Brisa - ZenTicket";
+    price = 10.00;
+    title = "Plan Brisa (Prueba Stripe Mínima) - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
     title = "Plan Serenidad - ZenTicket";
