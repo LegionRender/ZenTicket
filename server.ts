@@ -1620,8 +1620,8 @@ app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Resp
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 2.00;
-    title = "Plan Brisa - ZenTicket";
+    price = 10.00;
+    title = "Plan Brisa (Mínimo Suscripción $10) - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
     title = "Plan Serenidad - ZenTicket";
