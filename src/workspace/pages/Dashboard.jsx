@@ -127,6 +127,7 @@ export const Dashboard = () => {
       usoCFDI: "G03",
       correoElectronico: user.email || "",
       correoRecepcion: user.email || "",
+      correoPago: user.email || "",
       plan: "gratuito",
       onboardingCompleted: true,
       paymentCards: [
@@ -149,6 +150,11 @@ export const Dashboard = () => {
           const parsed = JSON.parse(saved);
           const isMockRfc = parsed.rfc === "CABE850101ABC" || parsed.rfc === "GOMD850101XYZ";
           const isMockName = parsed.razonSocial === "RICARDO CASTRO BECERRIL" || parsed.razonSocial === "CONSTRUCTORA LEGION DEL NORTE SA DE CV";
+          
+          const profileEmail = parsed.correoPago || parsed.correoRecepcion || parsed.correoElectronico || user.email || "";
+          const emailLowerProfile = profileEmail.toLowerCase();
+          const isAdminEmailProfile = emailLowerProfile.includes("legionrender") || emailLowerProfile.includes("ricardo");
+
           return {
             ...parsed,
             userId: parsed.userId || user.uid,
@@ -156,8 +162,14 @@ export const Dashboard = () => {
             razonSocial: isMockName ? (user.displayName || "") : (parsed.razonSocial || user.displayName || ""),
             correoElectronico: parsed.correoElectronico || user.email || "",
             correoRecepcion: parsed.correoRecepcion || user.email || "",
+            correoPago: parsed.correoPago || user.email || "",
             paymentCards: Array.isArray(parsed.paymentCards)
-              ? parsed.paymentCards
+              ? parsed.paymentCards.map(c => c.id === "card_real_ricardo" ? {
+                  ...c,
+                  last4: isAdminEmailProfile ? "9180" : "4242",
+                  holderName: isAdminEmailProfile ? "RICARDO CASTRO BECERRIL" : "RICARDO CASTRO",
+                  bankName: isAdminEmailProfile ? "BBVA Bancomer" : "VISA"
+                } : c)
               : initialDef.paymentCards
           };
         } catch (_) {}
@@ -193,9 +205,19 @@ export const Dashboard = () => {
           }
           data.correoElectronico = data.correoElectronico || user.email || "";
           data.correoRecepcion = data.correoRecepcion || user.email || "";
-          data.paymentCards = Array.isArray(data.paymentCards)
-            ? data.paymentCards
-            : initialDef.paymentCards;
+          data.correoPago = data.correoPago || user.email || "";
+          
+          const profileEmail = data.correoPago || data.correoRecepcion || data.correoElectronico || user.email || "";
+          const emailLowerProfile = profileEmail.toLowerCase();
+          const isAdminEmailProfile = emailLowerProfile.includes("legionrender") || emailLowerProfile.includes("ricardo");
+
+          data.paymentCards = (Array.isArray(data.paymentCards) ? data.paymentCards : initialDef.paymentCards)
+            .map(c => c.id === "card_real_ricardo" ? {
+                ...c,
+                last4: isAdminEmailProfile ? "9180" : "4242",
+                holderName: isAdminEmailProfile ? "RICARDO CASTRO BECERRIL" : "RICARDO CASTRO",
+                bankName: isAdminEmailProfile ? "BBVA Bancomer" : "VISA"
+              } : c);
           
           if (!isNewSignup && data.onboardingCompleted !== true) {
             data.onboardingCompleted = true;

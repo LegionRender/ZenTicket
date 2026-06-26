@@ -1593,7 +1593,7 @@ app.get("/mercadopago-mock-checkout", (req: Request, res: Response) => {
 
 // 1. Mercado Pago Checkout (Single Preference)
 app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response) => {
-  const { userId, planId } = req.body;
+  const { userId, planId, payerEmail } = req.body;
   if (!userId || !planId) {
     res.status(400).json({ error: "Faltan parámetros userId o planId" });
     return;
@@ -1659,6 +1659,7 @@ app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response
             currency_id: "MXN"
           }
         ],
+        payer: payerEmail ? { email: payerEmail } : undefined,
         back_urls: {
           success: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
           failure: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
@@ -1805,7 +1806,7 @@ app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Resp
 
 // 3. PayPal Checkout (Single Order)
 app.post("/api/billing/checkout/paypal", async (req: Request, res: Response) => {
-  const { userId, planId } = req.body;
+  const { userId, planId, payerEmail } = req.body;
   if (!userId || !planId) {
     res.status(400).json({ error: "Faltan parámetros userId o planId" });
     return;
@@ -1837,25 +1838,32 @@ app.post("/api/billing/checkout/paypal", async (req: Request, res: Response) => 
     const baseUrl = getSafeBaseUrl(req);
 
     const { accessToken, host } = await getPayPalAccessToken();
+    const orderData: any = {
+      intent: "CAPTURE",
+      purchase_units: [
+        {
+          reference_id: `${userId}:${planId}`,
+          amount: {
+            currency_code: "MXN",
+            value: price.toFixed(2)
+          },
+          description: title
+        }
+      ],
+      application_context: {
+        return_url: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
+        cancel_url: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`
+      }
+    };
+    if (payerEmail) {
+      orderData.payer = {
+        email_address: payerEmail
+      };
+    }
+
     const response = await axios.post(
       `${host}/v2/checkout/orders`,
-      {
-        intent: "CAPTURE",
-        purchase_units: [
-          {
-            reference_id: `${userId}:${planId}`,
-            amount: {
-              currency_code: "MXN",
-              value: price.toFixed(2)
-            },
-            description: title
-          }
-        ],
-        application_context: {
-          return_url: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
-          cancel_url: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`
-        }
-      },
+      orderData,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -1891,7 +1899,7 @@ app.post("/api/billing/checkout/paypal", async (req: Request, res: Response) => 
 
 // 3.5. Stripe Checkout (Session Creation)
 app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => {
-  const { userId, planId } = req.body;
+  const { userId, planId, payerEmail } = req.body;
   if (!userId || !planId) {
     res.status(400).json({ error: "Faltan parámetros userId o planId" });
     return;
@@ -1931,19 +1939,24 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
     const successUrl = process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`;
     console.log("DEBUG STRIPE SUCCESSURL:", successUrl);
 
+    const stripeParams = new URLSearchParams({
+      "payment_method_types[0]": "card",
+      "line_items[0][price_data][currency]": "mxn",
+      "line_items[0][price_data][product_data][name]": title,
+      "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
+      "line_items[0][quantity]": "1",
+      "mode": "payment",
+      "success_url": successUrl,
+      "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
+      "client_reference_id": `${userId}:${planId}`
+    });
+    if (payerEmail) {
+      stripeParams.append("customer_email", payerEmail);
+    }
+
     const response = await axios.post(
       "https://api.stripe.com/v1/checkout/sessions",
-      new URLSearchParams({
-        "payment_method_types[0]": "card",
-        "line_items[0][price_data][currency]": "mxn",
-        "line_items[0][price_data][product_data][name]": title,
-        "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
-        "line_items[0][quantity]": "1",
-        "mode": "payment",
-        "success_url": successUrl,
-        "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
-        "client_reference_id": `${userId}:${planId}`
-      }).toString(),
+      stripeParams.toString(),
       {
         headers: {
           Authorization: `Bearer ${stripeSecretKey}`,

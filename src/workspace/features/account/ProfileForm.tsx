@@ -332,7 +332,7 @@ export default function ProfileForm({
         body: JSON.stringify({
           userId: initialProfile?.userId || "guest",
           planId: checkoutPlan,
-          payerEmail: correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail || undefined
+          payerEmail: correoPago || correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail || undefined
         })
       });
 
@@ -502,6 +502,11 @@ export default function ProfileForm({
       } else if (userEmail) {
         setCorreoRecepcion(userEmail);
       }
+      if (initialProfile.correoPago) {
+        setCorreoPago(initialProfile.correoPago);
+      } else if (userEmail) {
+        setCorreoPago(userEmail);
+      }
       setCorreoElectronico(initialProfile.correoElectronico || userEmail || "");
       if (initialProfile.facturacionAutomatica !== undefined) {
         setFacturacionAutomatica(initialProfile.facturacionAutomatica);
@@ -511,6 +516,7 @@ export default function ProfileForm({
       }
     } else if (userEmail) {
       setCorreoRecepcion(userEmail);
+      setCorreoPago(userEmail);
     }
     if (userEmail) {
       setCorreoElectronico(initialProfile?.correoElectronico || userEmail);
@@ -558,6 +564,7 @@ export default function ProfileForm({
   const [correoElectronico, setCorreoElectronico] = useState(initialProfile?.correoElectronico || sessionEmail || "");
   const [telefono, setTelefono] = useState(initialProfile?.telefono || "");
   const [correoRecepcion, setCorreoRecepcion] = useState(initialProfile?.correoRecepcion || sessionEmail || "");
+  const [correoPago, setCorreoPago] = useState(initialProfile?.correoPago || sessionEmail || "");
   const [facturacionAutomatica, setFacturacionAutomatica] = useState(initialProfile?.facturacionAutomatica || false);
   const [metodoRecepcion, setMetodoRecepcion] = useState(initialProfile?.metodoRecepcion || "Ambos"); // "Correo", "Descarga", "Ambos"
   const [dosPasos, setDosPasos] = useState(false);
@@ -600,7 +607,8 @@ export default function ProfileForm({
             autoRenew: autoRenewChoice,
             paymentCards: cards,
             correoElectronico: correoElectronico || sessionEmail,
-            correoRecepcion: correoRecepcion || sessionEmail
+            correoRecepcion: correoRecepcion || sessionEmail,
+            correoPago: correoPago || sessionEmail
           });
           
           toast.success(
@@ -1636,6 +1644,7 @@ export default function ProfileForm({
         plan: initialProfile?.plan || "gratuito",
         paymentCards: initialProfile?.paymentCards || cards || [],
         correoRecepcion: correoRecepcion.trim(),
+        correoPago: correoPago.trim(),
         facturacionAutomatica,
         metodoRecepcion,
         navigationDisabled: false // Deactivate navigation restriction automatically so user can navigate!
@@ -1684,6 +1693,7 @@ export default function ProfileForm({
         plan: initialProfile?.plan || "gratuito",
         paymentCards: initialProfile?.paymentCards || cards || [],
         correoRecepcion: correoRecepcion.trim(),
+        correoPago: correoPago.trim(),
         facturacionAutomatica,
         metodoRecepcion
       });
@@ -1986,6 +1996,23 @@ export default function ProfileForm({
               onChange={(e) => setCorreoRecepcion(e.target.value)}
               className="w-full text-sm font-medium bg-[#F8F9FE] disabled:bg-slate-50 disabled:text-slate-450 border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400 disabled:cursor-not-allowed"
             />
+          </div>
+
+          {/* Correo para Cuentas de Pago */}
+          <div className="space-y-1">
+            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+              Correo para Cuentas de Pago (Stripe/PayPal/Mercado Pago)
+            </label>
+            <input
+              type="email"
+              value={correoPago}
+              onChange={(e) => setCorreoPago(e.target.value)}
+              placeholder="Ej. mi-cuenta-de-pago@email.com"
+              className="w-full text-sm font-medium bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
+            />
+            <p className="text-[10px] text-slate-400 mt-1 ml-1 leading-normal">
+              Las pasarelas de pago y la autodetección de tarjetas predeterminadas usarán esta dirección de correo electrónico.
+            </p>
           </div>
         </div>
 
