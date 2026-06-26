@@ -632,9 +632,9 @@ async function getPayPalAccessToken() {
     throw new Error("Faltan credenciales PAYPAL_CLIENT_ID o PAYPAL_CLIENT_SECRET.");
   }
   
-  const host = process.env.PAYPAL_MODE === "sandbox" || clientId.startsWith("Ad") || clientId.startsWith("AZ") || process.env.NODE_ENV !== "production"
-    ? "https://api-m.sandbox.paypal.com"
-    : "https://api-m.paypal.com";
+  const host = secretOrEnv(null, "PAYPAL_MODE") === "live"
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   
   const response = await axios.post(
@@ -668,7 +668,7 @@ const getSafeBaseUrl = (req) => {
 
 // 1. Mercado Pago Checkout (Single Preference)
 app.post("/api/billing/checkout/mercadopago", async (req, res) => {
-  const { userId, planId } = req.body;
+  const { userId, planId, payerEmail } = req.body;
   if (!userId || !planId) {
     res.status(400).json({ error: "Faltan parámetros userId o planId" });
     return;
@@ -677,7 +677,7 @@ app.post("/api/billing/checkout/mercadopago", async (req, res) => {
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 5.00;
+    price = 2.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -698,7 +698,25 @@ app.post("/api/billing/checkout/mercadopago", async (req, res) => {
 
   const accessToken = secretOrEnv(mercadoPagoAccessTokenParam, "MERCADOPAGO_ACCESS_TOKEN");
   if (!accessToken) {
-    res.status(500).json({ error: "Configuración de pasarela incompleta en servidor" });
+    const baseUrl = getSafeBaseUrl(req);
+    const mockUrl = `${baseUrl}/api/mercadopago-mock-checkout?userId=${userId}&planId=${planId}`;
+    
+    // Register simulated payment in Firestore
+    const paymentDocId = `mp_mock_${Date.now()}`;
+    await db.collection("payments").doc(paymentDocId).set({
+      userId,
+      planId,
+      provider: "mercadopago",
+      providerPaymentId: paymentDocId,
+      amount: price,
+      currency: "MXN",
+      status: "pending_payment",
+      checkoutUrl: mockUrl,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ checkoutUrl: mockUrl });
     return;
   }
 
@@ -716,6 +734,7 @@ app.post("/api/billing/checkout/mercadopago", async (req, res) => {
             currency_id: "MXN"
           }
         ],
+        payer: payerEmail ? { email: payerEmail } : undefined,
         back_urls: {
           success: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
           failure: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
@@ -767,7 +786,7 @@ app.post("/api/billing/subscription/mercadopago", async (req, res) => {
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 5.00;
+    price = 2.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -788,7 +807,25 @@ app.post("/api/billing/subscription/mercadopago", async (req, res) => {
 
   const accessToken = secretOrEnv(mercadoPagoAccessTokenParam, "MERCADOPAGO_ACCESS_TOKEN");
   if (!accessToken) {
-    res.status(500).json({ error: "Configuración de pasarela incompleta en servidor" });
+    const baseUrl = getSafeBaseUrl(req);
+    const mockUrl = `${baseUrl}/api/mercadopago-mock-checkout?userId=${userId}&planId=${planId}`;
+    
+    // Register simulated payment in Firestore
+    const paymentDocId = `mp_mock_${Date.now()}`;
+    await db.collection("payments").doc(paymentDocId).set({
+      userId,
+      planId,
+      provider: "mercadopago",
+      providerPaymentId: paymentDocId,
+      amount: price,
+      currency: "MXN",
+      status: "pending_payment",
+      checkoutUrl: mockUrl,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ checkoutUrl: mockUrl });
     return;
   }
 
@@ -840,9 +877,8 @@ app.post("/api/billing/subscription/mercadopago", async (req, res) => {
   }
 });
 
-// 3. PayPal Checkout (Single Order)
 app.post("/api/billing/checkout/paypal", async (req, res) => {
-  const { userId, planId } = req.body;
+  const { userId, planId, payerEmail } = req.body;
   if (!userId || !planId) {
     res.status(400).json({ error: "Faltan parámetros userId o planId" });
     return;
@@ -851,7 +887,7 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 5.00;
+    price = 2.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -874,25 +910,32 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
     const baseUrl = getSafeBaseUrl(req);
 
     const { accessToken, host } = await getPayPalAccessToken();
+    const orderData = {
+      intent: "CAPTURE",
+      purchase_units: [
+        {
+          reference_id: `${userId}:${planId}`,
+          amount: {
+            currency_code: "MXN",
+            value: price.toFixed(2)
+          },
+          description: title
+        }
+      ],
+      application_context: {
+        return_url: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
+        cancel_url: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`
+      }
+    };
+    if (payerEmail) {
+      orderData.payer = {
+        email_address: payerEmail
+      };
+    }
+
     const response = await axios.post(
       `${host}/v2/checkout/orders`,
-      {
-        intent: "CAPTURE",
-        purchase_units: [
-          {
-            reference_id: `${userId}:${planId}`,
-            amount: {
-              currency_code: "MXN",
-              value: price.toFixed(2)
-            },
-            description: title
-          }
-        ],
-        application_context: {
-          return_url: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
-          cancel_url: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`
-        }
-      },
+      orderData,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -925,9 +968,8 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
   }
 });
 
-// 3.5. Stripe Checkout (Session Creation)
 app.post("/api/billing/checkout/stripe", async (req, res) => {
-  const { userId, planId } = req.body;
+  const { userId, planId, payerEmail } = req.body;
   if (!userId || !planId) {
     res.status(400).json({ error: "Faltan parámetros userId o planId" });
     return;
@@ -936,8 +978,8 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 5.00;
-    title = "Plan Brisa - ZenTicket";
+    price = 15.00;
+    title = "Plan Brisa (Prueba Stripe Mínima $15) - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
     title = "Plan Serenidad - ZenTicket";
@@ -963,20 +1005,24 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
 
   try {
     const baseUrl = getSafeBaseUrl(req);
+    const stripeParams = new URLSearchParams({
+      "payment_method_types[0]": "card",
+      "line_items[0][price_data][currency]": "mxn",
+      "line_items[0][price_data][product_data][name]": title,
+      "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
+      "line_items[0][quantity]": "1",
+      "mode": "payment",
+      "success_url": process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
+      "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
+      "client_reference_id": `${userId}:${planId}`
+    });
+    if (payerEmail) {
+      stripeParams.append("customer_email", payerEmail);
+    }
 
     const response = await axios.post(
       "https://api.stripe.com/v1/checkout/sessions",
-      new URLSearchParams({
-        "payment_method_types[0]": "card",
-        "line_items[0][price_data][currency]": "mxn",
-        "line_items[0][price_data][product_data][name]": title,
-        "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
-        "line_items[0][quantity]": "1",
-        "mode": "payment",
-        "success_url": process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
-        "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
-        "client_reference_id": `${userId}:${planId}`
-      }).toString(),
+      stripeParams.toString(),
       {
         headers: {
           Authorization: `Bearer ${stripeSecretKey}`,
@@ -1383,6 +1429,104 @@ app.get("/api/billing/status/:userId", async (req, res) => {
 // Get PayPal Client ID safely for frontend SDK
 app.get("/api/config/paypal-client-id", (req, res) => {
   res.json({ clientId: secretOrEnv(paypalClientIdParam, "PAYPAL_CLIENT_ID") });
+});
+
+// Mock Mercado Pago Checkout page
+app.get("/api/mercadopago-mock-checkout", (req, res) => {
+  const { userId, planId } = req.query;
+  const planName = planId === "brisa" ? "Brisa" : planId === "serenidad" ? "Serenidad" : planId === "nirvana" ? "Nirvana" : "Especial";
+  const cost = planId === "brisa" ? 2 : planId === "serenidad" ? 250 : planId === "nirvana" ? 500 : 0;
+  
+  res.send(\`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Mercado Pago - Checkout Simulado</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-[#f5f5f5] font-sans flex flex-col justify-between min-h-screen text-slate-800">
+      <header class="bg-[#00A6EA] text-white p-4 shadow-sm flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="bg-white rounded-lg p-1.5 w-10 h-10 flex items-center justify-center">
+            <svg viewBox="0 0 100 100" class="w-8 h-8"><path fill="#00A6EA" d="M10 10h80v80H10z"/></svg>
+          </div>
+          <span class="font-bold text-lg tracking-tight">Mercado Pago</span>
+        </div>
+        <span class="text-xs font-semibold opacity-90">Sandbox de Simulación</span>
+      </header>
+
+      <main class="flex-grow flex items-center justify-center p-6">
+        <div class="bg-white rounded-3xl p-6 shadow-md max-w-sm w-full border border-slate-100 space-y-6 text-center">
+          <div class="w-16 h-16 bg-[#00A6EA]/10 text-[#00A6EA] rounded-full flex items-center justify-center mx-auto">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+
+          <div class="space-y-1.5">
+            <span class="text-[9px] font-black text-[#00A6EA] uppercase tracking-wider block">ZenTicket Suscripciones</span>
+            <h2 class="text-xl font-black text-slate-900">Plan \\\${planName}</h2>
+            <p class="text-xs text-slate-500 font-semibold">Autorización de cargo recurrente mensual</p>
+          </div>
+
+          <div class="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex justify-between items-center text-left">
+            <div>
+              <span class="text-[9.5px] font-black text-slate-450 uppercase tracking-widest block">Monto a Pagar</span>
+              <span class="text-lg font-black text-slate-800">$\\\${cost}.00 <span class="text-xs font-semibold text-slate-400">MXN</span></span>
+            </div>
+            <span class="text-[10px] bg-[#00A6EA]/15 text-[#00A6EA] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider">Mensual</span>
+          </div>
+
+          <div class="space-y-2.5">
+            <button 
+              id="btn-confirm" 
+              class="w-full bg-[#00A6EA] hover:bg-[#0089C4] text-white text-xs font-black py-3.5 rounded-2xl transition cursor-pointer text-center uppercase tracking-wider shadow-md active:scale-98"
+            >
+              Autorizar Cargo
+            </button>
+            <button 
+              id="btn-cancel" 
+              class="w-full bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs font-bold py-3.5 rounded-2xl transition cursor-pointer text-center"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <footer class="p-4 text-center text-[10px] text-slate-400 font-semibold">
+        Conexión encriptada SSL de 256 bits. Mercado Pago S. de R.L. de C.V.
+      </footer>
+
+      <script>
+        const btnConfirm = document.getElementById('btn-confirm');
+        const btnCancel = document.getElementById('btn-cancel');
+
+        btnConfirm.addEventListener('click', () => {
+          btnConfirm.disabled = true;
+          btnConfirm.innerHTML = '<div class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>Procesando...';
+          
+          setTimeout(() => {
+            if (window.opener) {
+              window.opener.postMessage({
+                type: "wallet_payment_success",
+                plan: "\${planId}",
+                wallet: "Mercado Pago"
+              }, "*");
+            }
+            window.close();
+          }, 1500);
+        });
+
+        btnCancel.addEventListener('click', () => {
+          window.close();
+        });
+      </script>
+    </body>
+    </html>
+  \`);
 });
 
 // 7. Cancel Subscription

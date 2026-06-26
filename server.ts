@@ -1494,7 +1494,7 @@ const getSafeBaseUrl = (req: Request): string => {
 };
 
 // Mock Mercado Pago Checkout page
-app.get("/mercadopago-mock-checkout", (req: Request, res: Response) => {
+app.get("/api/mercadopago-mock-checkout", (req: Request, res: Response) => {
   const { userId, planId } = req.query;
   const planName = planId === "brisa" ? "Brisa" : planId === "serenidad" ? "Serenidad" : planId === "nirvana" ? "Nirvana" : "Especial";
   const cost = planId === "brisa" ? 2 : planId === "serenidad" ? 250 : planId === "nirvana" ? 500 : 0;
@@ -1624,7 +1624,7 @@ app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
   if (!accessToken) {
     const baseUrl = getSafeBaseUrl(req);
-    const mockUrl = `${baseUrl}/mercadopago-mock-checkout?userId=${userId}&planId=${planId}`;
+    const mockUrl = `${baseUrl}/api/mercadopago-mock-checkout?userId=${userId}&planId=${planId}`;
     
     // Register simulated payment in Firestore
     const paymentDocId = `mp_mock_${Date.now()}`;
@@ -1734,7 +1734,7 @@ app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Resp
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
   if (!accessToken) {
     const baseUrl = getSafeBaseUrl(req);
-    const mockUrl = `${baseUrl}/mercadopago-mock-checkout?userId=${userId}&planId=${planId}`;
+    const mockUrl = `${baseUrl}/api/mercadopago-mock-checkout?userId=${userId}&planId=${planId}`;
     
     // Register simulated payment in Firestore
     const paymentDocId = `mp_mock_${Date.now()}`;
@@ -1908,8 +1908,8 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 10.00;
-    title = "Plan Brisa (Prueba Stripe Mínima) - ZenTicket";
+    price = 15.00;
+    title = "Plan Brisa (Prueba Stripe Mínima $15) - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
     title = "Plan Serenidad - ZenTicket";
