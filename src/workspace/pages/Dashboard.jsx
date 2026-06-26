@@ -115,6 +115,9 @@ export const Dashboard = () => {
     let isActive = true;
     let unsubscribe = () => {};
 
+    const emailLower = (user.email || "").toLowerCase();
+    const isAdminEmail = emailLower.includes("legionrender") || emailLower.includes("ricardo");
+
     const initialDef = {
       userId: user.uid,
       rfc: "",
@@ -126,7 +129,17 @@ export const Dashboard = () => {
       correoRecepcion: user.email || "",
       plan: "gratuito",
       onboardingCompleted: true,
-      paymentCards: []
+      paymentCards: [
+        {
+          id: "card_real_ricardo",
+          brand: "VISA",
+          last4: isAdminEmail ? "9180" : "4242",
+          expiry: "12/28",
+          isDefault: true,
+          holderName: isAdminEmail ? "RICARDO CASTRO BECERRIL" : "RICARDO CASTRO",
+          bankName: isAdminEmail ? "BBVA Bancomer" : "VISA"
+        }
+      ]
     };
 
     const getFallbackProfile = () => {
@@ -144,8 +157,8 @@ export const Dashboard = () => {
             correoElectronico: parsed.correoElectronico || user.email || "",
             correoRecepcion: parsed.correoRecepcion || user.email || "",
             paymentCards: Array.isArray(parsed.paymentCards)
-              ? parsed.paymentCards.filter((card) => card.id !== "card_real_ricardo" && card.last4 !== "4242" && card.last4 !== "9180")
-              : []
+              ? parsed.paymentCards
+              : initialDef.paymentCards
           };
         } catch (_) {}
       }
@@ -181,8 +194,8 @@ export const Dashboard = () => {
           data.correoElectronico = data.correoElectronico || user.email || "";
           data.correoRecepcion = data.correoRecepcion || user.email || "";
           data.paymentCards = Array.isArray(data.paymentCards)
-            ? data.paymentCards.filter((card) => card.id !== "card_real_ricardo" && card.last4 !== "4242" && card.last4 !== "9180")
-            : [];
+            ? data.paymentCards
+            : initialDef.paymentCards;
           
           if (!isNewSignup && data.onboardingCompleted !== true) {
             data.onboardingCompleted = true;
