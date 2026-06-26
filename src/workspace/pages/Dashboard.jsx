@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
+import { motion } from "motion/react";
 import { useAuth } from "@/auth/context/AuthContext";
+import { analyzeTicket, runAutomation } from "@/services/api";
 import { db } from "@/services/firebase/firebase";
 import {
   collection,
@@ -43,6 +45,7 @@ export const Dashboard = () => {
   const { user, logout } = useAuth();
 
   const [activeTab, setActiveTab] = useState("capturar"); // "capturar" | "tickets" | "conectores" | "historial" | "cuenta" | "admin"
+  const [hoveredTab, setHoveredTab] = useState(null);
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
 
   // 1. Core database states
@@ -69,6 +72,7 @@ export const Dashboard = () => {
     return parseFloat(localStorage.getItem("learningBudgetLimit") || "15.00");
   });
   const learningTimeoutRef = useRef(null);
+  const isSyncingRef = useRef(false);
 
   // Track read notification IDs in state at the dashboard level to share with the header bell icon
   const [readNotifIds, setReadNotifIds] = useState([]);
@@ -85,13 +89,15 @@ export const Dashboard = () => {
     if (Array.isArray(tickets)) {
       for (const t of tickets) {
         const ticketId = t.id || "tkt-temp";
-        if (t.status === "failed" && !readNotifIds.includes(`failed-${ticketId}`)) {
+        if (t.isOfflinePending) {
+          if (!readNotifIds.includes(`offline-${ticketId}`)) {
+            return true;
+          }
+        } else if (t.status === "failed" && !readNotifIds.includes(`failed-${ticketId}`)) {
           return true;
-        }
-        if (t.status === "review" && !readNotifIds.includes(`review-${ticketId}`)) {
+        } else if (t.status === "review" && !readNotifIds.includes(`review-${ticketId}`)) {
           return true;
-        }
-        if (t.status === "completed" && !readNotifIds.includes(`completed-${ticketId}`)) {
+        } else if (t.status === "completed" && !readNotifIds.includes(`completed-${ticketId}`)) {
           return true;
         }
       }
@@ -109,35 +115,38 @@ export const Dashboard = () => {
     let isActive = true;
     let unsubscribe = () => {};
 
-    const emailLower = (user.email || "").toLowerCase();
-    const isAdminEmail = emailLower.includes("legionrender") || emailLower.includes("ricardo");
     const initialDef = {
       userId: user.uid,
-      rfc: isAdminEmail ? "GOMD850101XYZ" : "CABE850101ABC",
-      razonSocial: isAdminEmail ? "CONSTRUCTORA LEGION DEL NORTE SA DE CV" : "RICARDO CASTRO BECERRIL",
-      regimenFiscal: "626",
-      codigoPostal: "02000",
+      rfc: "",
+      razonSocial: user.displayName || "",
+      regimenFiscal: "",
+      codigoPostal: "",
       usoCFDI: "G03",
+      correoElectronico: user.email || "",
+      correoRecepcion: user.email || "",
       plan: "gratuito",
       onboardingCompleted: true,
-      paymentCards: [
-        {
-          id: "card_real_ricardo",
-          brand: "VISA",
-          last4: isAdminEmail ? "9180" : "4242",
-          expiry: "12/28",
-          isDefault: true,
-          holderName: isAdminEmail ? "RICARDO CASTRO BECERRIL" : "RICARDO CASTRO",
-          bankName: isAdminEmail ? "BBVA Bancomer" : "VISA"
-        }
-      ]
+      paymentCards: []
     };
 
     const getFallbackProfile = () => {
       const saved = localStorage.getItem("fiscalProfile_" + user.uid);
       if (saved) {
         try {
-          return JSON.parse(saved);
+          const parsed = JSON.parse(saved);
+          const isMockRfc = parsed.rfc === "CABE850101ABC" || parsed.rfc === "GOMD850101XYZ";
+          const isMockName = parsed.razonSocial === "RICARDO CASTRO BECERRIL" || parsed.razonSocial === "CONSTRUCTORA LEGION DEL NORTE SA DE CV";
+          return {
+            ...parsed,
+            userId: parsed.userId || user.uid,
+            rfc: isMockRfc ? "" : (parsed.rfc || ""),
+            razonSocial: isMockName ? (user.displayName || "") : (parsed.razonSocial || user.displayName || ""),
+            correoElectronico: parsed.correoElectronico || user.email || "",
+            correoRecepcion: parsed.correoRecepcion || user.email || "",
+            paymentCards: Array.isArray(parsed.paymentCards)
+              ? parsed.paymentCards.filter((card) => card.id !== "card_real_ricardo" && card.last4 !== "4242" && card.last4 !== "9180")
+              : []
+          };
         } catch (_) {}
       }
       return initialDef;
@@ -163,6 +172,17 @@ export const Dashboard = () => {
           if (!data.plan) {
             data.plan = "gratuito";
           }
+          if (data.rfc === "CABE850101ABC" || data.rfc === "GOMD850101XYZ") {
+            data.rfc = "";
+          }
+          if (data.razonSocial === "RICARDO CASTRO BECERRIL" || data.razonSocial === "CONSTRUCTORA LEGION DEL NORTE SA DE CV") {
+            data.razonSocial = user.displayName || "";
+          }
+          data.correoElectronico = data.correoElectronico || user.email || "";
+          data.correoRecepcion = data.correoRecepcion || user.email || "";
+          data.paymentCards = Array.isArray(data.paymentCards)
+            ? data.paymentCards.filter((card) => card.id !== "card_real_ricardo" && card.last4 !== "4242" && card.last4 !== "9180")
+            : [];
           
           if (!isNewSignup && data.onboardingCompleted !== true) {
             data.onboardingCompleted = true;
@@ -209,6 +229,32 @@ export const Dashboard = () => {
       window.clearTimeout(fallbackTimer);
       unsubscribe();
     };
+  }, [user]);
+
+  // Keep the visible account plan synchronized with billing subscription updates.
+  useEffect(() => {
+    if (!user) return;
+    const subRef = doc(db, "subscriptions", user.uid);
+    const unsubscribe = onSnapshot(subRef, (docSnap) => {
+      if (!docSnap.exists()) return;
+      const sub = docSnap.data();
+      if (!sub?.planId) return;
+
+      setFiscalProfile((current) => {
+        const merged = {
+          ...(current || { userId: user.uid, correoElectronico: user.email || "", correoRecepcion: user.email || "" }),
+          plan: sub.planId,
+          paymentStatus: sub.paymentStatus || sub.status || current?.paymentStatus,
+          planStartDate: sub.currentPeriodStart || sub.planStartDate || current?.planStartDate,
+          autoRenew: sub.autoRenew ?? current?.autoRenew
+        };
+        localStorage.setItem("fiscalProfile_" + user.uid, JSON.stringify(merged));
+        return merged;
+      });
+    }, (err) => {
+      console.warn("Error watching user subscription:", err);
+    });
+    return unsubscribe;
   }, [user]);
 
   // Real-time user's digital Vault invoices
@@ -409,6 +455,180 @@ export const Dashboard = () => {
       unsubscribeInvoices();
     };
   }, [user]);
+
+  const syncOfflineTickets = async () => {
+    if (!window.navigator.onLine) return;
+    const pending = tickets.filter(t => t.isOfflinePending);
+    if (pending.length === 0) return;
+
+    for (const ticket of pending) {
+      let syncToastId = null;
+      try {
+        syncToastId = toast.loading(
+          `Sincronizando ticket offline de ${ticket.nombreEmisor || "Establecimiento"}...`
+        );
+
+        const imageUrl = ticket.imageUrl || "";
+        const parts = imageUrl.split(",");
+        if (parts.length < 2) {
+          throw new Error("Formato de imagen de ticket no válido.");
+        }
+        const mimeType = parts[0].match(/:(.*?);/)?.[1] || "image/jpeg";
+        const rawBase64 = parts[1];
+
+        const ocrResponse = await analyzeTicket({
+          imageBase64: rawBase64,
+          mimeType: mimeType,
+          personalGeminiKey: fiscalProfile?.personalGeminiKey,
+          userId: user?.uid,
+        });
+
+        if (!ocrResponse.ok) {
+          throw new Error("El motor OCR reportó un problema al digitalizar el archivo.");
+        }
+
+        const ocrResult = await ocrResponse.json();
+        if (ocrResult.ocrFailed) {
+          throw new Error(ocrResult.ocrError || "El OCR no pudo interpretar el ticket.");
+        }
+
+        const cleanStr = (s) => 
+          (s || "")
+           .toLowerCase()
+           .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+           .replace(/[^a-z0-9\s]/g, "")
+           .replace(/\b(sa|de|cv|sapi|srl|de|cv|grupo|comercial|cadena|tiendas|sucursal|santa|fe|magna|pemex)\b/g, "")
+           .trim();
+
+        const tRfc = (ocrResult.rfcEmisor || "").toLowerCase().trim();
+        const tNombre = cleanStr(ocrResult.nombreEmisor || "");
+
+        const matchedConnector = connectors.find((c) => {
+          const cRfc = (c.rfc || "").toLowerCase().trim();
+          if (tRfc && cRfc && tRfc === cRfc) return true;
+
+          const cNombre = cleanStr(c.nombre || "");
+          if (!tNombre || !cNombre) return false;
+
+          if (tNombre.includes(cNombre) || cNombre.includes(tNombre)) return true;
+
+          const tWords = tNombre.split(/\s+/).filter(w => w.length > 2);
+          const cWords = cNombre.split(/\s+/).filter(w => w.length > 2);
+          return tWords.some(w => cWords.includes(w));
+        });
+
+        if (!matchedConnector) {
+          await onUpdateTicketInDb(ticket.id, {
+            status: "review",
+            isOfflinePending: false,
+            wasProcessedOffline: true,
+            rfcEmisor: ocrResult.rfcEmisor,
+            nombreEmisor: ocrResult.nombreEmisor,
+            fechaCompra: ocrResult.fechaCompra,
+            folio: ocrResult.folio,
+            total: ocrResult.total,
+            sucursal: ocrResult.sucursal || "",
+            itemsJson: JSON.stringify(ocrResult.items),
+            errorMsg: "OCR completado pero no se encontró un portal de autofactura para este emisor. Conéctalo manualmente."
+          });
+          if (syncToastId) toast.dismiss(syncToastId);
+          toast.warning(
+            `Ticket de ${ocrResult.nombreEmisor || "Establecimiento"} digitalizado, pero requiere conectar un portal manualmente.`
+          );
+          continue;
+        }
+
+        const currentPlanStr = fiscalProfile?.plan || "gratuito";
+        if (currentPlanStr !== "gratuito" && fiscalProfile?.paymentStatus !== "paid" && fiscalProfile?.paymentStatus !== "subscription_active") {
+          throw new Error("Suscripción de pago inactiva.");
+        }
+
+        const authResponse = await runAutomation({
+          ticket: ocrResult,
+          profile: fiscalProfile,
+          connector: matchedConnector
+        });
+
+        if (!authResponse.ok) {
+          throw new Error("El motor del SAT reportó un error al certificar el CFDI.");
+        }
+
+        const invoiceData = await authResponse.json();
+
+        await onSaveInvoiceToDb(
+          ticket.id,
+          invoiceData.xmlContent,
+          invoiceData.pdfHtml,
+          invoiceData.folioFiscal,
+          ocrResult.rfcEmisor,
+          ocrResult.nombreEmisor,
+          ocrResult.total,
+          invoiceData.cost !== undefined ? invoiceData.cost : 2.50,
+          "existente",
+          invoiceData.rawCost !== undefined ? invoiceData.rawCost : 0
+        );
+
+        await onUpdateTicketInDb(ticket.id, {
+          status: "completed",
+          invoiceId: invoiceData.folioFiscal,
+          isOfflinePending: false,
+          wasProcessedOffline: true,
+          rfcEmisor: ocrResult.rfcEmisor,
+          nombreEmisor: ocrResult.nombreEmisor,
+          fechaCompra: ocrResult.fechaCompra,
+          folio: ocrResult.folio,
+          total: ocrResult.total,
+          sucursal: ocrResult.sucursal || "",
+          itemsJson: JSON.stringify(ocrResult.items),
+        });
+
+        if (syncToastId) toast.dismiss(syncToastId);
+        toast.success(
+          `Factura emitida para ${ocrResult.nombreEmisor} por un total de $${ocrResult.total} MXN (Sincronización Offline).`
+        );
+
+      } catch (err) {
+        console.error(`Error syncing offline ticket ${ticket.id}:`, err);
+        await onUpdateTicketInDb(ticket.id, {
+          status: "review",
+          isOfflinePending: false,
+          errorMsg: err.message || "Error durante procesamiento automático offline."
+        });
+        if (syncToastId) toast.dismiss(syncToastId);
+        toast.error(
+          `Error al procesar ticket offline: ${err.message || "Error de conexión/SAT"}`
+        );
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!user) return;
+
+    const handleOnline = () => {
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
+      syncOfflineTickets().finally(() => {
+        isSyncingRef.current = false;
+      });
+    };
+
+    window.addEventListener("online", handleOnline);
+
+    if (window.navigator.onLine && !isSyncingRef.current) {
+      const hasPending = tickets.some(t => t.isOfflinePending);
+      if (hasPending && fiscalProfile && connectors.length > 0) {
+        isSyncingRef.current = true;
+        syncOfflineTickets().finally(() => {
+          isSyncingRef.current = false;
+        });
+      }
+    }
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [tickets, fiscalProfile, connectors, user]);
 
   const recoverUserHistoryByMatchingDetails = async (targetEmail, targetPhone, targetRfc) => {
     if (!user) return;
@@ -1095,43 +1315,58 @@ export const Dashboard = () => {
             </div>
 
              {/* Navigation Menu Links */}
-            <nav className="flex flex-col gap-1.5 px-0.5">
-              {(() => {
-                const navItems = [
-                  { tab: "capturar", label: "Inicio", icon: <Home className="w-4 h-4" /> },
-                  { tab: "tickets", label: "Mis Tickets", icon: <Layers className="w-4 h-4" /> },
-                  { tab: "historial", label: "Gastos", icon: <History className="w-4 h-4" /> },
-                  { tab: "cuenta", label: "Mi Cuenta", icon: <User className="w-4 h-4" /> }
-                ];
-                if (isAdmin) {
-                  navItems.push({ tab: "admin", label: "Administración", icon: <Shield className="w-4 h-4" /> });
-                }
-                return navItems;
-              })().map((item) => {
-                const isDisabled = (!isProfileComplete && item.tab !== "cuenta") || isNavigationDisabled;
-                return (
-                  <button
-                    key={item.tab}
-                    onClick={() => handleTabClick(item.tab)}
-                    disabled={isDisabled}
-                    className={`flex items-center gap-3 w-full px-4.5 py-3.5 rounded-xl text-[11.5px] uppercase font-display font-extrabold tracking-wider transition-all duration-200 ${
-                      isDisabled 
-                        ? "opacity-40 cursor-not-allowed text-slate-400 hover:bg-transparent" 
-                        : "cursor-pointer"
-                    } ${
-                      activeTab === item.tab && !isDisabled
-                        ? "zt-btn-primary text-white scale-[1.02] shadow-sm shadow-blue-500/20"
-                        : isDisabled ? "" : "text-slate-500 hover:text-slate-900 hover:bg-slate-200/30"
-                    }`}
-                  >
-                    <span className={`transition-transform duration-150 ${activeTab === item.tab && !isDisabled ? "text-white scale-110" : "text-slate-400 group-hover:scale-110"}`}>
-                      {item.icon}
-                    </span>
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
+            <nav 
+               className="flex flex-col gap-1.5 px-0.5"
+               onMouseLeave={() => setHoveredTab(null)}
+             >
+               {(() => {
+                 const navItems = [
+                   { tab: "capturar", label: "Inicio", icon: <Home className="w-4 h-4" /> },
+                   { tab: "tickets", label: "Mis Tickets", icon: <Layers className="w-4 h-4" /> },
+                   { tab: "historial", label: "Gastos", icon: <History className="w-4 h-4" /> },
+                   { tab: "cuenta", label: "Mi Cuenta", icon: <User className="w-4 h-4" /> }
+                 ];
+                 if (isAdmin) {
+                   navItems.push({ tab: "admin", label: "Administración", icon: <Shield className="w-4 h-4" /> });
+                 }
+                 return navItems;
+               })().map((item) => {
+                 const isDisabled = (!isProfileComplete && item.tab !== "cuenta") || isNavigationDisabled;
+                 const isHovered = hoveredTab === item.tab;
+                 const isActive = activeTab === item.tab;
+                 const isHighlighted = isHovered || (hoveredTab === null && isActive);
+
+                 return (
+                    <button
+                      key={item.tab}
+                      onClick={() => handleTabClick(item.tab)}
+                      onMouseEnter={() => !isDisabled && setHoveredTab(item.tab)}
+                      disabled={isDisabled}
+                      className={`flex items-center gap-3 w-full px-4.5 py-3.5 rounded-xl text-[11.5px] uppercase font-display font-extrabold tracking-wider transition-all duration-200 relative overflow-hidden ${
+                        isDisabled 
+                          ? "opacity-40 cursor-not-allowed text-slate-400 hover:bg-transparent" 
+                          : "cursor-pointer active:scale-[0.98]"
+                      } ${
+                        isHighlighted && !isDisabled
+                          ? "zt-nav-highlighted text-white hover:transform-none shadow-md shadow-[#0B53F4]/15"
+                          : isDisabled ? "" : "text-slate-500 hover:text-slate-900"
+                      }`}
+                    >
+                      {isHighlighted && !isDisabled && (
+                        <motion.div
+                          layoutId="desktop-sidebar-nav-pill"
+                          className="absolute inset-0 zt-btn-primary -z-10 rounded-xl"
+                          transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                        />
+                      )}
+                      <span className={`transition-transform duration-150 relative z-10 ${isHighlighted && !isDisabled ? "text-white scale-110" : "text-slate-400 group-hover:scale-110"}`}>
+                        {item.icon}
+                      </span>
+                      <span className="relative z-10">{item.label}</span>
+                    </button>
+                  );
+               })}
+             </nav>
           </div>
 
           <div className="space-y-4 pt-5 border-t border-slate-200/45 px-1">
@@ -1175,14 +1410,14 @@ export const Dashboard = () => {
             <button
               type="button"
               onClick={handleNotificationsClick}
-              className="relative p-2 rounded-lg bg-slate-150/80 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700 text-slate-650 dark:text-slate-350 cursor-pointer transition select-none hover:bg-slate-200/60 dark:hover:bg-slate-700"
+              className="relative p-2 rounded-lg zt-btn-secondary-blue cursor-pointer transition select-none"
               title="Alertas y Notificaciones"
             >
-              <svg className="w-4.5 h-4.5 text-slate-600 dark:text-slate-400" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
+              <svg className="w-4.5 h-4.5 text-[#0B53F4]" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
               </svg>
               {hasUnreadNotifications && (
-                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#FFB200] rounded-full border-2 border-white dark:border-[#0b0d19]" />
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#FFB200] rounded-full border-2 border-[#ebf1ff]" />
               )}
             </button>
 
@@ -1216,21 +1451,21 @@ export const Dashboard = () => {
 
       {/* 3. MAIN WORKSPACE VIEW ROUTER (shifted left on desktop to clear sidebar space) */}
       <div className="flex-1 flex flex-col md:pl-66 min-w-0">
-        <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 relative">
+        <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-8 flex-1 relative">
           
           {/* Notification Bell Button (Desktop only, aligned with page titles) */}
-          <div className="hidden md:block absolute top-[34px] right-4 sm:right-6 lg:right-8 z-30">
+          <div className="hidden md:block absolute top-[24px] right-4 sm:right-6 lg:right-8 z-30">
             <button
               type="button"
               onClick={handleNotificationsClick}
-              className="relative p-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-800 border border-slate-200/50 shadow-2xs transition cursor-pointer select-none"
+              className="relative p-2.5 rounded-xl zt-btn-secondary-blue shadow-2xs transition cursor-pointer select-none"
               title="Alertas y Notificaciones"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.3" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-[#0B53F4]" fill="none" stroke="currentColor" strokeWidth="2.3" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
               </svg>
               {hasUnreadNotifications && (
-                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#FFB200] rounded-full border-2 border-white" />
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#FFB200] rounded-full border-2 border-[#ebf1ff]" />
               )}
             </button>
           </div>

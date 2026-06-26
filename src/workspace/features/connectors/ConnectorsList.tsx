@@ -619,7 +619,7 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
               {/* Scrollable grid list of connectors */}
               <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 scrollbar-none">
                 {modalFilteredConnectors.length === 0 ? (
-                  <div className="py-14 border border-dashed border-slate-150 rounded-2.5xl text-center">
+                  <div className="py-14 border border-dashed border-slate-150 rounded-2xl text-center">
                     <HelpCircle className="w-10 h-10 text-slate-300 mx-auto mb-2 opacity-50" />
                     <p className="text-sm font-extrabold text-slate-800">No hay conectores</p>
                     <p className="text-xs text-slate-400 mt-1">Intente cambiar la categoría o buscar otra empresa.</p>
@@ -636,7 +636,7 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
                     return (
                       <div
                         key={connector.id}
-                        className="bg-white border border-slate-200/60 rounded-2.5xl shadow-4xs hover:border-[#0B53F4]/20 transition-all duration-150 overflow-hidden text-left"
+                        className="bg-white border border-slate-200/60 rounded-2xl shadow-4xs hover:border-[#0B53F4]/20 transition-all duration-150 overflow-hidden text-left"
                       >
                         {/* Interactive header block */}
                         <div 

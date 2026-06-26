@@ -47,10 +47,16 @@ const Landing = () => {
   return (
     <main className="overflow-hidden bg-white">
       <Navbar 
-        onCtaClick={() => triggerAuth("signup")} 
+        onCtaClick={() => {
+          localStorage.setItem("selectedPlanOnSignup", "gratuito");
+          triggerAuth("signup");
+        }} 
         onLoginClick={() => triggerAuth("signin")} 
       />
-      <Hero onCtaClick={() => triggerAuth("signup")} />
+      <Hero onCtaClick={() => {
+        localStorage.setItem("selectedPlanOnSignup", "gratuito");
+        triggerAuth("signup");
+      }} />
       <LogosBar />
       <ProblemSection />
       <AssistantSection />
@@ -58,12 +64,21 @@ const Landing = () => {
       <BenefitsCarousel />
       <ComparisonTable />
       <StatsBar />
-      <PricingSection onChoose={() => triggerAuth("signup")} />
+      <PricingSection onChoose={(planId) => {
+        localStorage.setItem("selectedPlanOnSignup", planId);
+        triggerAuth("signup");
+      }} />
       <TestimonialsSection />
       <FAQSection />
       <FinalCTA
-        onCtaClick={() => triggerAuth("signup")}
-        onDemoClick={() => triggerAuth("signup")}
+        onCtaClick={() => {
+          localStorage.setItem("selectedPlanOnSignup", "gratuito");
+          triggerAuth("signup");
+        }}
+        onDemoClick={() => {
+          localStorage.setItem("selectedPlanOnSignup", "gratuito");
+          triggerAuth("signup");
+        }}
       />
       <Footer />
 

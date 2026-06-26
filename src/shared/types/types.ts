@@ -103,6 +103,8 @@ export interface Ticket {
   cost?: number; // OCR cost
   rawCost?: number; // Raw model token-based cost
   learningApprovedByAdmin?: boolean;
+  isOfflinePending?: boolean;
+  wasProcessedOffline?: boolean;
 }
 
 export interface ConnectorField {

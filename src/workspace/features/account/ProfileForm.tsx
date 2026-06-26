@@ -5,7 +5,8 @@ import {
   Save, AlertCircle, Sparkles, CreditCard, Shield, HelpCircle, 
   CheckCircle, Info, ChevronRight, Palette, Bell, Globe, 
   BookOpen, MessageSquare, Trash2, LogOut, Plus, MoreVertical, Pencil,
-  ArrowLeft, Smartphone, Lock, X, Infinity, Check, Sliders, Volume2, ShieldCheck, HeartPulse
+  ArrowLeft, Smartphone, Lock, X, Infinity, Check, Sliders, Volume2, ShieldCheck, HeartPulse,
+  ChevronDown
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { auth } from "@/services/firebase/firebase";
@@ -119,6 +120,19 @@ export default function ProfileForm({
   const toast = useToast();
   // State for automatic renewal choice inside the checkout flow
   const [autoRenewChoice, setAutoRenewChoice] = useState(true);
+  const sessionUser = auth.currentUser;
+  const sessionEmail = currentUserEmail || sessionUser?.email || "";
+  const sessionName = sessionUser?.displayName || (sessionEmail ? sessionEmail.split("@")[0] : "");
+  const isPlaceholderFiscalValue = (value?: string | null) => {
+    const normalized = (value || "").trim().toUpperCase();
+    return !normalized ||
+      normalized === "CABE850101ABC" ||
+      normalized === "GOMD850101XYZ" ||
+      normalized === "RICARDO CASTRO BECERRIL" ||
+      normalized === "CONSTRUCTORA LEGION DEL NORTE SA DE CV";
+  };
+  const savedFiscalName = !isPlaceholderFiscalValue(initialProfile?.razonSocial) ? initialProfile?.razonSocial : "";
+  const savedFiscalRfc = !isPlaceholderFiscalValue(initialProfile?.rfc) ? initialProfile?.rfc : "";
 
   // Helper functions for validating card numbers using the Luhn Algorithm and detecting bank names
   const getCardBankInfo = (cardNumber: string) => {
@@ -198,11 +212,11 @@ export default function ProfileForm({
 
   const renderVisualBrandBlock = (card: any, size: "sm" | "md" = "md") => {
     const logoSrc = getCardLogo(card);
-    const sizeClasses = size === "sm" ? "w-10 h-6 text-[8px]" : "w-12 h-8 text-[10px]" ;
+    const sizeClasses = size === "sm" ? "w-12 h-12 text-[10px]" : "w-14 h-14 text-[12px]" ;
     
     if (logoSrc) {
       return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg p-1 border border-slate-200 shadow-3xs flex items-center justify-center shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl p-1.5 border border-slate-200 shadow-3xs flex items-center justify-center shrink-0`}>
           <img 
             src={logoSrc} 
             className="w-full h-full object-contain select-none" 
@@ -214,56 +228,56 @@ export default function ProfileForm({
 
     if (card.brand === "VISA") {
       return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-[#010915] font-serif font-extrabold italic tracking-wider select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-[#010915] font-serif font-black italic tracking-wider select-none shadow-sm shrink-0`}>
           VISA
         </div>
       );
     }
     if (card.brand === "AMEX") {
       return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 ${size === "sm" ? "text-[7.5px]" : "text-[8.5px]"} text-[#00829B] font-mono font-black tracking-widest select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 ${size === "sm" ? "text-[8.5px]" : "text-[9.5px]"} text-[#00829B] font-mono font-black tracking-widest select-none shadow-sm shrink-0`}>
           AMEX
         </div>
       );
     }
     if (card.brand === "MERCADOPAGO") {
       return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-[#00A6EA] font-sans font-black select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-[#00A6EA] font-sans font-black select-none shadow-sm shrink-0`}>
           MP
         </div>
       );
     }
     if (card.brand === "APPLEPAY") {
       return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-black font-sans font-black select-none shadow-sm shrink-0`}>
-           Pay
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-black font-sans font-black select-none shadow-sm shrink-0`}>
+          Apple Pay
         </div>
       );
     }
     if (card.brand === "GOOGLEPAY") {
       return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-[#202124] font-sans font-black select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-[#202124] font-sans font-black select-none shadow-sm shrink-0`}>
           G Pay
         </div>
       );
     }
     if (card.brand === "SPINBYOXXO") {
       return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-[#5D2D91] font-sans font-black select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-[#5D2D91] font-sans font-black select-none shadow-sm shrink-0`}>
           SPIN
         </div>
       );
     }
     if (card.brand === "PAYPAL") {
       return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-[#003087] font-sans font-black italic select-none shadow-sm shrink-0`}>
+        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-[#003087] font-sans font-black italic select-none shadow-sm shrink-0`}>
           PayPal
         </div>
       );
     }
     return (
-      <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-lg flex items-center justify-center border border-slate-200 text-rose-600 font-sans font-black italic select-none shadow-sm relative overflow-hidden shrink-0`}>
-        <span className="relative z-10 text-[9px] uppercase tracking-tighter">MC</span>
+      <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-rose-600 font-sans font-black italic select-none shadow-sm relative overflow-hidden shrink-0`}>
+        <span className="relative z-10 text-[10px] uppercase tracking-tighter">MC</span>
       </div>
     );
   };
@@ -275,207 +289,69 @@ export default function ProfileForm({
     return true;
   };
 
+  const getCheckoutEndpointForWallet = (walletName: string) => {
+    if (walletName === "Mercado Pago") {
+      return autoRenewChoice ? "/api/billing/subscription/mercadopago" : "/api/billing/checkout/mercadopago";
+    }
+    if (walletName === "PayPal") return "/api/billing/checkout/paypal";
+    return "/api/billing/checkout/stripe";
+  };
+
+  const openOfficialCheckoutPopup = (checkoutUrl: string, walletName: string) => {
+    const width = 480;
+    const height = 720;
+    const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
+    const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
+    localStorage.setItem("pendingCheckoutWallet", walletName);
+    const popup = window.open(
+      checkoutUrl,
+      `${walletName} Checkout`,
+      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    if (!popup) {
+      toast.error(`El navegador bloqueó la ventana emergente de ${walletName}. Habilita pop-ups para completar el pago.`);
+      return false;
+    }
+    popup.focus();
+    return true;
+  };
+
   const handleDigitalWalletPayment = async (walletName: string) => {
     if (isProcessingWallet || isProcessingPayment) return;
     setIsProcessingWallet(true);
 
-    if (walletName === "Stripe") {
-      toast.info("Iniciando conexión segura con Stripe Checkout...", "Stripe Checkout");
-      try {
-        const checkoutPlan = checkoutPlanType || "personal";
-        const response = await fetch("/api/billing/checkout/stripe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: initialProfile?.userId || "guest",
-            planId: checkoutPlan
-          })
-        });
-
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || "No se pudo iniciar el flujo de pago con Stripe.");
-        }
-
-        const data = await response.json();
-        if (data.checkoutUrl) {
-          toast.success("Redirigiendo a Stripe Checkout...");
-          window.location.href = data.checkoutUrl;
-        } else {
-          throw new Error("No se recibió la dirección de pago de Stripe.");
-        }
-      } catch (err: any) {
-        console.error("Stripe payment init error:", err);
-        toast.error(err.message || "Error de conexión con Stripe Checkout. Intenta nuevamente.");
-      } finally {
-        setIsProcessingWallet(false);
-      }
-      return;
-    }
-
-    if (walletName === "Google Pay") {
-      toast.info("Cargando servicios seguros de Google Pay...", "Google Pay");
-      
-      try {
-        // 1. Load Google Pay and PayPal SDKs
-        await loadScript("https://pay.google.com/gp/p/js/pay.js");
-        
-        const clientId = await fetchPayPalClientId();
-        if (!clientId) {
-          throw new Error("No se pudo obtener el Client ID de PayPal.");
-        }
-        
-        await loadScript(`https://www.sandbox.paypal.com/sdk/js?client-id=${clientId}&currency=MXN&components=googlepay`);
-        
-        if (!(window as any).paypal || !(window as any).paypal.Googlepay) {
-          throw new Error("El SDK de Google Pay de PayPal no se pudo inicializar.");
-        }
-        
-        const googlePay = (window as any).paypal.Googlepay();
-        const gpayConfig = await googlePay.config();
-        
-        // 2. Initialize Google Pay Client
-        const paymentsClient = new (window as any).google.payments.api.PaymentsClient({
-          environment: "TEST" // Sandbox environment
-        });
-        
-        // Check if GPay is eligible
-        const isReadyToPayRequest = {
-          apiVersion: 2,
-          apiVersionMinor: 0,
-          allowedPaymentMethods: gpayConfig.allowedPaymentMethods
-        };
-        
-        const isReady = await paymentsClient.isReadyToPay(isReadyToPayRequest);
-        if (!isReady.result) {
-          throw new Error("Google Pay no está disponible en este dispositivo o navegador.");
-        }
-        
-        // 3. Create PayPal Order
-        toast.info("Generando orden de pago en PayPal...", "Procesando Orden");
-        const checkoutPlan = checkoutPlanType || "brisa"; // Fallback if null
-        
-        const orderRes = await fetch("/api/billing/checkout/paypal", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: initialProfile?.userId || "guest",
-            planId: checkoutPlan
-          })
-        });
-        
-        if (!orderRes.ok) {
-          const errData = await orderRes.json();
-          throw new Error(errData.error || "Fallo al crear orden de PayPal");
-        }
-        
-        const orderData = await orderRes.json();
-        const orderId = orderData.orderId;
-        
-        if (!orderId) {
-          throw new Error("No se recibió el ID de orden desde PayPal.");
-        }
-        
-        // 4. Open Google Pay Payment Sheet
-        toast.info("Abriendo ventana segura de Google Pay...", "Google Pay");
-        
-        const price = checkoutPlan === "personal" ? 150.00 : checkoutPlan === "empresa" ? 300.00 : checkoutPlan === "brisa" ? 99.00 : checkoutPlan === "serenidad" ? 250.00 : 500.00;
-        const paymentDataRequest = {
-          apiVersion: 2,
-          apiVersionMinor: 0,
-          allowedPaymentMethods: gpayConfig.allowedPaymentMethods,
-          transactionInfo: {
-            totalPriceStatus: "FINAL",
-            totalPrice: price.toFixed(2),
-            currencyCode: "MXN",
-            countryCode: "MX"
-          },
-          merchantInfo: {
-            merchantName: "ZenTicket - Ricardo Castro Becerril"
-          }
-        };
-        
-        const paymentData = await paymentsClient.loadPaymentData(paymentDataRequest);
-        
-        // 5. Confirm Order on PayPal
-        toast.info("Capturando fondos y activando suscripción...", "Procesando Cobro");
-        
-        const confirmResult = await googlePay.confirmOrder({
-          orderId: orderId,
-          paymentMethodData: paymentData.paymentMethodData
-        });
-        
-        if (confirmResult.status === "APPROVED") {
-          // Success! Update Firestore and display toast
-          await onSave({
-            userId: initialProfile?.userId || "guest",
-            rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
-            razonSocial: razonSocial?.trim().toUpperCase() || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
-            regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-            codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
-            usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-            createdAt: initialProfile?.createdAt || new Date().toISOString(),
-            personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-            plan: checkoutPlan,
-            planStartDate: new Date().toISOString(),
-            autoRenew: autoRenewChoice,
-            paymentCards: cards
-          });
-          
-          toast.success(
-            `¡Pago aprobado con éxito! Tu suscripción al Plan ${checkoutPlan.toUpperCase()} de ZenTicket está activa y se cobraron $${price} MXN a través de Google Pay.`,
-            "Suscripción Lista"
-          );
-          setCheckoutPlanType(null);
-          setActiveModal(null);
-        } else {
-          throw new Error(`La transacción no fue aprobada (Estado: ${confirmResult.status}).`);
-        }
-      } catch (err: any) {
-        console.error("GPay integration error:", err);
-        toast.error(err.message || "Error al completar el pago con Google Pay. Intente otro método.");
-      } finally {
-        setIsProcessingWallet(false);
-      }
-      return;
-    }
-
-    // Default simulation for other wallets
-    const cost = checkoutPlanType === "personal" ? 150 : 300;
-    toast.info(`Iniciando conexión segura con ${walletName}... Por favor, autorice la transacción en su cartera digital.`, "Conexión Segura");
-
-    // Realistic API interaction timeout
-    await new Promise(resolve => setTimeout(resolve, 1800));
+    const providerForMessage = walletName === "Google Pay" ? "Stripe Checkout" : walletName;
+    toast.info(`Abriendo checkout oficial de ${providerForMessage}...`, "Pago seguro");
 
     try {
-      await onSave({
-        userId: initialProfile?.userId || "guest",
-        rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
-        razonSocial: razonSocial?.trim().toUpperCase() || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
-        regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-        codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
-        usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-        createdAt: initialProfile?.createdAt || new Date().toISOString(),
-        personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-        plan: checkoutPlanType,
-        planStartDate: new Date().toISOString(),
-        autoRenew: autoRenewChoice,
-        paymentCards: cards
+      const checkoutPlan = checkoutPlanType || "brisa";
+      const endpoint = getCheckoutEndpointForWallet(walletName);
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: initialProfile?.userId || "guest",
+          planId: checkoutPlan,
+          payerEmail: correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail || undefined
+        })
       });
 
-      toast.success(
-        `¡Pago aprobado con éxito! Tu suscripción al Plan ${checkoutPlanType === "personal" ? "Personal" : "Empresa"} de ZenTicket está activa y se cobraron $${cost} MXN a través de su cuenta de ${walletName}.`,
-        "Suscripción Lista"
-      );
-      setCheckoutPlanType(null);
-      setActiveModal(null);
-    } catch (err) {
-      toast.error(`Error al autenticar la transacción con la pasarela de ${walletName}. Verifique sus fondos o conexión.`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `No se pudo iniciar el checkout oficial de ${providerForMessage}.`);
+      }
+      if (!data.checkoutUrl) {
+        throw new Error(`La pasarela de ${providerForMessage} no devolvió una URL de pago.`);
+      }
+
+      openOfficialCheckoutPopup(data.checkoutUrl, providerForMessage);
+    } catch (err: any) {
+      console.error(`${walletName} payment init error:`, err);
+      toast.error(err.message || `Error de conexión con ${providerForMessage}. Intenta nuevamente.`);
     } finally {
       setIsProcessingWallet(false);
     }
   };
-
   // 3D Secure 2.0 / Strong Customer Authentication states
   const [bankAuthVisible, setBankAuthVisible] = useState(false);
   const [bankAuthCard, setBankAuthCard] = useState<any>(null);
@@ -493,10 +369,10 @@ export default function ProfileForm({
   const [isSyncingGPay, setIsSyncingGPay] = useState(false);
 
   // Fiscal Profile state registers
-  const [rfc, setRfc] = useState(initialProfile?.rfc || "CABE850101ABC");
-  const [razonSocial, setRazonSocial] = useState(initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL");
-  const [regimenFiscal, setRegimenFiscal] = useState(initialProfile?.regimenFiscal || "626");
-  const [codigoPostal, setCodigoPostal] = useState(initialProfile?.codigoPostal || "02000");
+  const [rfc, setRfc] = useState(savedFiscalRfc || "");
+  const [razonSocial, setRazonSocial] = useState(savedFiscalName || "");
+  const [regimenFiscal, setRegimenFiscal] = useState(initialProfile?.regimenFiscal || "");
+  const [codigoPostal, setCodigoPostal] = useState(initialProfile?.codigoPostal || "");
   const [usoCFDI, setUsoCFDI] = useState(initialProfile?.usoCFDI || "G03");
   const [hasSavedFiscalData, setHasSavedFiscalData] = useState(() => {
     if (!initialProfile || !initialProfile.rfc || !initialProfile.razonSocial) return false;
@@ -539,11 +415,10 @@ export default function ProfileForm({
         personalGeminiKey,
       });
 
-      if (!res.ok) {
-        throw new Error("No se pudo analizar la constancia");
-      }
-
       const data = await res.json();
+      if (!res.ok || data.ocrFailed) {
+        throw new Error(data.error || "No se pudo analizar la constancia sin inventar datos");
+      }
       
       if (data.rfc) setRfc(data.rfc.toUpperCase().trim());
       if (data.razonSocial) setRazonSocial(data.razonSocial.toUpperCase().trim());
@@ -593,212 +468,163 @@ export default function ProfileForm({
     }
   };
 
-  // Cards State synchronized with Firestore or pre-seeded high-fidelity defaults
+  // Cards saved in Firestore. New cards are captured only by the official processor checkout.
   const [cards, setCards] = useState<PaymentCard[]>(() => {
-    const userEmail = initialProfile?.userId || initialProfile?.correoRecepcion || auth.currentUser?.email || "";
-    const emailLower = userEmail.toLowerCase();
-    const isLegion = emailLower.includes("legionrender") || 
-                     emailLower.includes("ricardo") || 
-                     initialProfile?.userId === "legionrender" || 
-                     initialProfile?.rfc === "GOMD850101XYZ" || 
-                     initialProfile?.razonSocial === "CONSTRUCTORA LEGION DEL NORTE SA DE CV";
     if (initialProfile?.paymentCards && initialProfile.paymentCards.length > 0) {
-      return initialProfile.paymentCards;
+      return initialProfile.paymentCards.filter((card) => card.last4 !== "Cuenta Vinculada");
     }
-    const realName = isLegion ? "RICARDO CASTRO BECERRIL" : "JULIAN DANIELS";
-    const defaultLast4 = isLegion ? "9180" : "4242";
-    const defaultBank = isLegion ? "BBVA Bancomer" : "VISA";
-    return [
-      {
-        id: "card_1",
-        brand: "VISA",
-        last4: defaultLast4,
-        expiry: "12/28",
-        isDefault: true,
-        holderName: realName,
-        bankName: defaultBank
-      }
-    ];
+    return [];
   });
 
-  // Keep cards in sync with backend profile snapshot and auto-provision real default cards for active user email
+  // Keep cards in sync with backend profile snapshot.
   React.useEffect(() => {
     if (initialProfile?.paymentCards) {
-      setCards(initialProfile.paymentCards);
+      setCards(initialProfile.paymentCards.filter((card) => card.last4 !== "Cuenta Vinculada"));
     }
   }, [initialProfile?.paymentCards]);
 
-  // Synchronize custom display names & ensure real card with holder name "RICARDO CASTRO BECERRIL" is auto-seeded for legionrender/ricardo
+  // Synchronize custom display names from the saved profile only; do not fabricate fiscal or payment data.
   React.useEffect(() => {
     const userEmail = currentUserEmail || auth.currentUser?.email;
-    const emailLower = (userEmail || "").toLowerCase();
-    const isLegion = emailLower.includes("legionrender") || emailLower.includes("ricardo");
-    
-    if (isLegion) {
-      setNombreCompleto("RICARDO CASTRO BECERRIL");
-      setCorreoElectronico(userEmail || "legionrender@gmail.com");
-      setRfc("GOMD850101XYZ");
-      setRazonSocial("CONSTRUCTORA LEGION DEL NORTE SA DE CV");
-      setCorreoRecepcion(initialProfile?.correoRecepcion || userEmail || "legionrender@gmail.com");
-
-      const hasRealCard = cards.some(c => c.holderName === "RICARDO CASTRO BECERRIL" && c.last4 === "9180");
-      const hasMockDaniels = cards.some(c => c.holderName === "JULIAN DANIELS");
-
-      if (!hasRealCard || hasMockDaniels) {
-        const realCard: PaymentCard = {
-          id: "card_real_ricardo",
-          brand: "VISA",
-          last4: "9180",
-          expiry: "12/28",
-          isDefault: true,
-          holderName: "RICARDO CASTRO BECERRIL",
-          bankName: "BBVA Bancomer"
-        };
-
-        const filteredCards = cards.filter(c => c.holderName !== "JULIAN DANIELS" && c.last4 !== "9180");
-        const listToSave = [realCard, ...filteredCards];
-
-        setCards(listToSave);
-
-        onSave({
-          userId: initialProfile?.userId || "guest",
-          rfc: "GOMD850101XYZ",
-          razonSocial: "CONSTRUCTORA LEGION DEL NORTE SA DE CV",
-          regimenFiscal: regimenFiscal || "626",
-          codigoPostal: codigoPostal || "02000",
-          usoCFDI: usoCFDI || "G03",
-          createdAt: initialProfile?.createdAt || new Date().toISOString(),
-          personalGeminiKey: personalGeminiKey || "",
-          plan: initialProfile?.plan || "gratuito",
-          paymentCards: listToSave,
-          correoRecepcion: initialProfile?.correoRecepcion || "legionrender@gmail.com",
-          facturacionAutomatica: initialProfile?.facturacionAutomatica || false,
-          metodoRecepcion: initialProfile?.metodoRecepcion || "Ambos"
-        }).then(() => {
-          toast.success("¡Hemos detectado tu tarjeta BBVA Bancomer vinculada a tu correo principal y la agregamos con tu nombre real!", "Bóveda Sincronizada");
-        }).catch(err => console.error("Error auto-saving default real card:", err));
+    const userName = auth.currentUser?.displayName || (userEmail ? userEmail.split("@")[0] : "");
+    if (initialProfile) {
+      if (!isPlaceholderFiscalValue(initialProfile.razonSocial)) {
+        setNombreCompleto(initialProfile.razonSocial);
       }
-    } else {
-      if (initialProfile) {
-        if (initialProfile.razonSocial) {
-          setNombreCompleto(initialProfile.razonSocial);
-        }
-        if (initialProfile.rfc) {
-          setRfc(initialProfile.rfc);
-        }
-        if (initialProfile.correoRecepcion) {
-          setCorreoRecepcion(initialProfile.correoRecepcion);
-        } else if (userEmail) {
-          setCorreoRecepcion(userEmail);
-        }
-        if (initialProfile.facturacionAutomatica !== undefined) {
-          setFacturacionAutomatica(initialProfile.facturacionAutomatica);
-        }
-        if (initialProfile.metodoRecepcion) {
-          setMetodoRecepcion(initialProfile.metodoRecepcion);
-        }
+      if (!isPlaceholderFiscalValue(initialProfile.rfc)) {
+        setRfc(initialProfile.rfc);
+      }
+      if (isPlaceholderFiscalValue(initialProfile.razonSocial) && userName) {
+        setNombreCompleto(userName);
+      }
+      if (initialProfile.correoRecepcion) {
+        setCorreoRecepcion(initialProfile.correoRecepcion);
       } else if (userEmail) {
         setCorreoRecepcion(userEmail);
       }
-      if (userEmail) {
-        setCorreoElectronico(userEmail);
+      setCorreoElectronico(initialProfile.correoElectronico || userEmail || "");
+      if (initialProfile.facturacionAutomatica !== undefined) {
+        setFacturacionAutomatica(initialProfile.facturacionAutomatica);
       }
+      if (initialProfile.metodoRecepcion) {
+        setMetodoRecepcion(initialProfile.metodoRecepcion);
+      }
+    } else if (userEmail) {
+      setCorreoRecepcion(userEmail);
+    }
+    if (userEmail) {
+      setCorreoElectronico(initialProfile?.correoElectronico || userEmail);
     }
   }, [currentUserEmail, initialProfile]);
-
-  // Automated transition from "connecting" state to "otp_prompt" state in bank validation simulator
-  React.useEffect(() => {
-    if (bankAuthVisible && bankAuthStatus === "connecting") {
-      const timer = setTimeout(() => {
-        setBankAuthStatus("otp_prompt");
-      }, 2400);
-      return () => clearTimeout(timer);
-    }
-  }, [bankAuthVisible, bankAuthStatus]);
 
   // Add Card Form State
   const [addingCard, setAddingCard] = useState(false);
   const [addingMethodStep, setAddingMethodStep] = useState<"select" | "card" | "connecting">("select");
-  const [selectedMethodToAdd, setSelectedMethodToAdd] = useState<"MERCADOPAGO" | "APPLEPAY" | "GOOGLEPAY" | "SPINBYOXXO" | "PAYPAL" | null>(null);
+  const [selectedMethodToAdd, setSelectedMethodToAdd] = useState<"MERCADOPAGO" | "GOOGLEPAY" | "PAYPAL" | null>(null);
   const [newCardNumber, setNewCardNumber] = useState("");
   const [newCardExpiry, setNewCardExpiry] = useState("");
   const [newCardCvv, setNewCardCvv] = useState("");
   const [newCardHolder, setNewCardHolder] = useState("");
   const [newCardBrand, setNewCardBrand] = useState<"VISA" | "MASTERCARD" | "AMEX">("VISA");
 
-  // Automated connection simulation for digital wallets (Mercado Pago, Apple Pay, Google Pay, Spin by OXXO)
-  React.useEffect(() => {
-    if (addingMethodStep === "connecting" && selectedMethodToAdd) {
-      const timer = setTimeout(async () => {
-        const method = selectedMethodToAdd;
-        const holderName = (currentUserEmail || auth.currentUser?.email || "Julian Daniels").split("@")[0].toUpperCase() || "TITULAR";
-        
-        // Prepare wallet card object
-        const newWalletCard: PaymentCard = {
-          id: "wallet_" + Date.now(),
-          brand: method,
-          last4: "Cuenta Vinculada",
-          expiry: "N/A",
-          holderName: holderName,
-          isDefault: cards.length === 0,
-          bankName: method === "MERCADOPAGO" ? "Mercado Pago" : 
-                    method === "APPLEPAY" ? "Apple Pay" : 
-                    method === "GOOGLEPAY" ? "Google Pay" : 
-                    method === "PAYPAL" ? "PayPal" : "Spin by OXXO"
-        };
-        
-        const updatedCards = [...cards, newWalletCard];
-        setCards(updatedCards);
-        
-        // Save to Firestore
-        try {
-          await onSave({
-            userId: initialProfile?.userId || "guest",
-            rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
-            razonSocial: razonSocial || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
-            regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-            codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
-            usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-            createdAt: initialProfile?.createdAt || new Date().toISOString(),
-            personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-            plan: initialProfile?.plan || "gratuito",
-            paymentCards: updatedCards
-          });
-          toast.success(`¡Tu cuenta de ${newWalletCard.bankName} se ha vinculado y guardado con éxito!`, "Conector Listo");
-        } catch (e) {
-          toast.error("Ocurrió un error al persistir la cuenta vinculada.");
-        } finally {
-          // Reset states to close the connection panel and return to selection/normal view
-          setSelectedMethodToAdd(null);
-          setAddingMethodStep("select");
-          setAddingCard(false);
-        }
-      }, 1500);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [addingMethodStep, selectedMethodToAdd, cards, currentUserEmail, rfc, razonSocial, regimenFiscal, codigoPostal, usoCFDI, initialProfile, personalGeminiKey, onSave]);
+  const currentPlan = initialProfile?.plan || "gratuito";
 
   // Checkout and Purchase state
-  const [checkoutPlanType, setCheckoutPlanType] = useState<"personal" | "empresa" | null>(null);
-  const [selectedCardForPlan, setSelectedCardForPlan] = useState<string>("");
+  const [checkoutPlanType, setCheckoutPlanType] = useState<"gratuito" | "brisa" | "serenidad" | "nirvana" | null>(() => {
+    const saved = localStorage.getItem("selectedPlanOnSignup");
+    if (saved) {
+      localStorage.removeItem("selectedPlanOnSignup");
+      if (saved === "gratuito" || saved === "brisa" || saved === "serenidad" || saved === "nirvana") {
+        return saved as "gratuito" | "brisa" | "serenidad" | "nirvana";
+      }
+    }
+    const profilePlan = initialProfile?.plan;
+    if (profilePlan === "brisa" || profilePlan === "serenidad" || profilePlan === "nirvana") {
+      return profilePlan;
+    }
+    return "brisa";
+  });
+  const selectedPlan = checkoutPlanType !== null ? checkoutPlanType : currentPlan;
+  const [selectedCardForPlan, setSelectedCardForPlan] = useState<string>(
+    (initialProfile?.paymentCards || []).find(c => c.isDefault)?.id || 
+    (initialProfile?.paymentCards || [])[0]?.id || 
+    "mercadopago_wallet"
+  );
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [showOtherPaymentMethods, setShowOtherPaymentMethods] = useState(false);
 
   // Extra Personal and preference parameters matching the detailed mockup
-  const [nombreCompleto, setNombreCompleto] = useState("Julian Daniels");
-  const [correoElectronico, setCorreoElectronico] = useState("julian.d@zenticket.mx");
-  const [telefono, setTelefono] = useState("+52 55 1234 5678");
-  const [correoRecepcion, setCorreoRecepcion] = useState(initialProfile?.correoRecepcion || currentUserEmail || auth.currentUser?.email || "facturas@ejemplo.com");
+  const [nombreCompleto, setNombreCompleto] = useState(savedFiscalName || sessionName || "");
+  const [correoElectronico, setCorreoElectronico] = useState(initialProfile?.correoElectronico || sessionEmail || "");
+  const [telefono, setTelefono] = useState(initialProfile?.telefono || "");
+  const [correoRecepcion, setCorreoRecepcion] = useState(initialProfile?.correoRecepcion || sessionEmail || "");
   const [facturacionAutomatica, setFacturacionAutomatica] = useState(initialProfile?.facturacionAutomatica || false);
   const [metodoRecepcion, setMetodoRecepcion] = useState(initialProfile?.metodoRecepcion || "Ambos"); // "Correo", "Descarga", "Ambos"
   const [dosPasos, setDosPasos] = useState(false);
+
+  // Detect if we are loading the success page inside the Stripe popup redirect
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("status");
+    const plan = params.get("plan");
+    if (window.opener && status === "success") {
+      window.opener.postMessage({ type: "stripe_payment_success", plan }, "*");
+      window.close();
+    }
+  }, []);
+
+  // Listen to messages from popup checkout windows
+  React.useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.data?.type === "stripe_payment_success" || event.data?.type === "wallet_payment_success") {
+        const { plan, wallet } = event.data;
+        const targetPlan = plan || checkoutPlanType || "brisa";
+        const targetWallet = wallet || localStorage.getItem("pendingCheckoutWallet") || "Stripe";
+        const cost = targetPlan === "brisa" ? 5 : 
+                     targetPlan === "serenidad" ? 250 : 
+                     targetPlan === "nirvana" ? 500 : 0;
+        
+        setIsProcessingPayment(true);
+        try {
+          await onSave({
+            userId: initialProfile?.userId || "guest",
+            rfc: rfc || "CABE850101ABC",
+            razonSocial: razonSocial.trim().toUpperCase(),
+            regimenFiscal,
+            codigoPostal,
+            usoCFDI,
+            createdAt: initialProfile?.createdAt || new Date().toISOString(),
+            personalGeminiKey: personalGeminiKey || "",
+            plan: targetPlan,
+            planStartDate: new Date().toISOString(),
+            autoRenew: autoRenewChoice,
+            paymentCards: cards,
+            correoElectronico: correoElectronico || sessionEmail,
+            correoRecepcion: correoRecepcion || sessionEmail
+          });
+          
+          toast.success(
+            `Suscripción al Plan ${targetPlan.toUpperCase()} activada con éxito. Se cobró $${cost} MXN a través de ${targetWallet}.`,
+            "Plan activado"
+          );
+        } catch (err) {
+          toast.error("Error al actualizar la suscripción.");
+        } finally {
+          setIsProcessingPayment(false);
+          localStorage.removeItem("pendingCheckoutWallet");
+          setActiveModal(null);
+        }
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [onSave, initialProfile, rfc, razonSocial, regimenFiscal, codigoPostal, usoCFDI, personalGeminiKey, autoRenewChoice, cards, checkoutPlanType]);
 
   // States for active dialog/modal settings
   const [activeModal, setActiveModal] = useState<"apariencia" | "notificaciones" | "idioma" | "faq" | "tutorial" | "soporte" | "plan" | null>(null);
   const [selectedDetailsCard, setSelectedDetailsCard] = useState<PaymentCard | null>(null);
 
   // Invoices cycle calculation
-  const currentPlan = initialProfile?.plan || "gratuito";
   const planStartDateStr = initialProfile?.planStartDate || initialProfile?.createdAt || new Date().toISOString();
   const planStartDate = new Date(planStartDateStr);
   const cycleInvoices = invoices.filter(inv => {
@@ -806,11 +632,889 @@ export default function ProfileForm({
     return new Date(inv.createdAt) >= planStartDate;
   });
   const cycleInvoicesCount = cycleInvoices.length;
-  const currentPlanLimit = currentPlan === "empresa" ? 60 : currentPlan === "personal" ? 20 : 5;
+  const currentPlanLimit = currentPlan === "nirvana" ? 100 : currentPlan === "serenidad" ? 30 : currentPlan === "brisa" ? 10 : 5;
+  const getPlanLabel = (plan?: string) => {
+    if (plan === "brisa") return "Plan Brisa";
+    if (plan === "serenidad") return "Plan Serenidad";
+    if (plan === "nirvana") return "Plan Nirvana";
+    if (plan === "personal") return "Plan Personal";
+    if (plan === "empresa") return "Plan Empresa";
+    return "Plan Gratuito";
+  };
+  const getPlanPrice = (plan?: string) => {
+    if (plan === "brisa") return "$5";
+    if (plan === "serenidad") return "$250";
+    if (plan === "nirvana") return "$500";
+    if (plan === "personal") return "$150";
+    if (plan === "empresa") return "$300";
+    return "$0";
+  };
+  const hasActivePaidPlan = currentPlan !== "gratuito" &&
+    (initialProfile?.paymentStatus === "paid" || initialProfile?.paymentStatus === "subscription_active" || !!initialProfile?.planStartDate);
+  const isMonthlyQuotaExhausted = currentPlan !== "gratuito" && cycleInvoicesCount >= currentPlanLimit;
+  const isPayingSameActivePlan = checkoutPlanType === currentPlan && hasActivePaidPlan;
+  const shouldDisablePayButton = checkoutPlanType !== "gratuito" && isPayingSameActivePlan && !isMonthlyQuotaExhausted;
 
   const isProfileComplete = true; // No validation locks - the app is completely open for navigation and operation
 
   
+  const renderAddingCardForm = () => {
+    if (!addingCard) return null;
+    return (
+      <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 mb-4 animate-fade-in text-left space-y-4">
+        
+        {false && addingMethodStep === "select" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-black text-slate-850 uppercase tracking-wide block">Seleccionar Método de Pago</span>
+                <span className="text-[9px] text-slate-450 font-bold block mt-0.5">Elige cómo deseas pagar tus planes</span>
+              </div>
+              <button 
+                onClick={() => {
+                  setAddingCard(false);
+                  setAddingMethodStep("select");
+                }} 
+                className="text-slate-450 hover:text-slate-655 font-bold text-xs p-1 cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              {/* Tarjeta Bancaria */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCardForPlan("stripe_wallet");
+                  setAddingCard(false);
+                }}
+                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#0B53F4] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+              >
+                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 text-[#0B53F4] flex items-center justify-center transition shrink-0">
+                  <CreditCard className="w-6 h-6" />
+                </div>
+                <div>
+                  <span className="text-sm font-black text-slate-850 block">Tarjeta Bancaria</span>
+                  <span className="text-xs text-slate-400 font-semibold block mt-1">Crédito o débito por Stripe Checkout</span>
+                </div>
+              </button>
+
+              {/* Stripe Checkout */}
+              <button
+                type="button"
+                onClick={() => {
+                  setAddingCard(false);
+                  handleDigitalWalletPayment("Stripe");
+                }}
+                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#635BFF] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+              >
+                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0 p-2 shadow-3xs">
+                  <img src={stripeLogo} className="w-full h-full object-contain" alt="Stripe" />
+                </div>
+                <div>
+                  <span className="text-sm font-black text-slate-850 block">Stripe Checkout</span>
+                  <span className="text-xs text-slate-400 font-semibold block mt-1">Pago seguro con tarjeta</span>
+                </div>
+              </button>
+
+              {/* Mercado Pago */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCardForPlan("mercadopago_wallet");
+                  setAddingCard(false);
+                }}
+                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#00A6EA] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+              >
+                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                  <img src={mercadoPagoLogo} className="w-full h-full object-contain" alt="Mercado Pago" />
+                </div>
+                <div>
+                  <span className="text-sm font-black text-slate-850 block">Mercado Pago</span>
+                  <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
+                </div>
+              </button>
+
+              {/* Google Pay */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCardForPlan("googlepay_wallet");
+                  setAddingCard(false);
+                }}
+                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#202124] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+              >
+                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                  <img src={googlePayLogo} className="w-full h-full object-contain" alt="Google Pay" />
+                </div>
+                <div>
+                  <span className="text-sm font-black text-slate-850 block">Google Pay</span>
+                  <span className="text-xs text-slate-400 font-semibold block mt-1">Disponible dentro de Stripe Checkout</span>
+                </div>
+              </button>
+
+              {/* PayPal */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCardForPlan("paypal_wallet");
+                  setAddingCard(false);
+                }}
+                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#003087] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+              >
+                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                  <img src={paypalLogo} className="w-full h-full object-contain" alt="PayPal" />
+                </div>
+                <div>
+                  <span className="text-sm font-black text-slate-850 block">PayPal</span>
+                  <span className="text-xs text-slate-400 font-semibold block mt-1">Pago seguro con PayPal</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {addingMethodStep === "card" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div>
+                  <span className="text-xs font-black text-slate-800 uppercase tracking-wide block">Alta de Tarjeta</span>
+                  <span className="text-[9px] text-slate-400 font-bold block mt-0.5">Registro de tarjeta de credito o debito</span>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setAddingCard(false);
+                  setAddingMethodStep("select");
+                }} 
+                className="text-slate-400 hover:text-slate-655 font-bold text-xs p-1 cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            {/* Card visual showcase with dynamic bank theme */}
+            {(() => {
+              const bankInfo = getCardBankInfo(newCardNumber);
+              return (
+                <div className={`bg-gradient-to-br ${bankInfo.bgColor} text-white rounded-2xl p-5 relative overflow-hidden shadow-lg font-mono select-none h-38 flex flex-col justify-between transition-all duration-300 border border-white/10`}>
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-tr from-white/10 to-transparent rounded-full blur-xl pointer-events-none" />
+                  <div className="flex justify-between items-start z-10">
+                    <div className="text-left">
+                      <span className="text-[8px] font-black tracking-widest text-white/50 block font-sans">RED DE PAGOS GLOBAL</span>
+                      <span className="text-[10px] font-black text-white leading-none mt-0.5 block font-sans">
+                        {bankInfo.bankName}
+                      </span>
+                    </div>
+                    <span className="text-xs font-extrabold italic tracking-wider text-slate-900 bg-white/95 px-2.5 py-1 rounded-lg shadow-sm border border-slate-100 uppercase">
+                      {newCardBrand}
+                    </span>
+                  </div>
+                  <div className="text-base tracking-widest font-black my-2 z-10 text-center text-white drop-shadow-sm">
+                    {newCardNumber ? newCardNumber.replace(/(\d{4})/g, "$1 ").trim() : "**** **** **** ****"}
+                  </div>
+                  <div className="flex justify-between text-[9px] items-end font-sans z-10 border-t border-white/10 pt-1.5">
+                    <div>
+                      <span className="text-[7px] text-white/50 block tracking-wider uppercase leading-none mb-1">TITULAR DE LA TARJETA</span>
+                      <span className="font-extrabold font-mono tracking-tight uppercase text-white/90">{newCardHolder.toUpperCase() || "NOMBRE DEL TITULAR"}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[7px] text-white/50 block tracking-wider uppercase leading-none mb-1">EXPIRA EN</span>
+                      <span className="font-mono font-extrabold text-white/95">{newCardExpiry || "MM/YY"}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+
+            <div className="grid grid-cols-2 gap-3.5">
+              <div className="col-span-2 space-y-1">
+                <div className="flex justify-between items-center px-1">
+                  <label className="text-[9.5px] font-black text-slate-455 uppercase tracking-widest block">Numero de Tarjeta</label>
+                  {newCardNumber.length >= 13 && (
+                    isValidLuhn(newCardNumber) ? (
+                      <span className="text-[8.5px] text-emerald-600 font-extrabold uppercase">Tarjeta valida</span>
+                    ) : (
+                      <span className="text-[8.5px] text-rose-500 font-extrabold uppercase">Formato invalido</span>
+                    )
+                  )}
+                </div>
+                <input 
+                  type="text" 
+                  maxLength={19} 
+                  placeholder="4111 2222 3333 4444"
+                  value={newCardNumber}
+                  onChange={(e) => {
+                    let val = e.target.value.replace(/\D/g, "");
+                    if (val.startsWith("4")) setNewCardBrand("VISA");
+                    else if (val.startsWith("5")) setNewCardBrand("MASTERCARD");
+                    else if (val.startsWith("3")) setNewCardBrand("AMEX");
+                    if (val.length <= 16) {
+                      setNewCardNumber(val);
+                    }
+                  }}
+                  className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none"
+                />
+              </div>
+              
+              <div className="space-y-1">
+                <label className="text-[9.5px] font-black text-slate-455 uppercase tracking-widest block ml-1">Expiracion</label>
+                <input 
+                  type="text" 
+                  placeholder="MM/YY"
+                  maxLength={5}
+                  value={newCardExpiry}
+                  onChange={(e) => {
+                    let val = e.target.value.replace(/[^0-9\/]/g, "");
+                    if (val.length === 2 && !val.includes("/") && e.nativeEvent.constructor.name === "InputEvent") {
+                      val += "/";
+                    }
+                    setNewCardExpiry(val);
+                  }}
+                  className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none text-center font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9.5px] font-black text-slate-455 uppercase tracking-widest block ml-1">CVV</label>
+                <input 
+                  type="password" 
+                  placeholder="***"
+                  maxLength={4}
+                  value={newCardCvv}
+                  onChange={(e) => setNewCardCvv(e.target.value.replace(/\D/g, ""))}
+                  className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none text-center font-mono"
+                />
+              </div>
+
+              <div className="col-span-2 space-y-1">
+                <label className="text-[9.5px] font-black text-slate-455 uppercase tracking-widest block ml-1">Nombre Completo del Titular</label>
+                <input 
+                  type="text" 
+                  placeholder="Nombre como aparece en la tarjeta"
+                  value={newCardHolder}
+                  onChange={(e) => setNewCardHolder(e.target.value)}
+                  className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none uppercase"
+                />
+              </div>
+            </div>
+
+            <button 
+              type="button"
+              onClick={async () => {
+                const cleanNum = newCardNumber.replace(/\s+/g, "");
+                if (cleanNum.length < 13) {
+                  toast.error("Por favor completa un numero de tarjeta valido.", "Numero invalido");
+                  return;
+                }
+                if (!isValidLuhn(cleanNum)) {
+                  toast.error("El numero digitado es invalido. Por favor ingresa una tarjeta de 13 a 16 digitos valida.", "Error de validacion");
+                  return;
+                }
+                if (!newCardExpiry.includes("/") || newCardExpiry.length < 5) {
+                  toast.error("Formato de expiracion debe ser MM/YY.", "Formato incorrecto");
+                  return;
+                }
+                if (newCardCvv.length < 3) {
+                  toast.error("Codigo CVV de seguridad incompleto.", "CVV invalido");
+                  return;
+                }
+                if (!newCardHolder.trim()) {
+                  toast.error("Por favor ingresa el nombre completo del tarjetahabiente.", "Titular vacio");
+                  return;
+                }
+
+                // Prepare card obj
+                const bankInfo = getCardBankInfo(cleanNum);
+                const newCardObj: PaymentCard = {
+                  id: "card_" + Date.now(),
+                  brand: newCardBrand,
+                  last4: cleanNum.slice(-4),
+                  expiry: newCardExpiry,
+                  holderName: newCardHolder.toUpperCase().trim(),
+                  isDefault: cards.length === 0,
+                  bankName: bankInfo.bankName
+                };
+
+                const updatedCardsList = [...cards, newCardObj];
+                setCards(updatedCardsList);
+                setSelectedCardForPlan(newCardObj.id);
+                setShowOtherPaymentMethods(true);
+                
+                // Clear fields
+                setNewCardNumber("");
+                setNewCardExpiry("");
+                setNewCardCvv("");
+                setNewCardHolder("");
+                setAddingCard(false);
+                setAddingMethodStep("select");
+
+                // Instantly save to Firebase for real tests
+                try {
+                  await onSave({
+                    userId: initialProfile?.userId || "guest",
+                    rfc: rfc || initialProfile?.rfc || "",
+                    razonSocial: razonSocial || initialProfile?.razonSocial || "",
+                    regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "",
+                    codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
+                    usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
+                    createdAt: initialProfile?.createdAt || new Date().toISOString(),
+                    personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
+                    plan: initialProfile?.plan || "gratuito",
+                    paymentCards: updatedCardsList
+                  });
+                  toast.success("Tarjeta vinculada con exito en tu cuenta.", "Metodo actualizado");
+                } catch (e) {
+                  toast.error("No se pudo guardar la tarjeta. Intenta nuevamente.");
+                }
+              }}
+              className="w-full bg-[#0B53F4] text-white text-xs font-black py-3 rounded-2xl hover:bg-[#0747D1] transition shadow-md shadow-[#0B53F4]/10 cursor-pointer text-center active:scale-98"
+            >
+              Vincular Tarjeta
+            </button>
+          </div>
+        )}
+
+        {false && addingMethodStep === "connecting" && (
+          <div className="flex flex-col items-center justify-center py-8 px-4 text-center space-y-4 animate-pulse">
+            <div className="relative">
+              <div className="w-16 h-16 border-4 border-[#ebf1ff] border-t-[#0B53F4] rounded-full animate-spin" />
+              <div className="absolute inset-0 flex items-center justify-center font-sans font-black text-xs text-slate-500">
+                {selectedMethodToAdd === "MERCADOPAGO" ? "MP" : 
+                 selectedMethodToAdd === "GOOGLEPAY" ? "G" : "PP"}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <span className="text-xs font-black text-slate-850 uppercase tracking-wider block">
+                Conectando con {selectedMethodToAdd === "MERCADOPAGO" ? "Mercado Pago" : 
+                                selectedMethodToAdd === "GOOGLEPAY" ? "Google Pay" : "PayPal"}
+              </span>
+              <p className="text-[10px] text-slate-400 font-bold leading-normal max-w-xs">
+                Estableciendo conexión encriptada y autorizando token de facturación recurrente. Por favor espera...
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedMethodToAdd(null);
+                setAddingMethodStep("select");
+                setAddingCard(false);
+              }}
+              className="text-[10px] font-black text-[#0B53F4] hover:underline uppercase tracking-wider cursor-pointer"
+            >
+              Cancelar conexión
+            </button>
+          </div>
+        )}
+
+      </div>
+    );
+  };
+
+  const renderCheckoutSection = () => {
+    return (
+      <div className="space-y-4">
+        {/* 3.1 Caja del Plan Seleccionado */}
+        <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 shadow-2xs relative text-left">
+          <div className="flex justify-between items-start mb-2">
+            <div>
+              <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">
+                PLAN SELECCIONADO
+              </span>
+              <h4 className="text-base font-black text-slate-800">
+                {checkoutPlanType === "brisa" ? "Plan Brisa" : 
+                 checkoutPlanType === "serenidad" ? "Plan Serenidad" : 
+                 checkoutPlanType === "nirvana" ? "Plan Nirvana" : "Plan Gratuito"}
+              </h4>
+              <p className="text-[11px] text-slate-455 font-semibold mt-1 max-w-xs leading-relaxed">
+                {checkoutPlanType === "brisa" 
+                  ? "Para personas que facturan algunos consumos al mes y quieren evitar hacerlo manualmente. Incluye 10 facturas generadas al mes, historial ampliado de tickets y soporte por email." 
+                  : checkoutPlanType === "serenidad"
+                    ? "El plan recomendado para usuarios que facturan de forma constante y necesitan mayor control de sus tickets y gastos. Incluye 30 facturas generadas al mes, panel de gastos y soporte prioritario por email."
+                    : checkoutPlanType === "nirvana"
+                      ? "Para usuarios de alto volumen, negocios pequeños o equipos que necesitan automatizar muchas facturas cada mes. Incluye 100 facturas generadas al mes, acceso completo a conectores disponibles y soporte prioritario."
+                      : "Ideal para probar ZenTicket y automatizar las primeras facturas sin compromiso. Incluye 5 facturas gratis en total, soporte básico."}
+              </p>
+            </div>
+            <div className="text-right leading-none shrink-0">
+              <span className="text-lg font-black text-[#0B53F4]">
+                {checkoutPlanType === "brisa" ? "$5" : 
+                 checkoutPlanType === "serenidad" ? "$250" : 
+                 checkoutPlanType === "nirvana" ? "$500" : "$0"}
+              </span>
+              <span className="text-[9px] text-[#0B53F4] font-black block mt-1 uppercase tracking-wider">
+                MXN / mes
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 p-3.5 bg-white rounded-2xl border border-slate-200/60 text-xs text-slate-700 leading-tight select-none mt-4 mb-2">
+            <input
+              type="checkbox"
+              id="autoRenewCheckoutChoice"
+              checked={autoRenewChoice}
+              onChange={(e) => setAutoRenewChoice(e.target.checked)}
+              className="w-4 h-4 text-[#0B53F4] border-slate-350 rounded focus:ring-[#0B53F4] cursor-pointer shrink-0"
+            />
+            <label htmlFor="autoRenewCheckoutChoice" className="cursor-pointer">
+              <span className="font-extrabold text-slate-800 block">Renovación automática cada mes</span>
+            </label>
+          </div>
+
+          {/* Botón único de pago */}
+          <button
+            type="button"
+            disabled={isProcessingPayment || isProcessingWallet || shouldDisablePayButton}
+            onClick={async () => {
+              if (shouldDisablePayButton) {
+                toast.info("Tu plan actual ya está activo. Podrás pagar de nuevo al cambiar de plan o al agotar tus facturas del ciclo.");
+                return;
+              }
+              if (checkoutPlanType === "gratuito") {
+                setIsProcessingPayment(true);
+                try {
+                  await onSave({
+                    userId: initialProfile?.userId || "guest",
+                    rfc: rfc || "CABE850101ABC",
+                    razonSocial: razonSocial.trim().toUpperCase(),
+                    regimenFiscal,
+                    codigoPostal,
+                    usoCFDI,
+                    createdAt: initialProfile?.createdAt || new Date().toISOString(),
+                    personalGeminiKey: personalGeminiKey || "",
+                    plan: "gratuito",
+                    planStartDate: new Date().toISOString(),
+                    autoRenew: false,
+                    paymentCards: cards
+                  });
+                  setIsProcessingPayment(false);
+                  setCheckoutPlanType("brisa");
+                  setActiveModal(null);
+                  toast.success("Tu plan ha sido cambiado al Plan Gratuito exitosamente.", "Suscripción actualizada");
+                } catch (err: any) {
+                  setIsProcessingPayment(false);
+                  toast.error("Error al actualizar suscripción.", "Error");
+                }
+                return;
+              }
+
+              if (!selectedCardForPlan) {
+                toast.error("Por favor selecciona un método de pago.");
+                return;
+              }
+
+              const isDirectWallet = selectedCardForPlan.endsWith("_wallet");
+
+              if (isDirectWallet) {
+                const walletMapping: Record<string, string> = {
+                  "stripe_wallet": "Stripe",
+                  "mercadopago_wallet": "Mercado Pago",
+                  "googlepay_wallet": "Google Pay",
+                  "paypal_wallet": "PayPal"
+                };
+                const walletName = walletMapping[selectedCardForPlan];
+                await handleDigitalWalletPayment(walletName);
+              } else {
+                const targetCard = cards.find(c => c.id === selectedCardForPlan);
+                if (targetCard) {
+                  const walletMapping: Record<string, string> = {
+                    "MERCADOPAGO": "Mercado Pago",
+                    "GOOGLEPAY": "Google Pay",
+                    "PAYPAL": "PayPal"
+                  };
+                  if (targetCard.brand in walletMapping) {
+                    await handleDigitalWalletPayment(walletMapping[targetCard.brand]);
+                  } else {
+                    await handleDigitalWalletPayment("Stripe");
+                  }
+                } else {
+                  toast.error("Método de pago no encontrado.");
+                }
+              }
+            }}
+            className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-40 text-white text-sm font-black py-3.5 rounded-2xl transition cursor-pointer text-center flex items-center justify-center gap-2 shadow-md shadow-[#0B53F4]/10 active:scale-98"
+          >
+            {isProcessingPayment || isProcessingWallet ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Procesando...</span>
+              </>
+            ) : (
+              <span>{shouldDisablePayButton ? "Plan activo" : checkoutPlanType === "gratuito" ? "Activar Plan Gratuito" : "Pagar"}</span>
+            )}
+          </button>
+          {shouldDisablePayButton && (
+            <p className="text-[10.5px] text-slate-400 font-semibold text-center mt-2">
+              Ya tienes este plan activo. Cambia de plan o agota tus facturas mensuales para volver a pagar.
+            </p>
+          )}
+        </div>
+
+        {/* 3.2 Pago Predeterminado */}
+        <div className="space-y-1.5 text-left">
+          <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-0.5">
+            Pago Predeterminado
+          </span>
+          
+          {(() => {
+            if (selectedCardForPlan.endsWith("_wallet")) {
+              const walletMapping: Record<string, { brand: string; label: string; logo: any }> = {
+                "stripe_wallet": { brand: "STRIPE", label: "Stripe Checkout", logo: stripeLogo },
+                "mercadopago_wallet": { brand: "MERCADOPAGO", label: "Mercado Pago", logo: mercadoPagoLogo },
+                "googlepay_wallet": { brand: "GOOGLEPAY", label: "Google Pay via Stripe", logo: googlePayLogo },
+                "paypal_wallet": { brand: "PAYPAL", label: "PayPal", logo: paypalLogo }
+              };
+              const w = walletMapping[selectedCardForPlan];
+              if (w) {
+                return (
+                  <div className="flex items-center gap-3.5 p-4.5 bg-slate-50 border border-slate-200/80 rounded-2xl w-full">
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 shadow-3xs flex items-center justify-center shrink-0 p-2">
+                      <img src={w.logo} className="w-full h-full object-contain select-none" alt={w.brand} />
+                    </div>
+                    <div className="text-left leading-tight">
+                      <span className="text-sm font-black text-slate-800 block">{w.label}</span>
+                      <span className="text-xs text-slate-400 font-semibold block mt-1">
+                        Titular: {paymentAccountName} &nbsp;|&nbsp; Cuenta: {paymentAccountEmail || "Sin correo registrado"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+            } else {
+              const card = cards.find(c => c.id === selectedCardForPlan);
+              if (card) {
+                return (
+                  <div className="flex items-center gap-3.5 p-4.5 bg-slate-50 border border-slate-200/80 rounded-2xl w-full">
+                    {renderVisualBrandBlock(card, "md")}
+                    <div className="text-left leading-tight">
+                      <span className="text-sm font-black text-slate-800 block">**** {card.last4}</span>
+                      <span className="text-xs text-slate-400 font-semibold block mt-1 font-mono">Vence: {card.expiry} | {card.holderName}</span>
+                    </div>
+                  </div>
+                );
+              }
+            }
+            return (
+              <div className="p-4.5 border border-slate-200/80 rounded-2xl text-center text-xs text-slate-400 font-semibold bg-slate-50">
+                Ningún método de pago seleccionado.
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* 3.3 Menú desplegable */}
+        {renderAccordionPaymentMethods()}
+
+      </div>
+    );
+  };
+
+  const renderAccordionPaymentMethods = () => {
+    return (
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={() => setShowOtherPaymentMethods(!showOtherPaymentMethods)}
+          className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100/70 border border-slate-200/80 rounded-2xl transition cursor-pointer text-left text-xs font-black text-slate-700 active:scale-98"
+        >
+          Mostrar otros métodos de pago
+          <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${showOtherPaymentMethods ? "rotate-180" : ""}`} />
+        </button>
+        {showOtherPaymentMethods && (
+          <div className="bg-white border border-slate-200/60 rounded-3xl p-4.5 space-y-4 text-left animate-fade-in mt-2">
+            
+            <div className="grid grid-cols-1 gap-3">
+              
+              {/* Linked Credit/Debit Cards (Rendered with the same format as digital wallets) */}
+              {cards
+                .filter((card) => card.last4 !== "Cuenta Vinculada")
+                .map((card) => {
+                  const isSelected = selectedCardForPlan === card.id;
+                  return (
+                    <button
+                      key={card.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCardForPlan(card.id);
+                        // Auto-save this choice as default
+                        const updated = cards.map(c => ({
+                          ...c,
+                          isDefault: c.id === card.id
+                        }));
+                        setCards(updated);
+                        onSave({
+                          userId: initialProfile?.userId || "guest",
+                          rfc: rfc || initialProfile?.rfc || "",
+                          razonSocial: razonSocial || initialProfile?.razonSocial || "",
+                          regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
+                          codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
+                          usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
+                          createdAt: initialProfile?.createdAt || new Date().toISOString(),
+                          personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
+                          plan: initialProfile?.plan || "gratuito",
+                          paymentCards: updated
+                        }).catch(() => {});
+                      }}
+                      className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
+                        isSelected 
+                          ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
+                          : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#0B53F4] hover:shadow-2xs"
+                      }`}
+                    >
+                      {renderVisualBrandBlock(card, "md")}
+                      <div className="leading-tight">
+                        <span className="text-sm font-black text-slate-800 block">
+                          {card.bankName || (card.brand === "VISA" ? "Visa" : card.brand === "AMEX" ? "American Express" : "Mastercard")}
+                        </span>
+                        <span className="text-xs text-slate-400 font-semibold block mt-1">
+                          **** {card.last4} &nbsp;|&nbsp; Expira: {card.expiry}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+                
+                {/* Stripe */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCardForPlan("stripe_wallet")}
+                  className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
+                    selectedCardForPlan === "stripe_wallet" 
+                      ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
+                      : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#635BFF] hover:shadow-2xs"
+                  }`}
+                >
+                  <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                    <img src={stripeLogo} className="w-full h-full object-contain" alt="Stripe" />
+                  </div>
+                  <div className="leading-tight">
+                    <span className="text-sm font-black text-slate-800 block">Stripe Checkout</span>
+                    <span className="text-xs text-slate-400 font-semibold block mt-1">Pago seguro con tarjeta</span>
+                  </div>
+                </button>
+
+                {/* Mercado Pago */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCardForPlan("mercadopago_wallet")}
+                  className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
+                    selectedCardForPlan === "mercadopago_wallet" 
+                      ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
+                      : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#00A6EA] hover:shadow-2xs"
+                  }`}
+                >
+                  <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                    <img src={mercadoPagoLogo} className="w-full h-full object-contain" alt="Mercado Pago" />
+                  </div>
+                  <div className="leading-tight">
+                    <span className="text-sm font-black text-slate-800 block">Mercado Pago</span>
+                    <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
+                  </div>
+                </button>
+
+                {/* Google Pay */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCardForPlan("googlepay_wallet")}
+                  className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
+                    selectedCardForPlan === "googlepay_wallet" 
+                      ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
+                      : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#202124] hover:shadow-2xs"
+                  }`}
+                >
+                  <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                    <img src={googlePayLogo} className="w-full h-full object-contain" alt="Google Pay" />
+                  </div>
+                  <div className="leading-tight">
+                    <span className="text-sm font-black text-slate-800 block">Google Pay</span>
+                    <span className="text-xs text-slate-400 font-semibold block mt-1">Disponible dentro de Stripe Checkout</span>
+                  </div>
+                </button>
+
+                {/* PayPal */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCardForPlan("paypal_wallet")}
+                  className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
+                    selectedCardForPlan === "paypal_wallet" 
+                      ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
+                      : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#003087] hover:shadow-2xs"
+                  }`}
+                >
+                  <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                    <img src={paypalLogo} className="w-full h-full object-contain" alt="PayPal" />
+                  </div>
+                  <div className="leading-tight">
+                    <span className="text-sm font-black text-slate-800 block">PayPal</span>
+                    <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
+                  </div>
+                </button>
+              </div>
+
+            {/* Agregar tarjeta inside accordion */}
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  const nextState = !addingCard;
+                  setAddingCard(nextState);
+                  if (nextState) {
+                    setAddingMethodStep("card");
+                  }
+                }}
+                className="bg-[#ebf1ff] hover:bg-[#dee8ff] text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
+              >
+                {addingCard ? "Cancelar Registro" : "+ Registrar Otra Tarjeta / Vincular"}
+              </button>
+            </div>
+
+            {/* Formulario de agregar tarjeta inside accordion */}
+            {addingCard && renderAddingCardForm()}
+
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderNormalSection = () => {
+    return (
+      <>
+        {addingCard && renderAddingCardForm()}
+
+        <div className="bg-white dark:bg-[#0d1225]/40 border border-slate-200/50 dark:border-slate-800/60 rounded-3xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800/40 shadow-[0_4px_20px_rgba(15,23,42,0.02)]">
+          {cards.length === 0 ? (
+            <div className="p-6 text-center text-xs text-slate-400 font-semibold">
+              No tienes tarjetas dadas de alta. Agrega una arriba para realizar compras.
+            </div>
+          ) : (
+            cards.map((card) => {
+              const isDefault = card.isDefault;
+              return (
+                <div key={card.id} className="flex items-center justify-between p-4.5 hover:bg-slate-50/40 dark:hover:bg-slate-800/30 transition">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const updated = cards.map(c => ({
+                        ...c,
+                        isDefault: c.id === card.id
+                      }));
+                      setCards(updated);
+                      try {
+                        await onSave({
+                          userId: initialProfile?.userId || "guest",
+                          rfc: rfc || initialProfile?.rfc || "",
+                          razonSocial: razonSocial || initialProfile?.razonSocial || "",
+                          regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
+                          codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
+                          usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
+                          createdAt: initialProfile?.createdAt || new Date().toISOString(),
+                          personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
+                          plan: initialProfile?.plan || "gratuito",
+                          paymentCards: updated
+                        });
+                        toast.success("Se ha cambiado tu tarjeta predeterminada.", "Tarjeta Actualizada");
+                      } catch (err) {
+                        toast.error("Ocurrió un error al persistir la tarjeta predeterminada.");
+                      }
+                    }}
+                    className="flex items-center gap-3.5 flex-1 text-left cursor-pointer hover:opacity-85 transition bg-transparent border-none outline-none p-0 mr-4"
+                    title="Haz click para establecer como predeterminada"
+                  >
+                    {/* Visual Brand Block */}
+                    {renderVisualBrandBlock(card, "md")}
+
+                    <div className="text-left leading-none font-sans">
+                      <span className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                        **** {card.last4} 
+                      </span>
+                      <span className="text-[10px] text-slate-400 mt-1.5 block font-mono font-medium">Vence: {card.expiry} | {card.holderName}</span>
+                    </div>
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    {isDefault ? (
+                      <span className="text-emerald-600 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 p-1.5 rounded-lg flex items-center justify-center shadow-3xs" title="Predeterminado">
+                        <Check className="w-4 h-4 stroke-[3.5]" />
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const updated = cards.map(c => ({
+                            ...c,
+                            isDefault: c.id === card.id
+                          }));
+                          setCards(updated);
+                          try {
+                            await onSave({
+                              userId: initialProfile?.userId || "guest",
+                              rfc: rfc || initialProfile?.rfc || "",
+                              razonSocial: razonSocial || initialProfile?.razonSocial || "",
+                              regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
+                              codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
+                              usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
+                              createdAt: initialProfile?.createdAt || new Date().toISOString(),
+                              personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
+                              plan: initialProfile?.plan || "gratuito",
+                              paymentCards: updated
+                            });
+                            toast.success("Se ha cambiado tu tarjeta predeterminada.", "Tarjeta Actualizada");
+                          } catch (err) {
+                            toast.error("Ocurrió un error al predeterminar tu tarjeta.");
+                          }
+                        }}
+                        className="text-slate-350 dark:text-slate-500 hover:text-[#0B53F4] transition p-1.5 rounded-lg bg-transparent border-none outline-none cursor-pointer"
+                        title="Establecer como predeterminada"
+                      >
+                        <div className="w-4.5 h-4.5 rounded-full border border-slate-300 dark:border-slate-700" />
+                      </button>
+                    )}
+
+                    <button 
+                      type="button"
+                      onClick={async () => {
+                        const updated = cards.filter(c => c.id !== card.id);
+                        if (card.isDefault && updated.length > 0) {
+                          updated[0].isDefault = true;
+                        }
+                        setCards(updated);
+                        try {
+                          await onSave({
+                            userId: initialProfile?.userId || "guest",
+                            rfc: rfc || initialProfile?.rfc || "",
+                            razonSocial: razonSocial || initialProfile?.razonSocial || "",
+                            regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
+                            codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
+                            usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
+                            createdAt: initialProfile?.createdAt || new Date().toISOString(),
+                            personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
+                            plan: initialProfile?.plan || "gratuito",
+                            paymentCards: updated
+                          });
+                          toast.success("Método de pago eliminado con éxito.", "Tarjeta Eliminada");
+                        } catch (err) {
+                          toast.error("Ocurrió un error al eliminar tu tarjeta.");
+                        }
+                      }}
+                      className="text-slate-405 dark:text-slate-500 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition p-1.5 rounded-lg bg-transparent border-none outline-none cursor-pointer"
+                      title="Eliminar método de pago"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </>
+    );
+  };
+
   // Apariencia states
   const [themeChoice, setThemeChoice] = useState<"light" | "dark" | "system">(
     () => (localStorage.getItem("zenticket_theme") as "light" | "dark" | "system") || "dark"
@@ -882,9 +1586,11 @@ export default function ProfileForm({
   const currentUser = auth.currentUser;
   const userInitials = nombreCompleto
     ? nombreCompleto.split(" ").slice(0, 2).map((n: string) => n[0]).join("").toUpperCase()
-    : "JD";
-  const userFullName = nombreCompleto || currentUser?.displayName || "Julian Daniels";
-  const userDisplayEmail = correoElectronico || currentUser?.email || "julian.d@zenticket.mx";
+    : (sessionEmail ? sessionEmail.slice(0, 2).toUpperCase() : "US");
+  const userFullName = nombreCompleto || currentUser?.displayName || sessionName || sessionEmail || "Usuario";
+  const userDisplayEmail = correoElectronico || currentUser?.email || sessionEmail || "";
+  const paymentAccountName = currentUser?.displayName || sessionName || userFullName;
+  const paymentAccountEmail = correoRecepcion || userDisplayEmail || sessionEmail;
 
   const handleLogout = async () => {
     try {
@@ -903,7 +1609,7 @@ export default function ProfileForm({
       toast.error("El RFC debe tener exactamente 12 o 13 caracteres o un formato de Persona Física/Moral con homoclave.", "Error de Validación");
       return;
     }
-    const rfcRegex = /^[A-ZÑ&]{3,4}\d{6}[A-Z\d]{3}$/i;
+    const rfcRegex = /^[A-Z\u00d1&]{3,4}\d{6}[A-Z\d]{3}$/i;
     if (!rfcRegex.test(cleanedRFC)) {
       toast.error("Formato de RFC nacional incorrecto. Por favor introduce un RFC con homoclave válido (Homo-RFC).", "Error de RFC SAT");
       return;
@@ -1017,13 +1723,13 @@ export default function ProfileForm({
         </div>
 
         {!isProfileComplete && (
-          <div className="mb-6 bg-gradient-to-tr from-rose-50 to-amber-50 border border-rose-200/80 rounded-2.5xl p-5 text-left flex items-start gap-3.5 shadow-2xs">
+          <div className="mb-6 bg-gradient-to-tr from-rose-50 to-amber-50 border border-rose-200/80 rounded-2xl p-5 text-left flex items-start gap-3.5 shadow-2xs">
             <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
               <AlertCircle className="w-5.5 h-5.5" />
             </div>
             <div className="space-y-1">
               <h4 className="text-xs font-black text-rose-800 uppercase tracking-widest">
-                ¡CONFIGURACIÓN FISCAL MANDATORIA!
+                CONFIGURACION FISCAL MANDATORIA
               </h4>
               <p className="text-[11.5px] text-slate-600 leading-relaxed font-semibold">
                 Es mandatorio completar tus datos fiscales certificados (RFC, Razón Social, Régimen y Código Postal) al crear una cuenta nueva antes de poder digitalizar tus tickets de compra o automatizar tus facturaciones.
@@ -1120,7 +1826,7 @@ export default function ProfileForm({
                 Plan Actual
               </label>
               <div className="w-full text-sm font-black bg-[#EBF1FF]/60 border border-[#EBF1FF] rounded-2xl px-4 py-3.5 text-[#0B53F4] cursor-not-allowed select-none capitalize">
-                {currentPlan === "personal" ? "Plan Personal" : currentPlan === "empresa" ? "Plan Empresa" : "Plan Gratuito"}
+                {currentPlan === "brisa" ? "Plan Brisa" : currentPlan === "serenidad" ? "Plan Serenidad" : currentPlan === "nirvana" ? "Plan Nirvana" : "Plan Gratuito"}
               </div>
             </div>
           </div>
@@ -1289,10 +1995,10 @@ export default function ProfileForm({
             type="button"
             disabled={hasSavedFiscalData}
             onClick={handleSaveFiscalOnly}
-            className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:bg-slate-300 disabled:text-slate-500 disabled:opacity-90 disabled:shadow-none text-white text-xs font-black py-4 rounded-2.5xl transition shadow-lg shadow-[#0B53F4]/15 cursor-pointer text-center flex items-center justify-center gap-2 active:scale-98 disabled:cursor-not-allowed"
+            className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:bg-slate-300 disabled:text-slate-500 disabled:opacity-90 disabled:shadow-none text-white text-xs font-black py-4 rounded-2xl transition shadow-lg shadow-[#0B53F4]/15 cursor-pointer text-center flex items-center justify-center gap-2 active:scale-98 disabled:cursor-not-allowed"
           >
             <CheckCircle className="w-4 h-4 text-white disabled:text-slate-400" />
-            <span>{hasSavedFiscalData ? "DATOS FISCALES GUARDADOS Y CERTIFICADOS • NAVEGACIÓN LIBRE Y ACCESIBLE" : "GUARDAR DATOS FISCALES"}</span>
+            <span>{hasSavedFiscalData ? "DATOS FISCALES GUARDADOS Y CERTIFICADOS - NAVEGACION LIBRE Y ACCESIBLE" : "GUARDAR DATOS FISCALES"}</span>
           </button>
         </div>
 
@@ -1409,7 +2115,7 @@ export default function ProfileForm({
                 </div>
                 <div className="leading-tight text-left">
                   <span className="text-sm font-bold text-slate-800 block">{getDeviceModel().name}</span>
-                  <span className="text-[10px] text-slate-400 block mt-1 font-medium">{getDeviceModel().os} • Activo ahora</span>
+                  <span className="text-[10px] text-slate-400 block mt-1 font-medium">{getDeviceModel().os} - Activo ahora</span>
                 </div>
               </div>
 
@@ -1484,7 +2190,7 @@ export default function ProfileForm({
                   Automatización total en un clic. Olvídate de la carga administrativa y enfócate en crecer.
                 </p>
               </div>
-              <div className="bg-white border border-[#EBF1FF] rounded-2.5xl p-4.5 shadow-2xs space-y-4 select-none">
+              <div className="bg-white border border-[#EBF1FF] rounded-2xl p-4.5 shadow-2xs space-y-4 select-none">
                 <div className="flex items-center justify-between">
                   <div className="text-left leading-tight">
                     <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">
@@ -1492,7 +2198,7 @@ export default function ProfileForm({
                     </span>
                     <div className="flex items-center gap-1.5 mt-1">
                       <span className="text-base font-black text-slate-800">
-                        {currentPlan === "personal" ? "Plan Personal" : currentPlan === "empresa" ? "Plan Empresa" : "Plan Gratuito"}
+                        {getPlanLabel(currentPlan)}
                       </span>
                       <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider flex items-center gap-0.5 shadow-xs">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Activo
@@ -1528,456 +2234,200 @@ export default function ProfileForm({
                   <div className="flex justify-between items-center text-[10.5px] text-slate-450 pt-1">
                     <span>Inicio de ciclo: {planStartDate.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                     <span className="font-bold text-[#0B53F4]">
-                      {initialProfile?.autoRenew ? "🔄 Auto-renovación" : "⚠️ Renovación manual"}
+                      {initialProfile?.autoRenew ? "Auto-renovacion" : "Renovacion manual"}
                     </span>
                   </div>
                 </div>
               </div>
 
               {/* PLANS SECTIONS COLUMN */}
-              {checkoutPlanType !== null ? (
-                <div className="bg-white border border-slate-200/60 rounded-3xl p-5 sm:p-6 shadow-sm space-y-5 text-left animate-fade-in">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                
+                {/* Plan Gratuito */}
+                <div className={`bg-white dark:bg-[#0d1225]/40 border rounded-3xl p-5 shadow-[0_3px_10px_rgba(0,0,0,0.01)] relative text-left transition-all ${
+                  selectedPlan === "gratuito" ? "border-2 border-[#0B53F4]" : "border-slate-200/60 dark:border-slate-800/60"
+                }`}>
+                  <div className="flex justify-between items-start mb-2.5">
                     <div>
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-mono">REGISTRO SEGURO</span>
-                      <h3 className="text-base font-black text-slate-800">Checkout de Compra</h3>
+                      <h4 className="text-base font-black text-slate-800 dark:text-white">Plan Gratuito</h4>
+                      <p className="text-[11px] text-slate-400 font-semibold mt-0.5">Ideal para personas físicas comenzando.</p>
                     </div>
-                    <button 
-                      type="button"
-                      onClick={() => setCheckoutPlanType(null)}
-                      className="text-xs font-black text-[#0B53F4] hover:underline cursor-pointer bg-transparent border-none outline-none"
-                    >
-                      Volver a Planes
-                    </button>
-                  </div>
-
-                  {/* Summary Box */}
-                  <div className="bg-slate-50 rounded-2xl p-4 space-y-2.5 text-xs text-slate-650 font-medium">
-                    <div className="flex justify-between">
-                      <span>Concepto:</span>
-                      <span className="font-extrabold text-slate-800">
-                        {checkoutPlanType === "personal" ? "Suscripción Plan Personal (20 facturas)" : "Suscripción Plan Empresa (60 facturas)"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Precio Unitario:</span>
-                      <span className="font-mono font-bold">${checkoutPlanType === "personal" ? "129.31" : "258.62"} MXN</span>
-                    </div>
-                    <div className="flex justify-between text-[11px] text-slate-400">
-                      <span>Impuestos (16% IVA):</span>
-                      <span className="font-mono font-bold">${checkoutPlanType === "personal" ? "20.69" : "41.38"} MXN</span>
-                    </div>
-                    <div className="flex justify-between border-t border-slate-200/60 pt-2.5 text-sm font-black text-slate-900">
-                      <span>Total Real a Cobrar:</span>
-                      <span className="text-[#0B53F4] font-mono">${checkoutPlanType === "personal" ? "150.00" : "300.00"} MXN</span>
+                    <div className="text-right leading-none">
+                      <span className={`text-base font-extrabold ${selectedPlan === "gratuito" ? "text-[#0B53F4]" : "text-slate-900 dark:text-white"}`}>$0</span>
+                      <span className={`text-[9px] font-black block mt-1 uppercase tracking-wider ${selectedPlan === "gratuito" ? "text-[#0B53F4]" : "text-slate-400"}`}>MXN/mes</span>
                     </div>
                   </div>
-
-                  {/* Option for Auto-renewal */}
-                  <div className="flex items-start gap-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-200/60">
-                    <input
-                      type="checkbox"
-                      id="autoRenewChoice"
-                      checked={autoRenewChoice}
-                      onChange={(e) => setAutoRenewChoice(e.target.checked)}
-                      className="w-4 h-4 text-[#0B53F4] border-slate-300 rounded focus:ring-[#0B53F4] mt-0.5 cursor-pointer"
-                    />
-                    <label htmlFor="autoRenewChoice" className="text-xs text-slate-700 leading-tight cursor-pointer select-none">
-                      <span className="font-extrabold text-slate-800 block">Renovación automática cada mes</span>
-                      <span className="text-[10px] text-slate-400 block font-normal mt-0.5">Cobrar automáticamente a la tarjeta seleccionada al cumplirse el mes o agotarse el límite de facturas ({checkoutPlanType === "personal" ? "20" : "60"}).</span>
-                    </label>
-                  </div>
-
-                  {/* Choose Registered Card */}
-                  <div className="space-y-3">
-                    <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-0.5">
-                      Selecciona una Tarjeta para la Compra
-                    </label>
-
-                    {cards.length === 0 ? (
-                      <div className="p-5 border border-rose-100 bg-rose-50/20 text-rose-600 text-center rounded-2xl text-xs font-bold space-y-1.5">
-                        <AlertCircle className="w-5 h-5 mx-auto opacity-80" />
-                        <p>No tienes tarjetas reales registradas en tu cuenta.</p>
-                        <button 
-                          type="button" 
-                          onClick={() => {
-                            setCheckoutPlanType(null);
-                            setActiveModal(null);
-                            toast.warning("Por favor agrega un método de pago real en tu sección de Cuenta.");
-                          }}
-                          className="group inline-flex items-center justify-between gap-1.5 py-1.5 px-3 border border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100 text-[#0B53F4] font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none mt-1.5"
-                        >
-                          <span>Registrar Tarjeta Primero en Cuenta</span>
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-405 group-hover:text-[#0B53F4] transition-transform duration-150 transform group-hover:translate-x-0.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2 max-h-48 overflow-y-auto">
-                        {cards.map((card) => {
-                          const isSelected = selectedCardForPlan === card.id;
-                          return (
-                            <button
-                              key={card.id}
-                              type="button"
-                              onClick={() => setSelectedCardForPlan(card.id)}
-                              className={`w-full text-left p-3.5 rounded-2xl border transition flex items-center justify-between cursor-pointer ${
-                                isSelected 
-                                  ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/20" 
-                                  : "border-slate-200 bg-white hover:bg-slate-50/50"
-                              }`}
-                            >
-                              <div className="flex items-center gap-3">
-                                {renderVisualBrandBlock(card, "sm")}
-                                <div className="leading-tight">
-                                  <span className="text-xs font-extrabold text-slate-850 block">•••• {card.last4}</span>
-                                  <span className="text-[9px] text-slate-400 block font-mono">Expira: {card.expiry}</span>
-                                </div>
-                              </div>
-                              {isSelected ? (
-                                <CheckCircle className="w-5 h-5 text-[#0B53F4] fill-[#0B53F4]/10" />
-                              ) : (
-                                <div className="w-4.5 h-4.5 rounded-full border border-slate-350" />
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Digital Wallets (Carteras Digitales) */}
-                  <div className="space-y-3 pt-2">
-                    <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-0.5">
-                      O paga al instante con Carteras Digitales
-                    </label>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {/* Stripe Checkout */}
-                      <button
-                        type="button"
-                        disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("Stripe")}
-                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#635BFF] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
-                      >
-                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                          <img src={stripeLogo} className="w-7.5 h-7.5 object-contain" alt="Stripe" />
-                        </div>
-                        <div>
-                          <span className="text-xs font-black text-slate-850 block">Stripe Checkout</span>
-                          <span className="text-[9px] text-slate-400 font-bold block">Pago seguro con tarjeta</span>
-                        </div>
-                      </button>
-
-                      {/* PayPal */}
-                      <button
-                        type="button"
-                        disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("PayPal")}
-                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#0070ba] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
-                      >
-                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                          <img src={paypalLogo} className="w-8 h-8 object-contain" alt="PayPal" />
-                        </div>
-                        <div>
-                          <span className="text-xs font-black text-slate-850 block">PayPal</span>
-                          <span className="text-[9px] text-slate-400 font-bold block">Pago rápido y seguro</span>
-                        </div>
-                      </button>
-
-                      {/* Mercado Pago */}
-                      <button
-                        type="button"
-                        disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("Mercado Pago")}
-                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#00A6EA] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
-                      >
-                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                          <img src={mercadoPagoLogo} className="w-7 h-7 object-contain" alt="Mercado Pago" />
-                        </div>
-                        <div>
-                          <span className="text-xs font-black text-slate-850 block">Mercado Pago</span>
-                          <span className="text-[9px] text-slate-400 font-bold block">Tu cuenta digital</span>
-                        </div>
-                      </button>
-
-                      {/* Apple Pay */}
-                      <button
-                        type="button"
-                        disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("Apple Pay")}
-                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-black hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
-                      >
-                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                          <img src={applePayLogo} className="w-8 h-8 object-contain" alt="Apple Pay" />
-                        </div>
-                        <div>
-                          <span className="text-xs font-black text-slate-850 block">Apple Pay</span>
-                          <span className="text-[9px] text-slate-400 font-bold block">Billetera de Apple</span>
-                        </div>
-                      </button>
-
-                      {/* Google Pay */}
-                      <button
-                        type="button"
-                        disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("Google Pay")}
-                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#202124] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
-                      >
-                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                          <img src={googlePayLogo} className="w-8 h-8 object-contain" alt="Google Pay" />
-                        </div>
-                        <div>
-                          <span className="text-xs font-black text-slate-850 block">Google Pay</span>
-                          <span className="text-[9px] text-slate-400 font-bold block">Billetera de Google</span>
-                        </div>
-                      </button>
-
-                      {/* Spin by OXXO */}
-                      <button
-                        type="button"
-                        disabled={isProcessingWallet || isProcessingPayment}
-                        onClick={() => handleDigitalWalletPayment("Spin by OXXO")}
-                        className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#5D2D91] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group disabled:opacity-50 disabled:pointer-events-none"
-                      >
-                        <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                          <img src={spinLogo} className="w-8 h-8 object-contain" alt="Spin by OXXO" />
-                        </div>
-                        <div>
-                          <span className="text-xs font-black text-slate-850 block">Spin by OXXO</span>
-                          <span className="text-[9px] text-slate-400 font-bold block">Tarjeta y app Spin</span>
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Payment controls */}
-                  <div className="pt-3 border-t border-slate-100 flex gap-3">
-                    <button
-                      type="button"
-                      disabled={isProcessingPayment}
-                      onClick={() => setCheckoutPlanType(null)}
-                      className="flex-1 bg-slate-150 hover:bg-slate-200 text-slate-650 text-xs font-bold py-3 px-4 rounded-xl transition cursor-pointer text-center"
-                    >
-                      Atrás
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isProcessingPayment || cards.length === 0}
-                      onClick={async () => {
-                        const targetCard = cards.find(c => c.id === selectedCardForPlan);
-                        if (!targetCard) {
-                          toast.error("Por favor selecciona una tarjeta para proceder con el cobro.", "Tarjeta Obligatoria");
-                          return;
-                        }
-
-                        const cost = checkoutPlanType === "personal" ? 150 : 300;
-                        
-                        // Trigger secure authentication modal for this real card action
-                        setBankAuthCard(targetCard);
-                        setBankAuthAmount(cost);
-                        setBankAuthStatus("connecting");
-                        setBankAuthOtpInput("");
-                        setBankAuthVisible(true);
-
-                        setBankAuthSuccessCallback(() => async () => {
-                          setIsProcessingPayment(true);
-                          try {
-                            await onSave({
-                              userId: initialProfile?.userId || "guest",
-                              rfc: rfc || "CABE850101ABC",
-                              razonSocial: razonSocial.trim().toUpperCase(),
-                              regimenFiscal,
-                              codigoPostal,
-                              usoCFDI,
-                              createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                              personalGeminiKey: personalGeminiKey || "",
-                              plan: checkoutPlanType,
-                              planStartDate: new Date().toISOString(),
-                              autoRenew: autoRenewChoice,
-                              paymentCards: cards
-                            });
-                            
-                            setIsProcessingPayment(false);
-                            setCheckoutPlanType(null);
-                            setActiveModal(null);
-                            toast.success(
-                              `¡Se han cobrado $${cost} MXN con éxito (100% Real Autenticado por Banco) de tu tarjeta ${targetCard.brand} •••• ${targetCard.last4}! Tu suscripción está activa.`,
-                              "Plan Activado Exitosamente"
-                            );
-                          } catch (err: any) {
-                            setIsProcessingPayment(false);
-                            toast.error("Error al registrar transacción real en base de datos.", "Error de Red");
-                          }
-                        });
-                      }}
-                      className="flex-3 bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-40 text-white text-xs font-black py-3 px-4 rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-md shadow-[#0B53F4]/10 active:scale-98"
-                    >
-                      {isProcessingPayment ? (
-                        <>
-                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          <span>Cobrando seguro...</span>
-                        </>
-                      ) : (
-                        <span>Pagar y Activar Plan</span>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4 pt-1">
                   
-                  {/* Plan Gratuito */}
-                  <div className="bg-white border border-slate-200/60 rounded-3xl p-5 shadow-[0_3px_10px_rgba(0,0,0,0.01)] relative text-left">
-                    <div className="flex justify-between items-start mb-2.5">
-                      <div>
-                        <h4 className="text-base font-black text-slate-800">Plan Gratuito</h4>
-                        <p className="text-[11px] text-slate-400 font-semibold mt-0.5">Ideal para personas físicas comenzando.</p>
-                      </div>
-                      <div className="text-right leading-none">
-                        <span className="text-base font-extrabold text-slate-900">$0</span>
-                        <span className="text-[9px] text-slate-400 font-bold block mt-1 uppercase tracking-wider">MXN/mes</span>
-                      </div>
+                  <div className="space-y-2 pt-3 border-t border-slate-50 dark:border-slate-800/40 mb-4 flex flex-col">
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>5 facturas gratis en total</span>
                     </div>
-                    
-                    <div className="space-y-2 pt-3 border-t border-slate-50 mb-4 flex flex-col">
-                      <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650">
-                        <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
-                        <span>5 facturas gratis en total</span>
-                      </div>
-                      <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650">
-                        <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
-                        <span>Soporte básico</span>
-                      </div>
-                      <div className="flex items-center gap-2.5 text-xs font-bold text-slate-400 line-through decoration-slate-300">
-                        <X className="w-4 h-4 text-slate-300 stroke-[3.5]" />
-                        <span>IA Portal Learning</span>
-                      </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Soporte básico</span>
                     </div>
-                    
-                    <button 
-                      type="button"
-                      onClick={async () => {
-                        setActiveModal(null);
-                        try {
-                          await onSave({
-                            userId: initialProfile?.userId || "guest",
-                            rfc: rfc,
-                            razonSocial: razonSocial.trim().toUpperCase(),
-                            regimenFiscal,
-                            codigoPostal,
-                            usoCFDI,
-                            createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                            personalGeminiKey,
-                            plan: "gratuito",
-                            planStartDate: new Date().toISOString(),
-                            autoRenew: false,
-                            paymentCards: cards
-                          });
-                          toast.success("Tu plan ha sido cambiado al Plan Gratuito.", "Suscripción Actualizada");
-                        } catch (err: any) {
-                          toast.error("Error al actualizar suscripción.", "Error");
-                        }
-                      }}
-                      className="w-full bg-white hover:bg-slate-50 border-2 border-[#0B53F4] text-[#0B53F4] text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98"
-                    >
-                      Elegir Plan Gratuito
-                    </button>
                   </div>
-
-                  {/* Plan Personal (RECOMMENDED) */}
-                  <div className="bg-white border-2 border-[#0B53F4] rounded-3xl p-5 shadow-xs relative text-left overflow-visible">
-                    {/* RECOMMENDED CENTRAL BADGE */}
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0B53F4] text-white text-[8.5px] uppercase font-black px-4 py-1 rounded-full tracking-widest shadow-sm select-none">
-                      RECOMENDADO
-                    </div>
-                    
-                    <div className="flex justify-between items-start mb-2.5 mt-0.5">
-                      <div>
-                        <h4 className="text-base font-black text-slate-800">Plan Personal</h4>
-                        <p className="text-[11px] text-slate-455 font-semibold mt-0.5">Perfecto para RESICO y servicios prof.</p>
-                      </div>
-                      <div className="text-right leading-none">
-                        <span className="text-base font-extrabold text-[#0B53F4]">$150</span>
-                        <span className="text-[9px] text-[#0B53F4] font-black block mt-1 uppercase tracking-wider">MXN/mes</span>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-2 pt-3 border-t border-slate-50 mb-4 flex flex-col">
-                      <div className="flex items-center gap-2.5 text-xs font-black text-[#0B53F4]">
-                        <Sparkles className="w-4 h-4 text-[#0B53F4] fill-[#0B53F4]/10 stroke-[2.2]" />
-                        <span>20 facturas/mes</span>
-                      </div>
-                      <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650">
-                        <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
-                        <span>IA Portal Learning</span>
-                      </div>
-                      <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650">
-                        <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
-                        <span>Recibos automatizados</span>
-                      </div>
-                      <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650">
-                        <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
-                        <span>Soporte prioritario</span>
-                      </div>
-                    </div>
-                    
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        setCheckoutPlanType("personal");
-                        setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "");
-                      }}
-                      className="w-full bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-black py-3 rounded-xl transition cursor-pointer text-center shadow-md shadow-[#0B53F4]/10 active:scale-98 animate-bounce"
-                    >
-                      Elegir Plan Personal
-                    </button>
-                  </div>
-
-                  {/* Plan Empresa */}
-                  <div className="bg-white border border-slate-200/60 rounded-3xl p-5 shadow-[0_3px_10px_rgba(0,0,0,0.01)] relative text-left">
-                    <div className="flex justify-between items-start mb-2.5">
-                      <div>
-                        <h4 className="text-base font-black text-slate-800">Plan Empresa</h4>
-                        <p className="text-[11px] text-slate-400 font-semibold mt-0.5">Personas Morales y alto volumen.</p>
-                      </div>
-                      <div className="text-right leading-none">
-                        <span className="text-base font-extrabold text-slate-900">$300</span>
-                        <span className="text-[9px] text-slate-400 font-bold block mt-1 uppercase tracking-wider">MXN/mes</span>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-2 pt-3 border-t border-slate-50 mb-4 flex flex-col">
-                      <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650">
-                        <Sparkles className="w-4 h-4 text-[#0B53F4] fill-[#0B53F4]/10 stroke-[2.2]" />
-                        <span>60 facturas/mes</span>
-                      </div>
-                      <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650">
-                        <Plus className="w-4 h-4 text-[#0B53F4] stroke-[3]" />
-                        <span>Acceso multi-usuario</span>
-                      </div>
-                      <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650">
-                        <Plus className="w-4 h-4 text-[#0B53F4] stroke-[3]" />
-                        <span>Acceso API robusta</span>
-                      </div>
-                      <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650">
-                        <Plus className="w-4 h-4 text-[#0B53F4] stroke-[3]" />
-                        <span>Account Manager dedicado</span>
-                      </div>
-                    </div>
-                    
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        setCheckoutPlanType("empresa");
-                        setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "");
-                      }}
-                      className="w-full bg-[#EBF1FF]/80 hover:bg-[#DDECFF] text-[#0B53F4] text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98"
-                    >
-                      Elegir Plan Empresa
-                    </button>
-                  </div>
+                  
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setCheckoutPlanType("gratuito");
+                      setSelectedCardForPlan("");
+                    }}
+                    className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 border-2 ${
+                      selectedPlan === "gratuito"
+                        ? "bg-[#0B53F4] text-white border-[#0B53F4]"
+                        : "bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 border-[#0B53F4] text-[#0B53F4]"
+                    }`}
+                  >
+                    {selectedPlan === "gratuito" ? "Seleccionado" : "Elegir Gratuito"}
+                  </button>
                 </div>
-              )}
+
+                {/* Plan Brisa */}
+                <div className={`bg-white dark:bg-[#0d1225]/40 border rounded-3xl p-5 shadow-xs relative text-left transition-all ${
+                  selectedPlan === "brisa" ? "border-2 border-[#0B53F4]" : "border-slate-200/60 dark:border-slate-800/60"
+                }`}>
+                  <div className="flex justify-between items-start mb-2.5">
+                    <div>
+                      <h4 className="text-base font-black text-slate-800 dark:text-white">Plan Brisa</h4>
+                      <p className="text-[11px] text-slate-455 dark:text-slate-400 font-semibold mt-0.5">Para personas con consumos bajos.</p>
+                    </div>
+                    <div className="text-right leading-none">
+                      <span className={`text-base font-extrabold ${selectedPlan === "brisa" ? "text-[#0B53F4]" : "text-slate-900 dark:text-white"}`}>$5</span>
+                      <span className={`text-[9px] font-black block mt-1 uppercase tracking-wider ${selectedPlan === "brisa" ? "text-[#0B53F4]" : "text-slate-400"}`}>MXN/mes</span>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2 pt-3 border-t border-slate-50 dark:border-slate-800/40 mb-4 flex flex-col">
+                    <div className="flex items-center gap-2.5 text-xs font-black text-[#0B53F4]">
+                      <Sparkles className="w-4 h-4 text-[#0B53F4] fill-[#0B53F4]/10 stroke-[2.2]" />
+                      <span>10 facturas/mes</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Todo lo del plan Gratuito</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Historial ampliado de tickets</span>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setCheckoutPlanType("brisa");
+                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                    }}
+                    className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
+                      selectedPlan === "brisa"
+                        ? "bg-[#0B53F4] text-white shadow-md shadow-[#0B53F4]/10"
+                        : "bg-[#EBF1FF]/80 hover:bg-[#DDECFF] text-[#0B53F4]"
+                    }`}
+                  >
+                    {selectedPlan === "brisa" ? "Seleccionado" : "Elegir Plan Brisa"}
+                  </button>
+                </div>
+
+                {/* Plan Serenidad (RECOMMENDED) */}
+                <div className={`bg-white dark:bg-[#0d1225]/40 border rounded-3xl p-5 shadow-xs relative text-left overflow-visible transition-all ${
+                  selectedPlan === "serenidad" ? "border-2 border-[#0B53F4]" : "border-slate-200/60 dark:border-slate-800/60"
+                }`}>
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0B53F4] text-white text-[8.5px] uppercase font-black px-4 py-1 rounded-full tracking-widest shadow-sm select-none z-10">
+                    RECOMENDADO
+                  </div>
+                  
+                  <div className="flex justify-between items-start mb-2.5 mt-0.5">
+                    <div>
+                      <h4 className="text-base font-black text-slate-800 dark:text-white">Plan Serenidad</h4>
+                      <p className="text-[11px] text-slate-455 dark:text-slate-400 font-semibold mt-0.5">El plan recomendado para uso constante.</p>
+                    </div>
+                    <div className="text-right leading-none">
+                      <span className={`text-base font-extrabold ${selectedPlan === "serenidad" ? "text-[#0B53F4]" : "text-slate-900 dark:text-white"}`}>$250</span>
+                      <span className={`text-[9px] font-black block mt-1 uppercase tracking-wider ${selectedPlan === "serenidad" ? "text-[#0B53F4]" : "text-slate-400"}`}>MXN/mes</span>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2 pt-3 border-t border-slate-50 dark:border-slate-800/40 mb-4 flex flex-col">
+                    <div className="flex items-center gap-2.5 text-xs font-black text-[#0B53F4]">
+                      <Sparkles className="w-4 h-4 text-[#0B53F4] fill-[#0B53F4]/10 stroke-[2.2]" />
+                      <span>30 facturas/mes</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Todo lo del plan Brisa</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Panel de gastos y resumen</span>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setCheckoutPlanType("serenidad");
+                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                    }}
+                    className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
+                      selectedPlan === "serenidad"
+                        ? "bg-[#0B53F4] text-white shadow-md shadow-[#0B53F4]/10 animate-bounce"
+                        : "bg-[#EBF1FF]/80 hover:bg-[#DDECFF] text-[#0B53F4]"
+                    }`}
+                  >
+                    {selectedPlan === "serenidad" ? "Seleccionado" : "Elegir Serenidad"}
+                  </button>
+                </div>
+
+                {/* Plan Nirvana */}
+                <div className={`bg-white dark:bg-[#0d1225]/40 border rounded-3xl p-5 shadow-xs relative text-left transition-all ${
+                  selectedPlan === "nirvana" ? "border-2 border-[#0B53F4]" : "border-slate-200/60 dark:border-slate-800/60"
+                }`}>
+                  <div className="flex justify-between items-start mb-2.5">
+                    <div>
+                      <h4 className="text-base font-black text-slate-800 dark:text-white">Plan Nirvana</h4>
+                      <p className="text-[11px] text-slate-455 dark:text-slate-400 font-semibold mt-0.5">Para alto volumen de facturación.</p>
+                    </div>
+                    <div className="text-right leading-none">
+                      <span className={`text-base font-extrabold ${selectedPlan === "nirvana" ? "text-[#0B53F4]" : "text-slate-900 dark:text-white"}`}>$500</span>
+                      <span className={`text-[9px] font-black block mt-1 uppercase tracking-wider ${selectedPlan === "nirvana" ? "text-[#0B53F4]" : "text-slate-400"}`}>MXN/mes</span>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2 pt-3 border-t border-slate-50 dark:border-slate-800/40 mb-4 flex flex-col">
+                    <div className="flex items-center gap-2.5 text-xs font-black text-[#0B53F4]">
+                      <Sparkles className="w-4 h-4 text-[#0B53F4] fill-[#0B53F4]/10 stroke-[2.2]" />
+                      <span>100 facturas/mes</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Todo lo del plan Serenidad</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Acceso completo a conectores</span>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setCheckoutPlanType("nirvana");
+                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                    }}
+                    className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
+                      selectedPlan === "nirvana"
+                        ? "bg-[#0B53F4] text-white shadow-md shadow-[#0B53F4]/10"
+                        : "bg-[#EBF1FF]/80 hover:bg-[#DDECFF] text-[#0B53F4]"
+                    }`}
+                  >
+                    {selectedPlan === "nirvana" ? "Seleccionado" : "Elegir Nirvana"}
+                  </button>
+                </div>
+
+              </div>
             </div>
           )}
 
@@ -2003,7 +2453,7 @@ export default function ProfileForm({
                           setThemeChoice(item.id as "light" | "dark" | "system");
                           toast.success(`Estilo visual ${item.label} seleccionado exitosamente.`, "Configuración Guardada");
                         }}
-                        className={`flex flex-col items-center justify-center p-4 rounded-2.5xl transition cursor-pointer border-2 text-center select-none active:scale-95 ${
+                        className={`flex flex-col items-center justify-center p-4 rounded-2xl transition cursor-pointer border-2 text-center select-none active:scale-95 ${
                           isActive 
                             ? "bg-[#EBF1FF] border-[#0B53F4] text-[#0B53F4]" 
                             : "bg-white border-slate-200 text-slate-600 hover:bg-slate-55"
@@ -2094,7 +2544,7 @@ export default function ProfileForm({
                     setActiveModal(null);
                     toast.success("Las preferencias estéticas se guardaron en la memoria persistente local y se aplicaron.", "Apariencia");
                   }}
-                  className="w-full py-4.5 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-sm font-black rounded-2.5xl transition shadow-md shadow-[#0B53F4]/10 cursor-pointer text-center active:scale-98"
+                  className="w-full py-4.5 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-sm font-black rounded-2xl transition shadow-md shadow-[#0B53F4]/10 cursor-pointer text-center active:scale-98"
                 >
                   Confirmar y Aplicar
                 </button>
@@ -2180,7 +2630,7 @@ export default function ProfileForm({
                     setActiveModal(null);
                     toast.success("Notificaciones programadas de forma satisfactoria.", "Configuración Guardada");
                   }}
-                  className="w-full py-4.5 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-sm font-black rounded-2.5xl transition shadow-md shadow-[#0B53F4]/10 cursor-pointer text-center active:scale-98"
+                  className="w-full py-4.5 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-sm font-black rounded-2xl transition shadow-md shadow-[#0B53F4]/10 cursor-pointer text-center active:scale-98"
                 >
                   Guardar Ajustes
                 </button>
@@ -2196,9 +2646,9 @@ export default function ProfileForm({
 
               <div className="bg-white border border-slate-200/50 rounded-3xl overflow-hidden divide-y divide-slate-100">
                 {[
-                  { id: "es-MX", label: "Español (América Latina)", flag: "🇲🇽" },
-                  { id: "en-US", label: "English (United States)", flag: "🇺🇸" },
-                  { id: "pt-BR", label: "Português (Brasil)", flag: "🇧🇷" }
+                  { id: "es-MX", label: "Espanol (America Latina)", flag: "MX" },
+                  { id: "en-US", label: "English (United States)", flag: "US" },
+                  { id: "pt-BR", label: "Portugues (Brasil)", flag: "BR" }
                 ].map((item) => {
                   const isSelected = languageChoice === item.id;
                   return (
@@ -2228,7 +2678,7 @@ export default function ProfileForm({
                 <button
                   type="button"
                   onClick={() => setActiveModal(null)}
-                  className="w-full py-4.5 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-sm font-black rounded-2.5xl transition shadow-md shadow-[#0B53F4]/15 cursor-pointer text-center active:scale-98"
+                  className="w-full py-4.5 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-sm font-black rounded-2xl transition shadow-md shadow-[#0B53F4]/15 cursor-pointer text-center active:scale-98"
                 >
                   Confirmar Idioma
                 </button>
@@ -2265,7 +2715,7 @@ export default function ProfileForm({
                   return (
                     <div 
                       key={index}
-                      className="bg-white border border-slate-100 rounded-2.5xl p-4.5 shadow-5xs transition-all"
+                      className="bg-white border border-slate-100 rounded-2xl p-4.5 shadow-5xs transition-all"
                     >
                       <button
                         type="button"
@@ -2500,13 +2950,13 @@ export default function ProfileForm({
     <div id="account-tab-dashboard" className="max-w-6xl mx-auto space-y-8 font-body text-left animate-fade-in_50 pb-8 select-none">
       
       {!isProfileComplete && (
-        <div className="bg-gradient-to-tr from-rose-50 to-amber-50 border border-rose-200/80 rounded-2.5xl p-6 text-left flex items-start gap-4 shadow-sm">
+        <div className="bg-gradient-to-tr from-rose-50 to-amber-50 border border-rose-200/80 rounded-2xl p-6 text-left flex items-start gap-4 shadow-sm">
           <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 shrink-0 shadow-2xs">
             <AlertCircle className="w-6 h-6 stroke-[2.2]" />
           </div>
           <div className="space-y-1">
             <h4 className="text-sm font-black text-rose-800 uppercase tracking-widest leading-none mb-1 shadow-2xs">
-              ¡CONFIGURACIÓN FISCAL MANDATORIA REQUERIDA!
+              CONFIGURACION FISCAL MANDATORIA REQUERIDA
             </h4>
             <p className="text-xs text-slate-600 leading-relaxed font-semibold">
               Tu cuenta se encuentra en estado inactivo. Es mandatorio completar el registro de tus datos fiscales oficiales de contribuyente (RFC, Razón Social, Régimen y Código Postal) para poder digitalizar tickets de compra y solicitar facturaciones.
@@ -2515,20 +2965,20 @@ export default function ProfileForm({
               onClick={() => setIsEditingFiscal(true)}
               className="mt-3 bg-rose-600 hover:bg-rose-700 text-white text-[10.5px] font-black px-4.5 py-2.5 rounded-xl uppercase tracking-wider transition cursor-pointer inline-flex items-center gap-1.5 focus:outline-none"
             >
-              Completar Datos Fiscales Ahora →
+              Completar Datos Fiscales Ahora
             </button>
           </div>
         </div>
       )}
 
       {initialProfile?.navigationDisabled && (
-        <div className="bg-gradient-to-tr from-amber-50/70 to-blue-50/70 border border-amber-200/70 rounded-2.5xl p-6 text-left flex items-start gap-4 shadow-sm animate-fade-in_50">
+        <div className="bg-gradient-to-tr from-amber-50/70 to-blue-50/70 border border-amber-200/70 rounded-2xl p-6 text-left flex items-start gap-4 shadow-sm animate-fade-in_50">
           <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 shrink-0 shadow-2xs">
             <Lock className="w-6 h-6 stroke-[2.2]" />
           </div>
           <div className="space-y-1">
             <h4 className="text-sm font-black text-amber-800 uppercase tracking-widest leading-none mb-1">
-              🔒 NAVEGACIÓN DESACTIVADA (MANDATO FISCAL)
+              NAVEGACION DESACTIVADA (MANDATO FISCAL)
             </h4>
             <p className="text-xs text-slate-600 leading-relaxed font-semibold">
               Has guardado los datos fiscales válidos. Con el fin de cumplir con el flujo restringido de ZenTicket, todas las opciones de navegación del panel lateral y del menú móvil han sido completamente bloqueadas de manera permanente.
@@ -2547,7 +2997,7 @@ export default function ProfileForm({
               }}
               className="mt-3 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-[10.5px] font-black px-4.5 py-2.5 rounded-xl uppercase tracking-wider transition cursor-pointer inline-flex items-center gap-1.5 focus:outline-none"
             >
-              Volver a activar navegación (Desbloquear) →
+              Volver a activar navegacion (Desbloquear)
             </button>
           </div>
         </div>
@@ -2583,7 +3033,7 @@ export default function ProfileForm({
         </button>
       </div>
 
-      {/* 2. SUSCRIPCIÓN Header & Detail Panel */}
+      {/* 2. SUSCRIPCION Header & Detail Panel */}
       <div className="space-y-2.5">
         <div className="flex items-center justify-between select-none">
           <span className="text-[11px] font-extrabold text-[#0B53F4]/80 uppercase tracking-widest font-display">
@@ -2596,20 +3046,20 @@ export default function ProfileForm({
             <div className="text-left font-body">
               <div className="flex items-center gap-2">
                 <span className="font-display font-extrabold text-sm text-slate-800 capitalize">
-                  {currentPlan === "personal" ? "Plan Personal" : currentPlan === "empresa" ? "Plan Empresa" : "Plan Gratuito"}
+                  {getPlanLabel(currentPlan)}
                 </span>
                 <span className="bg-[#ebf1ff] text-[#0B53F4] text-[9.5px] uppercase font-black px-2 py-0.5 rounded-md tracking-wider leading-none">
                   Activo
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
-                {currentPlan === "gratuito" ? "Plan de prueba permanente" : `Facturado mensual • Prox: ${new Date(planStartDate.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`}
+                {currentPlan === "gratuito" ? "Plan de prueba permanente" : `Facturado mensual - Prox: ${new Date(planStartDate.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`}
               </p>
             </div>
             {/* Amount details */}
             <div className="text-right flex items-baseline gap-1">
               <span className="text-lg font-mono font-extrabold text-slate-800">
-                {currentPlan === "personal" ? "$150" : currentPlan === "empresa" ? "$300" : "$0"}
+                {getPlanPrice(currentPlan)}
               </span>
               <span className="text-[10px] text-slate-400 font-bold font-display">/mes<br/><span className="text-[8px] tracking-wide block text-right">(MXN)</span></span>
             </div>
@@ -2637,7 +3087,6 @@ export default function ProfileForm({
             className="w-full zt-btn-primary hover:transform-none text-white text-xs font-bold py-3.5 rounded-full transition flex items-center justify-center gap-1.5 shadow-md shadow-[#0B53F4]/15 cursor-pointer active:scale-[0.98]"
           >
             <span>Gestionar Plan</span>
-            <span>→</span>
           </button>
         </div>
       </div>
@@ -2652,586 +3101,29 @@ export default function ProfileForm({
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
               Métodos de pago
-          </span>
-          <button 
-            type="button"
-            onClick={() => {
-              setAddingCard(!addingCard);
-              setAddingMethodStep("select");
-            }}
-            className="bg-[#ebf1ff] hover:bg-[#dee8ff] text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
-          >
-            {addingCard ? "Cancelar" : "+ Agregar Método de Pago"}
-          </button>
-        </div>
-
-        {addingCard && (
-          <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 mb-4 animate-fade-in text-left space-y-4">
-            
-            {addingMethodStep === "select" && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-black text-slate-850 uppercase tracking-wide block">Seleccionar Método de Pago</span>
-                    <span className="text-[9px] text-slate-400 font-bold block mt-0.5">Elige cómo deseas pagar tus planes</span>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      setAddingCard(false);
-                      setAddingMethodStep("select");
-                    }} 
-                    className="text-slate-400 hover:text-slate-655 font-bold text-xs p-1 cursor-pointer"
-                  >
-                    Cerrar
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Tarjeta Bancaria */}
-                  <button
-                    type="button"
-                    onClick={() => setAddingMethodStep("card")}
-                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#0B53F4] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 text-[#0B53F4] flex items-center justify-center transition shrink-0">
-                      <CreditCard className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-black text-slate-850 block">Tarjeta Bancaria</span>
-                      <span className="text-[9px] text-slate-400 font-bold block">Crédito o Débito</span>
-                    </div>
-                  </button>
-
-                  {/* Stripe Checkout */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAddingCard(false);
-                      handleDigitalWalletPayment("Stripe");
-                    }}
-                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#635BFF] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                      <img src={stripeLogo} className="w-7.5 h-7.5 object-contain" alt="Stripe" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-black text-slate-850 block">Stripe Checkout</span>
-                      <span className="text-[9px] text-slate-400 font-bold block">Pago seguro con tarjeta</span>
-                    </div>
-                  </button>
-
-                  {/* PayPal */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedMethodToAdd("PAYPAL");
-                      setAddingMethodStep("connecting");
-                    }}
-                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#0070ba] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                      <img src={paypalLogo} className="w-8 h-8 object-contain" alt="PayPal" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-black text-slate-850 block">PayPal</span>
-                      <span className="text-[9px] text-slate-400 font-bold block">Pago rápido y seguro</span>
-                    </div>
-                  </button>
-
-                  {/* Mercado Pago */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedMethodToAdd("MERCADOPAGO");
-                      setAddingMethodStep("connecting");
-                    }}
-                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#00A6EA] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                      <img src={mercadoPagoLogo} className="w-7 h-7 object-contain" alt="Mercado Pago" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-black text-slate-850 block">Mercado Pago</span>
-                      <span className="text-[9px] text-slate-400 font-bold block">Tu cuenta digital</span>
-                    </div>
-                  </button>
-
-                  {/* Apple Pay */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedMethodToAdd("APPLEPAY");
-                      setAddingMethodStep("connecting");
-                    }}
-                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-black hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                      <img src={applePayLogo} className="w-8 h-8 object-contain" alt="Apple Pay" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-black text-slate-850 block">Apple Pay</span>
-                      <span className="text-[9px] text-slate-400 font-bold block">Billetera de Apple</span>
-                    </div>
-                  </button>
-
-                  {/* Google Pay */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedMethodToAdd("GOOGLEPAY");
-                      setAddingMethodStep("connecting");
-                    }}
-                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#202124] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                      <img src={googlePayLogo} className="w-8 h-8 object-contain" alt="Google Pay" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-black text-slate-850 block">Google Pay</span>
-                      <span className="text-[9px] text-slate-400 font-bold block">Billetera de Google</span>
-                    </div>
-                  </button>
-
-                  {/* Spin by OXXO */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedMethodToAdd("SPINBYOXXO");
-                      setAddingMethodStep("connecting");
-                    }}
-                    className="flex items-center gap-3 p-4 bg-white border border-slate-200 hover:border-[#5D2D91] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0">
-                      <img src={spinLogo} className="w-8 h-8 object-contain" alt="Spin by OXXO" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-black text-slate-850 block">Spin by OXXO</span>
-                      <span className="text-[9px] text-slate-400 font-bold block">Tarjeta y app Spin</span>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {addingMethodStep === "card" && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setAddingMethodStep("select")}
-                      className="text-slate-400 hover:text-slate-600 transition p-1 cursor-pointer"
-                    >
-                      <ArrowLeft className="w-4 h-4" />
-                    </button>
-                    <div>
-                      <span className="text-xs font-black text-slate-800 uppercase tracking-wide block">Alta de Tarjeta Real</span>
-                      <span className="text-[9px] text-slate-400 font-bold block mt-0.5">Sujeto a autenticación bancaria directa</span>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      setAddingCard(false);
-                      setAddingMethodStep("select");
-                    }} 
-                    className="text-slate-400 hover:text-slate-655 font-bold text-xs p-1 cursor-pointer"
-                  >
-                    Cerrar
-                  </button>
-                </div>
-
-                {/* Card visual showcase with dynamic bank theme */}
-                {(() => {
-                  const bankInfo = getCardBankInfo(newCardNumber);
-                  const cardValid = isValidLuhn(newCardNumber);
-                  return (
-                    <div className={`bg-gradient-to-br ${bankInfo.bgColor} text-white rounded-2xl p-5 relative overflow-hidden shadow-lg font-mono select-none h-38 flex flex-col justify-between transition-all duration-300 border border-white/10`}>
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-tr from-white/10 to-transparent rounded-full blur-xl pointer-events-none" />
-                      <div className="flex justify-between items-start z-10">
-                        <div className="text-left">
-                          <span className="text-[8px] font-black tracking-widest text-white/50 block font-sans">RED DE PAGOS GLOBAL</span>
-                          <span className="text-[10px] font-black text-white leading-none mt-0.5 block font-sans">
-                            {bankInfo.bankName}
-                          </span>
-                        </div>
-                        <span className="text-xs font-extrabold italic tracking-wider text-slate-900 bg-white/95 px-2.5 py-1 rounded-lg shadow-sm border border-slate-100 uppercase">
-                          {newCardBrand}
-                        </span>
-                      </div>
-                      <div className="text-base tracking-widest font-black my-2 z-10 text-center text-white drop-shadow-sm">
-                        {newCardNumber ? newCardNumber.replace(/(\d{4})/g, "$1 ").trim() : "•••• •••• •••• ••••"}
-                      </div>
-                      <div className="flex justify-between text-[9px] items-end font-sans z-10 border-t border-white/10 pt-1.5">
-                        <div>
-                          <span className="text-[7px] text-white/50 block tracking-wider uppercase leading-none mb-1">TITULAR DE LA TARJETA</span>
-                          <span className="font-extrabold font-mono tracking-tight uppercase text-white/90">{newCardHolder.toUpperCase() || "NOMBRE DEL TITULAR"}</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-[7px] text-white/50 block tracking-wider uppercase leading-none mb-1">EXPIRA EN</span>
-                          <span className="font-mono font-extrabold text-white/95">{newCardExpiry || "MM/YY"}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Google Pay / Google Play store fast link account */}
-                <div className="bg-blue-50/40 border border-blue-100 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left">
-                  <div className="space-y-0.5">
-                    <span className="text-[9.5px] font-black text-blue-600 block uppercase tracking-wider">Sync con Google Account</span>
-                    <span className="text-[10.5px] text-slate-600 font-semibold block leading-tight">
-                      Sincroniza tarjetas reales de Google Pay o Google Play vinculadas a {currentUserEmail || auth.currentUser?.email || "tu correo"}.
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={isSyncingGPay}
-                    onClick={async () => {
-                      setIsSyncingGPay(true);
-                      toast.info("Conectando con Google Pay API para recuperar tarjetas vinculadas a tu cuenta de mail...");
-                      
-                      // Play a realistic OAuth API sync wait
-                      await new Promise(resolve => setTimeout(resolve, 2200));
-
-                      // Simulate retrieving the real card from their active google account
-                      const syncedCardObj: PaymentCard = {
-                        id: "card_gpay_" + Date.now(),
-                        brand: "VISA",
-                        last4: "9821",
-                        expiry: "11/29",
-                        holderName: (currentUserEmail || auth.currentUser?.email || "Julian Daniels").split("@")[0].toUpperCase() + " GPAY",
-                        isDefault: cards.length === 0,
-                        bankName: "BBVA Bancomer"
-                      };
-
-                      const updated = [...cards, syncedCardObj];
-                      setCards(updated);
-                      setIsSyncingGPay(false);
-                      
-                      try {
-                        await onSave({
-                          userId: initialProfile?.userId || "guest",
-                          rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
-                          razonSocial: razonSocial || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
-                          regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                          codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
-                          usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                          createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                          personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                          plan: initialProfile?.plan || "gratuito",
-                          paymentCards: updated
-                        });
-                        toast.success("¡Método de pago importado con éxito de tu cuenta de Google Play Store!", "Sincronizado con Éxito");
-                      } catch (e) {
-                        toast.error("Ocurrió un error al persistir el método de pago sincronizado.");
-                      }
-                    }}
-                    className="bg-white hover:bg-slate-50 text-slate-800 text-[10.5px] font-black px-3 py-2 rounded-xl border border-slate-200 transition cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs whitespace-nowrap active:scale-98"
-                  >
-                    {isSyncingGPay ? (
-                      <>
-                        <div className="w-3 h-3 border border-slate-600 border-t-transparent rounded-full animate-spin" />
-                        <span>Sincronizando...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block shrink-0" />
-                        <span>Sincronizar GPay / Play Store</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3.5">
-                  <div className="col-span-2 space-y-1">
-                    <div className="flex justify-between items-center px-1">
-                      <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block">Número de Tarjeta</label>
-                      {newCardNumber.length >= 13 && (
-                        isValidLuhn(newCardNumber) ? (
-                          <span className="text-[8.5px] text-emerald-600 font-extrabold uppercase">✓ Tarjeta Válida (Luhn OK)</span>
-                        ) : (
-                          <span className="text-[8.5px] text-rose-500 font-extrabold uppercase">✗ Formato de Número Inválido</span>
-                        )
-                      )}
-                    </div>
-                    <input 
-                      type="text" 
-                      maxLength={19} 
-                      placeholder="4111 2222 3333 4444 o digita BBVA / Nu / MP"
-                      value={newCardNumber}
-                      onChange={(e) => {
-                        let val = e.target.value.replace(/\D/g, "");
-                        if (val.startsWith("4")) setNewCardBrand("VISA");
-                        else if (val.startsWith("5")) setNewCardBrand("MASTERCARD");
-                        else if (val.startsWith("3")) setNewCardBrand("AMEX");
-                        // limit to 16 digits
-                        if (val.length <= 16) {
-                          setNewCardNumber(val);
-                        }
-                      }}
-                      className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none"
-                    />
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-1">Expiración</label>
-                    <input 
-                      type="text" 
-                      placeholder="MM/YY"
-                      maxLength={5}
-                      value={newCardExpiry}
-                      onChange={(e) => {
-                        let val = e.target.value.replace(/[^0-9/]/g, "");
-                        if (val.length === 2 && !val.includes("/") && e.nativeEvent.constructor.name === "InputEvent") {
-                          val += "/";
-                        }
-                        setNewCardExpiry(val);
-                      }}
-                      className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none text-center font-mono"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-1">CVV</label>
-                    <input 
-                      type="password" 
-                      placeholder="•••"
-                      maxLength={4}
-                      value={newCardCvv}
-                      onChange={(e) => setNewCardCvv(e.target.value.replace(/\D/g, ""))}
-                      className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none text-center font-mono"
-                    />
-                  </div>
-
-                  <div className="col-span-2 space-y-1">
-                    <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-1">Nombre Completo del Titular</label>
-                    <input 
-                      type="text" 
-                      placeholder="JULIAN DANIELS o tu nombre"
-                      value={newCardHolder}
-                      onChange={(e) => setNewCardHolder(e.target.value)}
-                      className="w-full text-xs font-semibold bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2.5 text-slate-800 outline-none uppercase"
-                    />
-                  </div>
-                </div>
-
-                <button 
-                  type="button"
-                  onClick={async () => {
-                    const cleanNum = newCardNumber.replace(/\s+/g, "");
-                    if (cleanNum.length < 13) {
-                      toast.error("Por favor completa un número de tarjeta válido.", "Número Inválido");
-                      return;
-                    }
-                    if (!isValidLuhn(cleanNum)) {
-                      toast.error("El número digitado es inválido. Por favor ingresa una tarjeta de 13 a 16 dígitos válida.", "Error de Validación");
-                      return;
-                    }
-                    if (!newCardExpiry.includes("/") || newCardExpiry.length < 5) {
-                      toast.error("Formato de expiración debe ser MM/YY.", "Format Incorrecto");
-                      return;
-                    }
-                    if (newCardCvv.length < 3) {
-                      toast.error("Código CVV de seguridad incompleto.", "CVV Inválido");
-                      return;
-                    }
-                    if (!newCardHolder.trim()) {
-                      toast.error("Por favor ingresa el nombre completo del tarjetahabiente.", "Titular Vacío");
-                      return;
-                    }
-
-                    // Prepare card obj
-                    const bankInfo = getCardBankInfo(cleanNum);
-                    const newCardObj: PaymentCard = {
-                      id: "card_" + Date.now(),
-                      brand: newCardBrand,
-                      last4: cleanNum.slice(-4),
-                      expiry: newCardExpiry,
-                      holderName: newCardHolder.toUpperCase().trim(),
-                      isDefault: cards.length === 0,
-                      bankName: bankInfo.bankName
-                    };
-
-                    const updatedCardsList = [...cards, newCardObj];
-                    setCards(updatedCardsList);
-                    
-                    // Clear fields
-                    setNewCardNumber("");
-                    setNewCardExpiry("");
-                    setNewCardCvv("");
-                    setNewCardHolder("");
-                    setAddingCard(false);
+            </span>
+            {checkoutPlanType === null && (
+              <button 
+                type="button"
+                onClick={() => {
+                  const nextState = !addingCard;
+                  setAddingCard(nextState);
+                  if (nextState) {
                     setAddingMethodStep("select");
-
-                    // Instantly save to Firebase for real tests
-                    try {
-                      await onSave({
-                        userId: initialProfile?.userId || "guest",
-                        rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
-                        razonSocial: razonSocial || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
-                        regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                        codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
-                        usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                        createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                        personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                        plan: initialProfile?.plan || "gratuito",
-                        paymentCards: updatedCardsList
-                      });
-                      toast.success("¡Tarjeta bancaria real vinculada con éxito en tu cuenta!", "Bóveda Actualizada");
-                    } catch (e) {
-                      toast.error("Vulnerabilidad o error al persistir tarjeta en la base de datos.");
-                    }
-                  }}
-                  className="w-full bg-[#0B53F4] text-white text-xs font-black py-3 rounded-2xl hover:bg-[#0747D1] transition shadow-md shadow-[#0B53F4]/10 cursor-pointer text-center active:scale-98"
-                >
-                  Vincular Tarjeta Bancaria Real
-                </button>
-              </div>
+                  }
+                }}
+                className="bg-[#ebf1ff] hover:bg-[#dee8ff] text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
+              >
+                {addingCard ? "Cancelar" : "+ Agregar Método de Pago"}
+              </button>
             )}
-
-            {addingMethodStep === "connecting" && (
-              <div className="flex flex-col items-center justify-center py-8 px-4 text-center space-y-4 animate-pulse">
-                <div className="relative">
-                  <div className="w-16 h-16 border-4 border-[#ebf1ff] border-t-[#0B53F4] rounded-full animate-spin" />
-                  <div className="absolute inset-0 flex items-center justify-center font-sans font-black text-xs text-slate-500">
-                    {selectedMethodToAdd === "MERCADOPAGO" ? "MP" : 
-                     selectedMethodToAdd === "APPLEPAY" ? "" : 
-                     selectedMethodToAdd === "GOOGLEPAY" ? "G" : 
-                     selectedMethodToAdd === "PAYPAL" ? "PP" : "SPIN"}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs font-black text-slate-850 uppercase tracking-wider block">
-                    Conectando con {selectedMethodToAdd === "MERCADOPAGO" ? "Mercado Pago" : 
-                                    selectedMethodToAdd === "APPLEPAY" ? "Apple Pay" : 
-                                    selectedMethodToAdd === "GOOGLEPAY" ? "Google Pay" : 
-                                    selectedMethodToAdd === "PAYPAL" ? "PayPal" : "Spin by OXXO"}
-                  </span>
-                  <p className="text-[10px] text-slate-400 font-bold leading-normal max-w-xs">
-                    Estableciendo conexión encriptada y autorizando token de facturación recurrente. Por favor espera...
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedMethodToAdd(null);
-                    setAddingMethodStep("select");
-                    setAddingCard(false);
-                  }}
-                  className="text-[10px] font-black text-[#0B53F4] hover:underline uppercase tracking-wider cursor-pointer"
-                >
-                  Cancelar conexión
-                </button>
-              </div>
-            )}
-
           </div>
-        )}
 
-        <div className="bg-white border border-slate-200/50 rounded-3xl overflow-hidden divide-y divide-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.02)]">
-          {cards.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-400 font-semibold">
-              No tienes tarjetas dadas de alta. Agrega una arriba para realizar compras.
-            </div>
-          ) : (
-            cards.map((card) => (
-              <div key={card.id} className="flex items-center justify-between p-4.5 hover:bg-slate-50/40 transition">
-                <button
-                  type="button"
-                  onClick={() => setSelectedDetailsCard(card)}
-                  className="flex items-center gap-3.5 flex-1 text-left cursor-pointer hover:opacity-85 transition bg-transparent border-none outline-none p-0 mr-4"
-                  title="Haz click para ver detalles y comprar planes"
-                >
-                  {/* Visual Brand Block */}
-                  {renderVisualBrandBlock(card, "md")}
-
-                  <div className="text-left leading-none">
-                    <span className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                      •••• {card.last4} 
-                      <span className="text-[8px] text-[#0B53F4] font-black bg-[#EBF1FF] px-1.5 py-0.5 rounded uppercase tracking-wider">
-                        Ver / Comprar
-                      </span>
-                    </span>
-                    <span className="text-[10px] text-slate-400 mt-1.5 block font-mono">Vence: {card.expiry} | {card.holderName}</span>
-                  </div>
-                </button>
-
-                <div className="flex items-center gap-2">
-                  {card.isDefault ? (
-                    <span className="bg-emerald-50 border border-emerald-100 text-emerald-600 text-[8px] uppercase font-black px-2 py-1 rounded-md tracking-wider leading-none">
-                      Predeterminado
-                    </span>
-                  ) : (
-                    <button 
-                      type="button"
-                      onClick={async () => {
-                        const updated = cards.map(c => ({
-                          ...c,
-                          isDefault: c.id === card.id
-                        }));
-                        setCards(updated);
-                        try {
-                          await onSave({
-                            userId: initialProfile?.userId || "guest",
-                            rfc: rfc || initialProfile?.rfc || "",
-                            razonSocial: razonSocial || initialProfile?.razonSocial || "",
-                            regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                            codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
-                            usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                            createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                            personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                            plan: initialProfile?.plan || "gratuito",
-                            paymentCards: updated
-                          });
-                          toast.success("Se ha cambiado tu tarjeta predeterminada.", "Tarjeta Actualizada");
-                        } catch (err) {
-                          toast.error("Ocurrió un error al persistir la tarjeta predeterminada.");
-                        }
-                      }}
-                      className="text-[8.5px] bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] font-black px-2.5 py-1 rounded transition cursor-pointer uppercase tracking-wider border-none"
-                    >
-                      Predeterminar
-                    </button>
-                  )}
-
-                  <button 
-                    type="button"
-                    onClick={async () => {
-                      const updated = cards.filter(c => c.id !== card.id);
-                      if (card.isDefault && updated.length > 0) {
-                        updated[0].isDefault = true;
-                      }
-                      setCards(updated);
-                      try {
-                        await onSave({
-                          userId: initialProfile?.userId || "guest",
-                          rfc: rfc || initialProfile?.rfc || "",
-                          razonSocial: razonSocial || initialProfile?.razonSocial || "",
-                          regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                          codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
-                          usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                          createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                          personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                          plan: initialProfile?.plan || "gratuito",
-                          paymentCards: updated
-                        });
-                        toast.success("Método de pago eliminado con éxito.", "Tarjeta Eliminada");
-                      } catch (err) {
-                        toast.error("Ocurrió un error al eliminar tu tarjeta.");
-                      }
-                    }}
-                    className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition p-1.5 rounded-lg bg-transparent border-none outline-none cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
+          {renderCheckoutSection()}
         </div>
-      </div>
 
-      {/* 4. CONFIGURACIÓN Header & Options List with interactive components */}
+
+      {/* 4. CONFIGURACION Header & Options List with interactive components */}
       <div className="space-y-2.5">
         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
           Configuración
@@ -3285,7 +3177,7 @@ export default function ProfileForm({
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-slate-400 font-bold">
-                {languageChoice === "es-MX" ? "Español (MX)" : languageChoice === "en-US" ? "English (US)" : "Português (BR)"}
+                {languageChoice === "es-MX" ? "Espanol (MX)" : languageChoice === "en-US" ? "English (US)" : "Portugues (BR)"}
               </span>
               <ChevronRight className="w-4 h-4 text-slate-350" />
             </div>
@@ -3325,7 +3217,7 @@ export default function ProfileForm({
           {/* FAQ */}
           <div 
             onClick={() => { setActiveModal("faq"); setOpenFaqIndex(-1); }}
-            className="bg-white border border-slate-200/50 rounded-2.5xl p-4 flex flex-col items-center justify-center gap-3 hover:bg-slate-50 transition text-center shadow-[0_4px_20px_rgba(15,23,42,0.02)] py-5 cursor-pointer active:scale-95"
+            className="bg-white border border-slate-200/50 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 hover:bg-slate-50 transition text-center shadow-[0_4px_20px_rgba(15,23,42,0.02)] py-5 cursor-pointer active:scale-95"
           >
             <div className="w-10 h-10 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
               <HelpCircle className="w-5.5 h-5.5 stroke-[2.5]" />
@@ -3336,7 +3228,7 @@ export default function ProfileForm({
           {/* Tutoriales */}
           <div 
             onClick={() => { setActiveModal("tutorial"); setTutorialStep(0); }}
-            className="bg-white border border-slate-200/50 rounded-2.5xl p-4 flex flex-col items-center justify-center gap-3 hover:bg-slate-50 transition text-center shadow-[0_4px_20px_rgba(15,23,42,0.02)] py-5 cursor-pointer active:scale-95"
+            className="bg-white border border-slate-200/50 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 hover:bg-slate-50 transition text-center shadow-[0_4px_20px_rgba(15,23,42,0.02)] py-5 cursor-pointer active:scale-95"
           >
             <div className="w-10 h-10 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
               <BookOpen className="w-5.5 h-5.5 stroke-[2.5]" />
@@ -3346,8 +3238,8 @@ export default function ProfileForm({
 
           {/* Soporte */}
           <div 
-            onClick={() => { setActiveModal("soporte"); setSupportSubject("error_conector"); setSupportMessage(""); setSupportEmail(currentUser?.email || "julian.d@zenticket.mx"); }}
-            className="bg-white border border-slate-200/50 rounded-2.5xl p-4 flex flex-col items-center justify-center gap-3 hover:bg-slate-50 transition text-center shadow-[0_4px_20px_rgba(15,23,42,0.02)] py-5 cursor-pointer active:scale-95"
+            onClick={() => { setActiveModal("soporte"); setSupportSubject("error_conector"); setSupportMessage(""); setSupportEmail(currentUser?.email || sessionEmail || ""); }}
+            className="bg-white border border-slate-200/50 rounded-2xl p-4 flex flex-col items-center justify-center gap-3 hover:bg-slate-50 transition text-center shadow-[0_4px_20px_rgba(15,23,42,0.02)] py-5 cursor-pointer active:scale-95"
           >
             <div className="w-10 h-10 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
               <MessageSquare className="w-5.5 h-5.5 stroke-[2.5]" />
@@ -3369,7 +3261,7 @@ export default function ProfileForm({
         </button>
 
         {showDeleteConfirm ? (
-          <div className="bg-rose-50 border border-rose-200 rounded-2.5xl p-5 space-y-3.5 text-left animate-fade-in">
+          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5 space-y-3.5 text-left animate-fade-in">
             <h4 className="text-xs font-black text-rose-800 uppercase tracking-widest flex items-center gap-1.5 leading-none">
               <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
               ¡Sincronización de Memoria Inactiva!
@@ -3408,252 +3300,7 @@ export default function ProfileForm({
         )}
       </div>
 
-      {/* 💳 DETALLE DE TARJETA & COMPRAR PLAN MODAL */}
-      {selectedDetailsCard && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl overflow-hidden max-w-md w-full shadow-2xl border border-slate-100 flex flex-col text-slate-800 animate-scale-up">
-            
-            {/* Header with Close */}
-            <div className="p-6 border-b border-slate-150 flex items-center justify-between text-left">
-              <div>
-                <h3 className="text-base font-black font-display text-slate-800">Detalles de Tarjeta Bancaria</h3>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Gestión del Método de Pago</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedDetailsCard(null)}
-                className="text-slate-400 hover:text-slate-650 transition p-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Visual Card Showcase */}
-            <div className="p-6 text-left space-y-6">
-              {(() => {
-                const bankName = selectedDetailsCard.bankName || "BBVA Bancomer";
-                const bgInfo = 
-                  selectedDetailsCard.brand === "VISA" 
-                    ? "from-blue-900 via-blue-800 to-indigo-950" 
-                    : selectedDetailsCard.brand === "AMEX"
-                    ? "from-cyan-800 via-cyan-700 to-teal-900"
-                    : "from-rose-850 via-red-750 to-rose-950";
-
-                return (
-                  <div className={`bg-gradient-to-br ${bgInfo} text-white rounded-2xl p-5 relative overflow-hidden shadow-lg font-mono select-none h-38 flex flex-col justify-between border border-white/10`}>
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-tr from-white/10 to-transparent rounded-full blur-xl pointer-events-none" />
-                    <div className="flex justify-between items-start z-10">
-                      <div className="text-left">
-                        <span className="text-[7.5px] font-black tracking-widest text-white/50 block font-sans">MÉTODO DE PAGO</span>
-                        <span className="text-[11px] font-black text-white leading-none mt-0.5 block font-sans">
-                          {bankName}
-                        </span>
-                      </div>
-                      <span className="text-xs font-black italic tracking-widest bg-white/10 px-2 py-0.5 rounded uppercase font-sans">
-                        {selectedDetailsCard.brand}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1 text-left z-10">
-                      <span className="text-base font-black tracking-widest block leading-none">
-                        {(selectedDetailsCard.brand === "AMEX" ? "3782 •••••• •" : selectedDetailsCard.brand === "MASTERCARD" ? "5412 •••• •••• " : "4242 •••• •••• ") + selectedDetailsCard.last4}
-                      </span>
-                      <div className="flex justify-between text-[9px] text-white/70">
-                        <span className="font-sans font-bold">VENCE: {selectedDetailsCard.expiry}</span>
-                        <span className="font-sans font-bold">CVV: ***</span>
-                      </div>
-                    </div>
-
-                    <div className="text-left z-10">
-                      <span className="text-[8px] font-black text-white/55 block font-sans uppercase">TARJETAHABIENTE</span>
-                      <span className="text-[10px] font-bold tracking-wide truncate block">{selectedDetailsCard.holderName}</span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* BRANDED BANK REQUIREMENTS */}
-              <div className="bg-blue-50/20 border border-blue-100/50 rounded-2xl p-4 space-y-3 text-left">
-                <div className="flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-[#0B53F4]" />
-                  <span className="text-[10px] font-black text-[#0B53F4] uppercase tracking-widest leading-none">Requisitos de Seguridad del Banco</span>
-                </div>
-                <p className="text-[10px] font-semibold text-slate-500 leading-normal">
-                  Su banco emisor ({selectedDetailsCard.bankName || "BBVA Bancomer"}) requiere que introduzca los datos de autenticación del plástico y su credencial de compra para autorizar la conexión.
-                </p>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[8.5px] font-black text-slate-400 uppercase tracking-widest block">CVV (3 Dígitos)</label>
-                    <input 
-                      type="text" 
-                      maxLength={3}
-                      placeholder="123"
-                      value={modalCvvInput}
-                      onChange={(e) => setModalCvvInput(e.target.value.replace(/\D/g, ""))}
-                      className="w-full text-xs font-mono font-black tracking-widest bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2 outline-none text-slate-800"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[8.5px] font-black text-slate-400 uppercase tracking-widest block">PIN / Clave de Compra Web</label>
-                    <input 
-                      type="password" 
-                      maxLength={4}
-                      placeholder="••••"
-                      value={modalPinInput}
-                      onChange={(e) => setModalPinInput(e.target.value.replace(/\D/g, ""))}
-                      className="w-full text-xs font-mono font-black tracking-widest bg-white border border-slate-200 focus:border-[#0B53F4] rounded-xl px-3 py-2 outline-none text-slate-800"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Purchase Section */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-1">
-                  <CreditCard className="w-4 h-4 text-[#0B53F4]" />
-                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Contratar Plan con esta Tarjeta</h4>
-                </div>
-                <p className="text-[11px] text-slate-500 leading-relaxed font-semibold">
-                  Selecciona uno de los planes reales para realizar el cargo correspondiente y actualizar tu cuenta de inmediato.
-                </p>
-
-                <div className="grid grid-cols-2 gap-3 mt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (modalCvvInput.length < 3) {
-                        toast.error(`El emisor ${selectedDetailsCard.bankName || "Emisor"} denegó la transacción: el código CVV es incompleto o inválido.`, "Código CVV Requerido");
-                        return;
-                      }
-                      if (modalPinInput.length < 4) {
-                        toast.error(`Su banco requiere la clave PIN de compra móvil para realizar transacciones por internet de forma segura.`, "PIN de Seguridad Requerido");
-                        return;
-                      }
-
-                      setSelectedCardForPlan(selectedDetailsCard.id);
-                      setCheckoutPlanType("personal");
-                      
-                      // Prepare and trigger 3DS secure system
-                      setBankAuthCard(selectedDetailsCard);
-                      setBankAuthAmount(150.00); 
-                      setBankAuthStatus("connecting");
-                      setBankAuthOtpInput("");
-                      setBankAuthVisible(true);
-
-                      // Define dynamic success callback
-                      setBankAuthSuccessCallback(() => async () => {
-                        try {
-                          await onSave({
-                            userId: initialProfile?.userId || "guest",
-                            rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
-                            razonSocial: razonSocial || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
-                            regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                            codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
-                            usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                            createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                            personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                            plan: "personal",
-                            planStartDate: new Date().toISOString(),
-                            paymentCards: cards
-                          });
-                          toast.success("¡Plan Personal contratado y activo exitosamente!", "Suscripción Lista");
-                        } catch (err) {
-                          toast.error("Ocurrió un error al registrar la suscripción.");
-                        }
-                      });
-
-                      // Reset credentials inputs
-                      setModalCvvInput("");
-                      setModalPinInput("");
-                      setSelectedDetailsCard(null); // Close details modal
-                    }}
-                    className="border border-slate-200 hover:border-[#0B53F4]/50 bg-slate-50 hover:bg-[#EBF1FF]/40 rounded-2xl p-3.5 text-left transition cursor-pointer flex flex-col justify-between gap-2 group text-slate-800"
-                  >
-                    <div>
-                      <span className="text-[9px] font-black text-[#0B53F4] uppercase tracking-wider block">Plan Personal</span>
-                      <span className="text-sm font-extrabold text-slate-800 block mt-1">$150.00 <span className="text-[9px] text-slate-400 font-bold">/mes</span></span>
-                    </div>
-                    <span className="text-[9.5px] font-bold text-slate-500 group-hover:text-[#0B53F4] transition">Contratar Plan →</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (modalCvvInput.length < 3) {
-                        toast.error(`El emisor ${selectedDetailsCard.bankName || "Emisor"} denegó la transacción: el código CVV es incompleto o inválido.`, "Código CVV Requerido");
-                        return;
-                      }
-                      if (modalPinInput.length < 4) {
-                        toast.error(`Su banco requiere la clave PIN de compra móvil para realizar transacciones por internet de forma segura.`, "PIN de Seguridad Requerido");
-                        return;
-                      }
-
-                      setSelectedCardForPlan(selectedDetailsCard.id);
-                      setCheckoutPlanType("empresa");
-
-                      // Prepare and trigger 3DS secure system
-                      setBankAuthCard(selectedDetailsCard);
-                      setBankAuthAmount(300.00);
-                      setBankAuthStatus("connecting");
-                      setBankAuthOtpInput("");
-                      setBankAuthVisible(true);
-
-                      // Define dynamic success callback
-                      setBankAuthSuccessCallback(() => async () => {
-                        try {
-                          await onSave({
-                            userId: initialProfile?.userId || "guest",
-                            rfc: rfc || initialProfile?.rfc || "CABE850101ABC",
-                            razonSocial: razonSocial || initialProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
-                            regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                            codigoPostal: codigoPostal || initialProfile?.codigoPostal || "02000",
-                            usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                            createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                            personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                            plan: "empresa",
-                            planStartDate: new Date().toISOString(),
-                            paymentCards: cards
-                          });
-                          toast.success("¡Plan Empresa contratado y activo exitosamente!", "Suscripción Lista");
-                        } catch (err) {
-                          toast.error("Ocurrió un error al registrar la suscripción.");
-                        }
-                      });
-
-                      // Reset credentials inputs
-                      setModalCvvInput("");
-                      setModalPinInput("");
-                      setSelectedDetailsCard(null); // Close details modal
-                    }}
-                    className="border border-slate-200 hover:border-emerald-600/50 bg-slate-50 hover:bg-emerald-50/20 rounded-2xl p-3.5 text-left transition cursor-pointer flex flex-col justify-between gap-2 group text-slate-800"
-                  >
-                    <div>
-                      <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wider block">Plan Empresa</span>
-                      <span className="text-sm font-extrabold text-slate-800 block mt-1">$300.00 <span className="text-[9px] text-slate-400 font-bold">/mes</span></span>
-                    </div>
-                    <span className="text-[9.5px] font-bold text-slate-500 group-hover:text-emerald-600 transition">Contratar Plan →</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Technical Security Footnote */}
-              <div className="bg-slate-50 rounded-2xl p-4 flex gap-3 text-left">
-                <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                <div className="space-y-0.5">
-                  <h5 className="text-[10px] font-black text-slate-800 uppercase tracking-widest">Autenticación Strong Customer (SCA)</h5>
-                  <p className="text-[9.5px] text-slate-500 leading-normal font-semibold">
-                    Se solicitará verificación del banco emisor por SMS/OTP a través del protocolo oficial 3D Secure v2 para realizar transacciones reales seguras bajo políticas PCI-DSS globales.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {bankAuthVisible && (
+      {false && bankAuthVisible && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl overflow-hidden max-w-md w-full shadow-2xl border border-slate-100 flex flex-col text-slate-800 animate-scale-up">
             
@@ -3671,7 +3318,7 @@ export default function ProfileForm({
                   </div>
                   <h3 className="text-xl font-black font-display tracking-tight text-white">{bankInfo.bankName}</h3>
                   <p className="text-[10px] text-white/80 font-mono mt-1">
-                    Conexión Encriptada • Protocolo 3D Secure v2.2
+                    Conexion Encriptada - Protocolo 3D Secure v2.2
                   </p>
                 </div>
               );
@@ -3696,7 +3343,7 @@ export default function ProfileForm({
                   <div className="bg-blue-50/50 border border-blue-100/50 rounded-2xl p-4 flex gap-3">
                     <Smartphone className="w-5 h-5 text-[#0B53F4] shrink-0 mt-0.5" />
                     <div className="text-[11px] text-slate-600 leading-relaxed font-semibold">
-                      Su banco emisor ha solicitado la verificación de identidad telefónica (SCA/OTP) por seguridad. Hemos enviado un mensaje de texto SMS con su clave temporal al número de teléfono celular registrado para la tarjeta terminada en <span className="font-mono font-black text-slate-800 bg-white px-1.5 py-0.5 border border-slate-100 rounded">•••• {bankAuthCard?.last4}</span>.
+                      Su banco emisor ha solicitado la verificacion de identidad telefonica (SCA/OTP) por seguridad. Hemos enviado un mensaje de texto SMS con su clave temporal al numero de telefono celular registrado para la tarjeta terminada en <span className="font-mono font-black text-slate-800 bg-white px-1.5 py-0.5 border border-slate-100 rounded">**** {bankAuthCard?.last4}</span>.
                     </div>
                   </div>
 
@@ -3796,7 +3443,7 @@ export default function ProfileForm({
                     }}
                     className="w-full bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-black py-3 rounded-2xl transition cursor-pointer shadow-md shadow-[#0B53F4]/10 text-center uppercase tracking-wide"
                   >
-                    Activar y Finalizar Transacción →
+                    Activar y Finalizar Transaccion
                   </button>
                 </div>
               )}

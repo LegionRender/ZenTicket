@@ -10,28 +10,74 @@ import axios from "axios";
 
 dotenv.config();
 
-// Initialize firebase-admin with projectId or GOOGLE_APPLICATION_CREDENTIALS
-try {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    initializeApp({
-      credential: cert(serviceAccount)
-    });
-  } else {
-    initializeApp({
-      projectId: "factubolt"
-    });
-  }
-  console.log("[Firebase Admin] Inicializado exitosamente.");
-} catch (e) {
-  console.warn("[Firebase Admin Warning] No se pudo inicializar con credenciales reales. Corriendo en modo fallback.", e);
-  // Allow initialization for local development without credentials if already initialized
-  if (getApps().length === 0) {
-    initializeApp({ projectId: "factubolt" });
+const hasRealCredentials = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+
+let adminDb: any;
+
+if (hasRealCredentials) {
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      initializeApp({
+        credential: cert(serviceAccount)
+      });
+    } else {
+      initializeApp({
+        projectId: "factubolt"
+      });
+    }
+    console.log("[Firebase Admin] Inicializado exitosamente.");
+    adminDb = getFirestore();
+  } catch (e) {
+    console.warn("[Firebase Admin Warning] No se pudo inicializar con credenciales reales.", e);
   }
 }
 
-const adminDb = getFirestore();
+if (!adminDb) {
+  console.log("[Firebase Admin] No se detectaron credenciales reales. Cargando Bóveda Mock en Memoria para desarrollo local.");
+  const mockDb: Record<string, Record<string, any>> = {
+    payments: {},
+    subscriptions: {},
+    fiscalProfiles: {},
+    billingEvents: {}
+  };
+  
+  adminDb = {
+    collection: (colName: string) => {
+      if (!mockDb[colName]) mockDb[colName] = {};
+      return {
+        doc: (docId: string) => {
+          return {
+            set: async (data: any, options?: any) => {
+              console.log(`[Mock Firestore Set] ${colName}/${docId}:`, data);
+              if (options?.merge) {
+                mockDb[colName][docId] = { ...mockDb[colName][docId], ...data };
+              } else {
+                mockDb[colName][docId] = data;
+              }
+              return { writeTime: new Date() };
+            },
+            get: async () => {
+              console.log(`[Mock Firestore Get] ${colName}/${docId}`);
+              const data = mockDb[colName][docId];
+              return {
+                exists: !!data,
+                data: () => data,
+                id: docId
+              };
+            }
+          };
+        },
+        add: async (data: any) => {
+          const docId = "mock_event_" + Date.now();
+          console.log(`[Mock Firestore Add] ${colName}/${docId}:`, data);
+          mockDb[colName][docId] = data;
+          return { id: docId, writeTime: new Date() };
+        }
+      };
+    }
+  };
+}
 
 
 const app = express();
@@ -1435,6 +1481,18 @@ async function getPayPalAccessToken() {
   };
 }
 
+const getSafeBaseUrl = (req: Request): string => {
+  let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  if (Array.isArray(proto)) {
+    proto = proto[0];
+  }
+  if (typeof proto === "string" && proto.includes(",")) {
+    proto = proto.split(",")[0].trim();
+  }
+  const host = req.get("host") || "localhost:3000";
+  return `${proto}://${host}`;
+};
+
 // 1. Mercado Pago Checkout (Single Preference)
 app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response) => {
   const { userId, planId } = req.body;
@@ -1446,7 +1504,7 @@ app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 99.00;
+    price = 5.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -1472,6 +1530,8 @@ app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response
   }
 
   try {
+    const baseUrl = getSafeBaseUrl(req);
+
     const response = await axios.post(
       "https://api.mercadopago.com/v1/preferences",
       {
@@ -1484,12 +1544,12 @@ app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response
           }
         ],
         back_urls: {
-          success: process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
-          failure: process.env.BILLING_FAILURE_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=failure`,
-          pending: process.env.BILLING_PENDING_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=pending`
+          success: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
+          failure: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
+          pending: process.env.BILLING_PENDING_URL || `${baseUrl}/workspace?tab=cuenta&status=pending`
         },
         auto_return: "approved",
-        notification_url: `${process.env.APP_PUBLIC_URL}/api/billing/webhooks/mercadopago`,
+        notification_url: `${baseUrl}/api/billing/webhooks/mercadopago`,
         external_reference: `${userId}:${planId}`
       },
       {
@@ -1535,7 +1595,7 @@ app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Resp
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 99.00;
+    price = 5.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -1561,10 +1621,12 @@ app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Resp
   }
 
   try {
+    const baseUrl = getSafeBaseUrl(req);
+
     const response = await axios.post(
       "https://api.mercadopago.com/preapprovals",
       {
-        back_url: process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
+        back_url: process.env.BILLING_SUCCESS_URL || `${baseUrl}/workspace?tab=cuenta&status=success`,
         reason: title,
         auto_recurring: {
           frequency: 1,
@@ -1618,7 +1680,7 @@ app.post("/api/billing/checkout/paypal", async (req: Request, res: Response) => 
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 99.00;
+    price = 5.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -1638,6 +1700,8 @@ app.post("/api/billing/checkout/paypal", async (req: Request, res: Response) => 
   }
 
   try {
+    const baseUrl = getSafeBaseUrl(req);
+
     const { accessToken, host } = await getPayPalAccessToken();
     const response = await axios.post(
       `${host}/v2/checkout/orders`,
@@ -1654,8 +1718,8 @@ app.post("/api/billing/checkout/paypal", async (req: Request, res: Response) => 
           }
         ],
         application_context: {
-          return_url: process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
-          cancel_url: process.env.BILLING_FAILURE_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=failure`
+          return_url: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
+          cancel_url: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`
         }
       },
       {
@@ -1702,7 +1766,7 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 99.00;
+    price = 5.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -1728,6 +1792,11 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
   }
 
   try {
+    const baseUrl = getSafeBaseUrl(req);
+    console.log("DEBUG STRIPE BASEURL:", baseUrl);
+    const successUrl = process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`;
+    console.log("DEBUG STRIPE SUCCESSURL:", successUrl);
+
     const response = await axios.post(
       "https://api.stripe.com/v1/checkout/sessions",
       new URLSearchParams({
@@ -1737,8 +1806,8 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
         "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
         "line_items[0][quantity]": "1",
         "mode": "payment",
-        "success_url": process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
-        "cancel_url": process.env.BILLING_FAILURE_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=failure`,
+        "success_url": successUrl,
+        "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
         "client_reference_id": `${userId}:${planId}`
       }).toString(),
       {

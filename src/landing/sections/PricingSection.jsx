@@ -32,7 +32,7 @@ const plans = [
     iconColor: "text-sky-500 bg-sky-50",
     sub: "Para uso personal frecuente.",
     desc: "Para personas que facturan algunos consumos al mes y quieren evitar hacerlo manualmente.",
-    price: "$99",
+    price: "$5",
     features: [
       "10 facturas generadas al mes.",
       "Todo lo del plan Gratuito.",

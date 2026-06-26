@@ -247,7 +247,20 @@ export default function ScannerAndSimulator({
         const ticketId = t.id || "tkt-temp";
         const timestamp = t.createdAt ? new Date(t.createdAt) : new Date();
 
-        if (t.status === "failed") {
+        if (t.isOfflinePending) {
+          list.push({
+            id: `offline-${ticketId}`,
+            category: "pendientes",
+            criticality: "importante",
+            title: "Captura Sin Conexión",
+            message: `El ticket de ${t.nombreEmisor || "Establecimiento"} fue guardado localmente sin internet. Se procesará automáticamente al recuperar conexión.`,
+            createdAt: timestamp,
+            read: readNotifIds.includes(`offline-${ticketId}`),
+            actionText: "En espera de conexión 🌐",
+            actionType: "offline_pending",
+            ticket: t
+          });
+        } else if (t.status === "failed") {
           list.push({
             id: `failed-${ticketId}`,
             category: "pendientes",
@@ -274,12 +287,15 @@ export default function ScannerAndSimulator({
             ticket: t
           });
         } else if (t.status === "completed") {
+          const wasOffline = t.wasProcessedOffline;
           list.push({
             id: `completed-${ticketId}`,
             category: "facturas",
             criticality: "informativa",
-            title: `Factura Certificada SAT - ${t.nombreEmisor || "Establecimiento"}`,
-            message: `Se timbró exitosamente el CFDI 4.0 para ${t.nombreEmisor || "Establecimiento"} por un monto de $${(t.total || 0).toFixed(2)} MXN de manera limpia.`,
+            title: wasOffline ? `Factura Emitida (Sincronización Offline)` : `Factura Certificada SAT - ${t.nombreEmisor || "Establecimiento"}`,
+            message: wasOffline
+              ? `El ticket sin conexión de ${t.nombreEmisor || "Establecimiento"} por $${(t.total || 0).toFixed(2)} MXN ha sido procesado y facturado automáticamente.`
+              : `Se timbró exitosamente el CFDI 4.0 para ${t.nombreEmisor || "Establecimiento"} por un monto de $${(t.total || 0).toFixed(2)} MXN de manera limpia.`,
             createdAt: timestamp,
             read: readNotifIds.includes(`completed-${ticketId}`),
             actionText: "Ver detalles 📄",
@@ -651,6 +667,33 @@ export default function ScannerAndSimulator({
       const mime = compressed.mimeType;
 
       setTicketImage(base64Str);
+
+      if (!window.navigator.onLine) {
+        stopSimulation();
+        const offlineTicketId = await onSaveTicketToDb({
+          userId: user?.uid || "guest",
+          imageUrl: base64Str,
+          status: "review",
+          isOfflinePending: true,
+          rfcEmisor: "PENDIENTE",
+          nombreEmisor: "Establecimiento Pendiente (Captura Offline)",
+          fechaCompra: new Date().toISOString().split("T")[0],
+          folio: "OFFLINE-" + Math.random().toString(36).substring(2, 7).toUpperCase(),
+          total: 0,
+          sucursal: "Captura Local",
+          itemsJson: "[]",
+          createdAt: new Date().toISOString(),
+          cost: 0.50,
+          rawCost: 0
+        });
+        setTicketId(offlineTicketId);
+        toast.warning(
+          "No tienes conexión a internet en este momento. No te preocupes: hemos guardado la foto de tu ticket de forma segura y realizaremos todo el proceso de facturación automáticamente en cuanto recuperes tu conexión. ¡Nosotros nos encargamos! 🌐",
+          "Captura Sin Conexión"
+        );
+        setIsOcrLoading(false);
+        return;
+      }
 
       const rawBase64 = base64Str.split(",")[1];
 
@@ -1103,7 +1146,7 @@ export default function ScannerAndSimulator({
               </p>
             </div>
 
-            <div className="w-full bg-slate-50 rounded-2.5xl p-4.5 text-left border border-slate-200/50 space-y-3 font-sans">
+            <div className="w-full bg-slate-50 rounded-2xl p-4.5 text-left border border-slate-200/50 space-y-3 font-sans">
               <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block font-mono">
                 DETALLE DE TRANSACCIÓN
               </span>
@@ -1116,7 +1159,7 @@ export default function ScannerAndSimulator({
               <div className="flex justify-between items-center text-xs font-bold pt-1.5 border-t border-slate-100 font-mono">
                 <span className="text-slate-600 font-sans">Costo mensual:</span>
                 <span className="text-[#0B53F4] font-black text-sm">
-                  {fiscalProfile?.plan === "brisa" ? "$99.00 MXN" : fiscalProfile?.plan === "serenidad" ? "$250.00 MXN" : fiscalProfile?.plan === "nirvana" ? "$500.00 MXN" : "Contratar Plan ($99 - $500 MXN)"}
+                  {fiscalProfile?.plan === "brisa" ? "$5.00 MXN" : fiscalProfile?.plan === "serenidad" ? "$250.00 MXN" : fiscalProfile?.plan === "nirvana" ? "$500.00 MXN" : "Contratar Plan ($5 - $500 MXN)"}
                 </span>
               </div>
             </div>

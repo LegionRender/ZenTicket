@@ -359,8 +359,8 @@ export default function AdminScreen({
   const displayGratuito = profilesList.filter((p) => p.plan === "gratuito").length || 1;
   const displayUsersCount = profilesList.length || (countBrisa + countSerenidad + countNirvana + displayGratuito);
 
-  // Prices: Plan Brisa is $99 MXN/month, Plan Serenidad is $250 MXN/month, Plan Nirvana is $500 MXN/month.
-  const totalSubscriptionsRevenue = (countBrisa * 99) + (countSerenidad * 250) + (countNirvana * 500);
+  // Prices: Plan Brisa is $5 MXN/month for live payment testing, Plan Serenidad is $250 MXN/month, Plan Nirvana is $500 MXN/month.
+  const totalSubscriptionsRevenue = (countBrisa * 5) + (countSerenidad * 250) + (countNirvana * 500);
 
   // 1b. Accumulated Invoiced Total from active user invoices
   const totalInvoicedAmount = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
@@ -935,7 +935,7 @@ export default function AdminScreen({
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-[#00A6EA]" />
-                Plan Brisa ($99 MXN)
+                Plan Brisa ($5 MXN)
               </span>
               <span className="font-extrabold text-slate-800">{countBrisa} contratados</span>
             </div>

@@ -161,7 +161,7 @@ const Navbar = ({ onCtaClick, onLoginClick }) => {
                 onLoginClick?.();
               }}
               data-testid={TID.nav.login}
-              className="zt-btn-primary text-white text-[14.5px] font-semibold px-6 py-2.5 rounded-full hover:scale-[1.03] active:scale-97 transition cursor-pointer select-none font-sans"
+              className="zt-btn-primary hover:transform-none text-white text-[14.5px] font-bold px-6 py-2.5 rounded-full transition flex items-center justify-center shadow-md shadow-[#0B53F4]/15 cursor-pointer active:scale-[0.98] border-none select-none font-sans"
             >
               Iniciar sesión
             </button>
@@ -229,7 +229,7 @@ const Navbar = ({ onCtaClick, onLoginClick }) => {
                       setOpen(false);
                       onLoginClick?.();
                     }}
-                    className="w-full py-3.5 bg-[#0b53f4]/55 hover:bg-[#0b53f4]/75 text-white text-[14.5px] font-bold rounded-xl transition duration-150 cursor-pointer flex items-center justify-center gap-2 border border-[#0b53f4]/35 font-sans shadow-sm shadow-[#0b53f4]/10"
+                    className="w-full zt-btn-primary hover:transform-none text-white text-[14.5px] font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-[#0B53F4]/15 cursor-pointer active:scale-[0.98] border-none font-sans"
                   >
                     <LogIn className="w-5 h-5 shrink-0" strokeWidth={1.5} />
                     <span>Iniciar sesión</span>

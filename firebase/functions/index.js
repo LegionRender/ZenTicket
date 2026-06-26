@@ -15,6 +15,10 @@ const geminiApiKey = defineSecret("GEMINI_API_KEY");
 const geminiPrimaryKey = defineSecret("GEMINI_API_KEY_PRIMARY");
 const geminiSecondaryKey = defineSecret("GEMINI_API_KEY_SECONDARY");
 const openAiApiKey = defineSecret("OPENAI_API_KEY");
+const stripeSecretKeyParam = defineSecret("STRIPE_SECRET_KEY");
+const mercadoPagoAccessTokenParam = defineSecret("MERCADOPAGO_ACCESS_TOKEN");
+const paypalClientIdParam = defineSecret("PAYPAL_CLIENT_ID");
+const paypalClientSecretParam = defineSecret("PAYPAL_CLIENT_SECRET");
 const openAiModel = defineString("OPENAI_VISION_MODEL", { default: "gpt-4o-mini" });
 
 app.use(express.json({ limit: "15mb" }));
@@ -79,6 +83,25 @@ const OCR_PROMPT = [
   "Devuelve un JSON con rfcEmisor, nombreEmisor, fechaCompra, folio, total, sucursal e items."
 ].join(" ");
 
+const CONSTANCIA_RESPONSE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    rfc: { type: "STRING", description: "RFC del contribuyente tal como aparece. Si no es legible, usa cadena vacia." },
+    razonSocial: { type: "STRING", description: "Nombre, denominacion o razon social visible. Si no es legible, usa cadena vacia." },
+    regimenFiscal: { type: "STRING", description: "Codigo numerico de 3 digitos del regimen fiscal visible. Si no es legible, usa cadena vacia." },
+    codigoPostal: { type: "STRING", description: "Codigo postal fiscal de 5 digitos visible. Si no es legible, usa cadena vacia." }
+  },
+  required: ["rfc", "razonSocial", "regimenFiscal", "codigoPostal"]
+};
+
+const CONSTANCIA_PROMPT = [
+  "Analiza esta Constancia de Situacion Fiscal del SAT Mexico.",
+  "Extrae solo datos visibles del documento cargado: RFC, razonSocial, regimenFiscal y codigoPostal.",
+  "No inventes ni completes datos por contexto, correo, nombre de usuario o ejemplos.",
+  "Si el archivo no es una constancia valida o algun dato no es legible, devuelve cadena vacia para ese campo.",
+  "Responde solo JSON valido."
+].join(" ");
+
 function now() {
   return admin.firestore.FieldValue.serverTimestamp();
 }
@@ -105,6 +128,10 @@ function optionalSecret(secretParam) {
   } catch (_err) {
     return "";
   }
+}
+
+function secretOrEnv(secretParam, envName) {
+  return optionalSecret(secretParam) || (process.env[envName] || "").trim();
 }
 
 function hasUsableKey(value) {
@@ -260,6 +287,103 @@ async function runProviderOcr(provider, image, mimeType) {
   throw new Error(`Unsupported OCR provider: ${provider.provider}`);
 }
 
+function normalizeConstanciaData(data) {
+  const cleaned = {
+    rfc: String(data?.rfc || "").toUpperCase().replace(/[^A-Z0-9&Ñ]/g, "").trim(),
+    razonSocial: String(data?.razonSocial || "").toUpperCase().replace(/\s+/g, " ").trim(),
+    regimenFiscal: String(data?.regimenFiscal || "").replace(/\D/g, "").slice(0, 3),
+    codigoPostal: String(data?.codigoPostal || "").replace(/\D/g, "").slice(0, 5)
+  };
+
+  const validRfc = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(cleaned.rfc);
+  const validRegimen = /^\d{3}$/.test(cleaned.regimenFiscal);
+  const validCp = /^\d{5}$/.test(cleaned.codigoPostal);
+  const validName = cleaned.razonSocial.length >= 3;
+
+  if (!validRfc || !validRegimen || !validCp || !validName) {
+    return null;
+  }
+  return cleaned;
+}
+
+async function runGeminiConstancia(provider, file, mimeType) {
+  const ai = new GoogleGenAI({ apiKey: provider.key });
+  let lastError = "";
+
+  for (const model of provider.models) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: {
+          parts: [
+            { inlineData: { mimeType: mimeType || "application/pdf", data: file } },
+            { text: CONSTANCIA_PROMPT }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: CONSTANCIA_RESPONSE_SCHEMA
+        }
+      });
+
+      if (!response.text || !response.text.trim()) {
+        throw new Error("Gemini returned an empty constancia response.");
+      }
+
+      const parsed = normalizeConstanciaData(JSON.parse(response.text.trim()));
+      if (!parsed) {
+        throw new Error("Constancia response did not contain all required visible fiscal fields.");
+      }
+
+      return { data: parsed, model };
+    } catch (err) {
+      lastError = err?.message || String(err);
+      console.warn(`[CONSTANCIA] ${provider.id}/${model} failed:`, lastError);
+    }
+  }
+
+  throw new Error(lastError || `${provider.id} failed`);
+}
+
+async function runOpenAiConstancia(provider, file, mimeType) {
+  const fileUrl = `data:${mimeType || "application/pdf"};base64,${file}`;
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${provider.key}`
+    },
+    body: JSON.stringify({
+      model: provider.models[0],
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: CONSTANCIA_PROMPT },
+            { type: "input_image", image_url: fileUrl }
+          ]
+        }
+      ],
+      text: { format: { type: "json_object" } }
+    })
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(JSON.stringify(body));
+  }
+  const text = body.output_text ||
+    body.output?.flatMap((item) => item.content || []).find((item) => item.type === "output_text")?.text;
+  if (!text) {
+    throw new Error("OpenAI returned an empty constancia response.");
+  }
+  const parsed = normalizeConstanciaData(JSON.parse(text));
+  if (!parsed) {
+    throw new Error("Constancia response did not contain all required visible fiscal fields.");
+  }
+  return { data: parsed, model: provider.models[0] };
+}
+
 async function createAlert(payload) {
   await db.collection("ocr_alerts").add({
     ...payload,
@@ -405,6 +529,65 @@ app.post("/api/tickets/analyze", async (req, res) => {
   }
 });
 
+app.post("/api/fiscal/parse-constancia", async (req, res) => {
+  const { file, mimeType } = req.body || {};
+
+  if (!file) {
+    res.status(400).json({ error: "Falta el archivo base64 de la constancia fiscal" });
+    return;
+  }
+
+  const providers = buildProviderPlan(req);
+  if (providers.length === 0) {
+    res.status(503).json({
+      error: "No hay proveedor OCR configurado para leer la constancia. Ingresa los datos manualmente.",
+      ocrFailed: true
+    });
+    return;
+  }
+
+  const attempts = [];
+  for (const provider of providers) {
+    const startedAt = Date.now();
+    try {
+      const result = provider.provider === "gemini"
+        ? await runGeminiConstancia(provider, file, mimeType)
+        : await runOpenAiConstancia(provider, file, mimeType);
+
+      res.json({
+        ...result.data,
+        ocrFailed: false,
+        ocrProvider: provider.id,
+        ocrModel: result.model
+      });
+      return;
+    } catch (err) {
+      const message = err?.message || String(err);
+      attempts.push({
+        provider: provider.id,
+        status: "failed",
+        error: message.slice(0, 700),
+        durationMs: Date.now() - startedAt
+      });
+      console.warn(`[CONSTANCIA] ${provider.id} failed:`, message);
+    }
+  }
+
+  await createAlert({
+    type: "constancia_ocr_failure",
+    severity: "warning",
+    provider: "all",
+    code: "constancia_parse_failed",
+    message: "No se pudo extraer la constancia fiscal sin inventar datos."
+  });
+
+  res.status(422).json({
+    error: "No se pudieron leer todos los datos fiscales requeridos en la constancia. Ingresa los datos manualmente.",
+    ocrFailed: true,
+    attempts
+  });
+});
+
 app.post("/api/ocr/retry-pending", async (req, res) => {
   const snapshot = await db.collection("ocr_retry_queue")
     .where("status", "==", "pending")
@@ -443,8 +626,8 @@ app.post("/api/ocr/retry-pending", async (req, res) => {
 
 // Helpers for PayPal Access Token
 async function getPayPalAccessToken() {
-  const clientId = process.env.PAYPAL_CLIENT_ID;
-  const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+  const clientId = secretOrEnv(paypalClientIdParam, "PAYPAL_CLIENT_ID");
+  const clientSecret = secretOrEnv(paypalClientSecretParam, "PAYPAL_CLIENT_SECRET");
   if (!clientId || !clientSecret) {
     throw new Error("Faltan credenciales PAYPAL_CLIENT_ID o PAYPAL_CLIENT_SECRET.");
   }
@@ -471,6 +654,18 @@ async function getPayPalAccessToken() {
   };
 }
 
+const getSafeBaseUrl = (req) => {
+  let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  if (Array.isArray(proto)) {
+    proto = proto[0];
+  }
+  if (typeof proto === "string" && proto.includes(",")) {
+    proto = proto.split(",")[0].trim();
+  }
+  const host = req.get("host") || "localhost:3000";
+  return `${proto}://${host}`;
+};
+
 // 1. Mercado Pago Checkout (Single Preference)
 app.post("/api/billing/checkout/mercadopago", async (req, res) => {
   const { userId, planId } = req.body;
@@ -482,7 +677,7 @@ app.post("/api/billing/checkout/mercadopago", async (req, res) => {
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 99.00;
+    price = 5.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -501,13 +696,15 @@ app.post("/api/billing/checkout/mercadopago", async (req, res) => {
     return;
   }
 
-  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+  const accessToken = secretOrEnv(mercadoPagoAccessTokenParam, "MERCADOPAGO_ACCESS_TOKEN");
   if (!accessToken) {
     res.status(500).json({ error: "Configuración de pasarela incompleta en servidor" });
     return;
   }
 
   try {
+    const baseUrl = getSafeBaseUrl(req);
+
     const response = await axios.post(
       "https://api.mercadopago.com/v1/preferences",
       {
@@ -520,12 +717,12 @@ app.post("/api/billing/checkout/mercadopago", async (req, res) => {
           }
         ],
         back_urls: {
-          success: process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
-          failure: process.env.BILLING_FAILURE_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=failure`,
-          pending: process.env.BILLING_PENDING_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=pending`
+          success: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
+          failure: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
+          pending: process.env.BILLING_PENDING_URL || `${baseUrl}/workspace?tab=cuenta&status=pending`
         },
         auto_return: "approved",
-        notification_url: `${process.env.APP_PUBLIC_URL}/api/billing/webhooks/mercadopago`,
+        notification_url: `${baseUrl}/api/billing/webhooks/mercadopago`,
         external_reference: `${userId}:${planId}`
       },
       {
@@ -570,7 +767,7 @@ app.post("/api/billing/subscription/mercadopago", async (req, res) => {
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 99.00;
+    price = 5.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -589,17 +786,19 @@ app.post("/api/billing/subscription/mercadopago", async (req, res) => {
     return;
   }
 
-  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+  const accessToken = secretOrEnv(mercadoPagoAccessTokenParam, "MERCADOPAGO_ACCESS_TOKEN");
   if (!accessToken) {
     res.status(500).json({ error: "Configuración de pasarela incompleta en servidor" });
     return;
   }
 
   try {
+    const baseUrl = getSafeBaseUrl(req);
+
     const response = await axios.post(
       "https://api.mercadopago.com/preapprovals",
       {
-        back_url: process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
+        back_url: process.env.BILLING_SUCCESS_URL || `${baseUrl}/workspace?tab=cuenta&status=success`,
         reason: title,
         auto_recurring: {
           frequency: 1,
@@ -652,7 +851,7 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 99.00;
+    price = 5.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -672,6 +871,8 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
   }
 
   try {
+    const baseUrl = getSafeBaseUrl(req);
+
     const { accessToken, host } = await getPayPalAccessToken();
     const response = await axios.post(
       `${host}/v2/checkout/orders`,
@@ -688,8 +889,8 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
           }
         ],
         application_context: {
-          return_url: process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
-          cancel_url: process.env.BILLING_FAILURE_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=failure`
+          return_url: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
+          cancel_url: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`
         }
       },
       {
@@ -735,7 +936,7 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 99.00;
+    price = 5.00;
     title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
@@ -754,13 +955,15 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
     return;
   }
 
-  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  const stripeSecretKey = secretOrEnv(stripeSecretKeyParam, "STRIPE_SECRET_KEY");
   if (!stripeSecretKey) {
     res.status(500).json({ error: "Configuración de pasarela Stripe incompleta en el servidor" });
     return;
   }
 
   try {
+    const baseUrl = getSafeBaseUrl(req);
+
     const response = await axios.post(
       "https://api.stripe.com/v1/checkout/sessions",
       new URLSearchParams({
@@ -770,8 +973,8 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
         "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
         "line_items[0][quantity]": "1",
         "mode": "payment",
-        "success_url": process.env.BILLING_SUCCESS_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=success`,
-        "cancel_url": process.env.BILLING_FAILURE_URL || `${process.env.APP_PUBLIC_URL}/workspace?tab=cuenta&status=failure`,
+        "success_url": process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
+        "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
         "client_reference_id": `${userId}:${planId}`
       }).toString(),
       {
@@ -814,7 +1017,7 @@ app.post("/api/billing/webhooks/mercadopago", async (req, res) => {
   console.log(`[Mercado Pago Webhook] Recibido event: ${topic} con ID: ${paymentId}`);
 
   if (paymentId) {
-    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+    const accessToken = secretOrEnv(mercadoPagoAccessTokenParam, "MERCADOPAGO_ACCESS_TOKEN");
     if (!accessToken) {
       res.status(500).send("Webhook config error: missing token");
       return;
@@ -1057,7 +1260,7 @@ app.post("/api/billing/webhooks/stripe", async (req, res) => {
   const event = req.body;
   console.log(`[Stripe Webhook] Recibido event: ${event?.type}`);
 
-  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  const stripeSecretKey = secretOrEnv(stripeSecretKeyParam, "STRIPE_SECRET_KEY");
   if (!stripeSecretKey) {
     res.status(500).send("Webhook config error: missing token");
     return;
@@ -1179,7 +1382,7 @@ app.get("/api/billing/status/:userId", async (req, res) => {
 
 // Get PayPal Client ID safely for frontend SDK
 app.get("/api/config/paypal-client-id", (req, res) => {
-  res.json({ clientId: process.env.PAYPAL_CLIENT_ID || "" });
+  res.json({ clientId: secretOrEnv(paypalClientIdParam, "PAYPAL_CLIENT_ID") });
 });
 
 // 7. Cancel Subscription
@@ -1213,7 +1416,16 @@ exports.api = onRequest(
     region: "us-central1",
     timeoutSeconds: 120,
     memory: "512MiB",
-    secrets: [geminiApiKey, geminiPrimaryKey, geminiSecondaryKey, openAiApiKey]
+    secrets: [
+      geminiApiKey,
+      geminiPrimaryKey,
+      geminiSecondaryKey,
+      openAiApiKey,
+      stripeSecretKeyParam,
+      mercadoPagoAccessTokenParam,
+      paypalClientIdParam,
+      paypalClientSecretParam
+    ]
   },
   app
 );
