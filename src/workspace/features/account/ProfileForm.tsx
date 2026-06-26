@@ -1072,6 +1072,47 @@ export default function ProfileForm({
             </label>
           </div>
 
+          {/* Correo para Cuentas de Pago */}
+          <div className="space-y-1 bg-white border border-slate-200/60 rounded-2xl p-4 mt-3 mb-3 text-left">
+            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+              Correo para Cuentas de Pago (Stripe/PayPal/Mercado Pago)
+            </label>
+            <div className="flex gap-2 mt-1.5">
+              <input
+                type="email"
+                value={correoPago}
+                onChange={(e) => setCorreoPago(e.target.value)}
+                placeholder="Ej. mi-cuenta-de-pago@email.com"
+                className="flex-grow text-xs font-semibold bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-xl px-3.5 py-2.5 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!correoPago.trim()) {
+                    toast.error("El correo no puede estar vacío.");
+                    return;
+                  }
+                  try {
+                    await onSave({
+                      ...initialProfile,
+                      correoPago: correoPago.trim()
+                        || (initialProfile?.correoPago || "")
+                    });
+                    toast.success("Correo de pagos actualizado y sincronizado.", "Conexiones actualizadas");
+                  } catch (e) {
+                    toast.error("No se pudo actualizar el correo de pagos.");
+                  }
+                }}
+                className="bg-[#0B53F4] hover:bg-[#0747D1] text-white text-[11px] font-black px-4 py-2.5 rounded-xl transition cursor-pointer shrink-0 active:scale-95 animate-fade-in"
+              >
+                Actualizar
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1 ml-1 leading-normal">
+              Vincula automáticamente las tarjetas predeterminadas y pre-llena tus datos en las pasarelas al pagar.
+            </p>
+          </div>
+
           {/* Botón único de pago */}
           <button
             type="button"
@@ -1994,25 +2035,8 @@ export default function ProfileForm({
               value={correoRecepcion}
               disabled={hasSavedFiscalData}
               onChange={(e) => setCorreoRecepcion(e.target.value)}
-              className="w-full text-sm font-medium bg-[#F8F9FE] disabled:bg-slate-50 disabled:text-slate-450 border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400 disabled:cursor-not-allowed"
+              className="w-full text-sm font-medium bg-[#F8F9FE] disabled:bg-slate-50 disabled:text-slate-455 border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400 disabled:cursor-not-allowed"
             />
-          </div>
-
-          {/* Correo para Cuentas de Pago */}
-          <div className="space-y-1">
-            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Correo para Cuentas de Pago (Stripe/PayPal/Mercado Pago)
-            </label>
-            <input
-              type="email"
-              value={correoPago}
-              onChange={(e) => setCorreoPago(e.target.value)}
-              placeholder="Ej. mi-cuenta-de-pago@email.com"
-              className="w-full text-sm font-medium bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
-            />
-            <p className="text-[10px] text-slate-400 mt-1 ml-1 leading-normal">
-              Las pasarelas de pago y la autodetección de tarjetas predeterminadas usarán esta dirección de correo electrónico.
-            </p>
           </div>
         </div>
 
