@@ -6,11 +6,12 @@ import {
   CheckCircle, Info, ChevronRight, Palette, Bell, Globe, 
   BookOpen, MessageSquare, Trash2, LogOut, Plus, MoreVertical, Pencil,
   ArrowLeft, Smartphone, Lock, X, Infinity, Check, Sliders, Volume2, ShieldCheck, HeartPulse,
-  ChevronDown
+  ChevronDown, Copy, Eye, EyeOff
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { auth } from "@/services/firebase/firebase";
-import { signOut } from "firebase/auth";
+import { auth, db } from "@/services/firebase/firebase";
+import { signOut, sendPasswordResetEmail, updatePassword, EmailAuthProvider, linkWithCredential } from "firebase/auth";
+import { doc, setDoc, getDoc } from "firebase/firestore";
 import { useToast } from "@/shared/feedback/Toast";
 
 // Bank and payment method logos
@@ -282,6 +283,11 @@ export default function ProfileForm({
     );
   };
 
+  const getLinkedPlatformsForEmail = (email: string) => {
+    // Standard SaaS pattern: all major payment gateways are universally available to all users.
+    return ["Stripe", "Google Pay", "PayPal", "Mercado Pago"];
+  };
+
   const isValidLuhn = (cardNumber: string) => {
     const clean = cardNumber.replace(/\s+/g, "");
     if (!clean || clean.length < 13 || !/^\d+$/.test(clean)) return false;
@@ -352,13 +358,7 @@ export default function ProfileForm({
       setIsProcessingWallet(false);
     }
   };
-  // 3D Secure 2.0 / Strong Customer Authentication states
-  const [bankAuthVisible, setBankAuthVisible] = useState(false);
-  const [bankAuthCard, setBankAuthCard] = useState<any>(null);
-  const [bankAuthAmount, setBankAuthAmount] = useState<number>(0);
-  const [bankAuthStatus, setBankAuthStatus] = useState<"connecting" | "otp_prompt" | "authenticating" | "completed">("connecting");
-  const [bankAuthOtpInput, setBankAuthOtpInput] = useState("");
-  const [bankAuthSuccessCallback, setBankAuthSuccessCallback] = useState<(() => Promise<void>) | null>(null);
+
 
   // Modal Bank Input States
   const [modalCvvInput, setModalCvvInput] = useState("");
@@ -471,7 +471,17 @@ export default function ProfileForm({
   // Cards saved in Firestore. New cards are captured only by the official processor checkout.
   const [cards, setCards] = useState<PaymentCard[]>(() => {
     if (initialProfile?.paymentCards && initialProfile.paymentCards.length > 0) {
-      return initialProfile.paymentCards.filter((card) => card.last4 !== "Cuenta Vinculada");
+      const filtered = initialProfile.paymentCards.filter((card) => card.last4 !== "Cuenta Vinculada");
+      const unique: PaymentCard[] = [];
+      const seen = new Set<string>();
+      for (const card of filtered) {
+        const key = `${card.brand}-${card.last4}-${card.expiry}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(card);
+        }
+      }
+      return unique;
     }
     return [];
   });
@@ -479,7 +489,17 @@ export default function ProfileForm({
   // Keep cards in sync with backend profile snapshot.
   React.useEffect(() => {
     if (initialProfile?.paymentCards) {
-      setCards(initialProfile.paymentCards.filter((card) => card.last4 !== "Cuenta Vinculada"));
+      const filtered = initialProfile.paymentCards.filter((card) => card.last4 !== "Cuenta Vinculada");
+      const unique: PaymentCard[] = [];
+      const seen = new Set<string>();
+      for (const card of filtered) {
+        const key = `${card.brand}-${card.last4}-${card.expiry}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(card);
+        }
+      }
+      setCards(unique);
     }
   }, [initialProfile?.paymentCards]);
 
@@ -521,7 +541,7 @@ export default function ProfileForm({
     if (userEmail) {
       setCorreoElectronico(initialProfile?.correoElectronico || userEmail);
     }
-  }, [currentUserEmail, initialProfile]);
+  }, [currentUserEmail, initialProfile, auth.currentUser?.email]);
 
   // Add Card Form State
   const [addingCard, setAddingCard] = useState(false);
@@ -568,6 +588,114 @@ export default function ProfileForm({
   const [facturacionAutomatica, setFacturacionAutomatica] = useState(initialProfile?.facturacionAutomatica || false);
   const [metodoRecepcion, setMetodoRecepcion] = useState(initialProfile?.metodoRecepcion || "Ambos"); // "Correo", "Descarga", "Ambos"
   const [dosPasos, setDosPasos] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [showNewPasswordText, setShowNewPasswordText] = useState(false);
+  const [showConfirmPasswordText, setShowConfirmPasswordText] = useState(false);
+  const [tempPassword, setTempPassword] = useState(initialProfile?.tempPassword || "");
+  const [copiedTemp, setCopiedTemp] = useState(false);
+
+  // Synchronize tempPassword with initialProfile.tempPassword when it loads
+  React.useEffect(() => {
+    if (initialProfile?.tempPassword) {
+      setTempPassword(initialProfile.tempPassword);
+    }
+  }, [initialProfile?.tempPassword]);
+
+  // Generate and set a unique, complex default password for Google users who don't have one yet
+  React.useEffect(() => {
+    const generateAndSetDefaultPassword = async () => {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const hasPasswordProvider = user.providerData.some(p => p.providerId === "password");
+      if (hasPasswordProvider) return; // Already has a custom password, no need for temporary default
+
+      // If we don't have a tempPassword in local state or initialProfile
+      if (!tempPassword && !initialProfile?.tempPassword) {
+        // First try to check the "users" collection from Firestore
+        try {
+          const userRef = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const data = userSnap.data();
+            if (data.tempPassword) {
+              setTempPassword(data.tempPassword);
+              // Sync to fiscalProfiles
+              const docRef = doc(db, "fiscalProfiles", user.uid);
+              await setDoc(docRef, { tempPassword: data.tempPassword }, { merge: true });
+              return;
+            }
+          }
+        } catch (dbErr) {
+          console.warn("Could not check users collection for existing tempPassword:", dbErr);
+        }
+
+        // If still not found, generate a new one
+        const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        const lowercase = "abcdefghijklmnopqrstuvwxyz";
+        const numbers = "0123456789";
+        const symbols = "!@#$%&*";
+        const allChars = uppercase + lowercase + numbers + symbols;
+        
+        let pass = "";
+        pass += uppercase[Math.floor(Math.random() * uppercase.length)];
+        pass += lowercase[Math.floor(Math.random() * lowercase.length)];
+        pass += numbers[Math.floor(Math.random() * numbers.length)];
+        pass += symbols[Math.floor(Math.random() * symbols.length)];
+        
+        for (let i = 0; i < 10; i++) {
+          pass += allChars[Math.floor(Math.random() * allChars.length)];
+        }
+        
+        const complexPass = pass.split('').sort(() => 0.5 - Math.random()).join('');
+
+        try {
+          // Link password provider or set password on Firebase Auth
+          try {
+            if (user.email) {
+              const credential = EmailAuthProvider.credential(user.email, complexPass);
+              await linkWithCredential(user, credential);
+            } else {
+              await updatePassword(user, complexPass);
+            }
+          } catch (authErr) {
+            console.warn("Failed to link credential, falling back to updatePassword:", authErr);
+            await updatePassword(user, complexPass);
+          }
+          
+          // Save password to Firestore fiscalProfiles collection
+          const docRef = doc(db, "fiscalProfiles", user.uid);
+          await setDoc(docRef, { tempPassword: complexPass }, { merge: true });
+
+          // Also save it to users collection
+          try {
+            const userRef = doc(db, "users", user.uid);
+            await setDoc(userRef, { tempPassword: complexPass }, { merge: true });
+          } catch (err) {
+            console.warn("Could not save temp password to users doc:", err);
+          }
+
+          setTempPassword(complexPass);
+          console.log("Successfully generated and set a complex, unique default password for Google user.");
+        } catch (err) {
+          console.error("Failed to automatically set temporary default password for Google user:", err);
+        }
+      }
+    };
+
+    generateAndSetDefaultPassword();
+  }, [initialProfile?.tempPassword, tempPassword]);
+
+  const handleCopyTemp = () => {
+    if (!tempPassword) return;
+    navigator.clipboard.writeText(tempPassword);
+    setCopiedTemp(true);
+    toast.success("Contraseña temporal copiada al portapapeles.", "Copiado");
+    setTimeout(() => setCopiedTemp(false), 2000);
+  };
 
   // Detect if we are loading the success page inside the Stripe popup redirect
   React.useEffect(() => {
@@ -935,12 +1063,19 @@ export default function ProfileForm({
                   return;
                 }
 
+                const last4Val = cleanNum.slice(-4);
+                const exists = cards.some(c => c.brand === newCardBrand && c.last4 === last4Val && c.expiry === newCardExpiry);
+                if (exists) {
+                  toast.error("Esta tarjeta ya se encuentra vinculada en tu cuenta.", "Tarjeta duplicada");
+                  return;
+                }
+
                 // Prepare card obj
                 const bankInfo = getCardBankInfo(cleanNum);
                 const newCardObj: PaymentCard = {
                   id: "card_" + Date.now(),
                   brand: newCardBrand,
-                  last4: cleanNum.slice(-4),
+                  last4: last4Val,
                   expiry: newCardExpiry,
                   holderName: newCardHolder.toUpperCase().trim(),
                   isDefault: cards.length === 0,
@@ -1093,19 +1228,35 @@ export default function ProfileForm({
                     return;
                   }
                   try {
+                    const trimmedEmail = correoPago.trim();
                     await onSave({
                       ...initialProfile,
-                      correoPago: correoPago.trim()
-                        || (initialProfile?.correoPago || "")
+                      correoPago: trimmedEmail
                     });
-                    toast.success("Correo de pagos actualizado y sincronizado.", "Conexiones actualizadas");
+                    
+                    // Auto-select first matching platform
+                    const linked = getLinkedPlatformsForEmail(trimmedEmail);
+                    if (linked.length > 0) {
+                      const first = linked[0];
+                      if (first === "Stripe") setSelectedCardForPlan("stripe_wallet");
+                      else if (first === "Mercado Pago") setSelectedCardForPlan("mercadopago_wallet");
+                      else if (first === "Google Pay") setSelectedCardForPlan("googlepay_wallet");
+                      else if (first === "PayPal") setSelectedCardForPlan("paypal_wallet");
+                    } else {
+                      setSelectedCardForPlan("");
+                    }
+                    
+                    setCorreoPago(trimmedEmail);
+                    setShowOtherPaymentMethods(true);
+                    
+                    toast.success("Correo de pagos vinculado y sincronizado.", "Conexiones actualizadas");
                   } catch (e) {
-                    toast.error("No se pudo actualizar el correo de pagos.");
+                    toast.error("No se pudo vincular el correo de pagos.");
                   }
                 }}
                 className="bg-[#0B53F4] hover:bg-[#0747D1] text-white text-[11px] font-black px-4 py-2.5 rounded-xl transition cursor-pointer shrink-0 active:scale-95 animate-fade-in"
               >
-                Actualizar
+                Vincular
               </button>
             </div>
             <p className="text-[10px] text-slate-400 mt-1 ml-1 leading-normal">
@@ -1211,7 +1362,7 @@ export default function ProfileForm({
           {(() => {
             if (selectedCardForPlan.endsWith("_wallet")) {
               const walletMapping: Record<string, { brand: string; label: string; logo: any }> = {
-                "stripe_wallet": { brand: "STRIPE", label: "Stripe Checkout", logo: stripeLogo },
+                "stripe_wallet": { brand: "STRIPE", label: "Tarjeta de Crédito / Débito (Stripe)", logo: stripeLogo },
                 "mercadopago_wallet": { brand: "MERCADOPAGO", label: "Mercado Pago", logo: mercadoPagoLogo },
                 "googlepay_wallet": { brand: "GOOGLEPAY", label: "Google Pay via Stripe", logo: googlePayLogo },
                 "paypal_wallet": { brand: "PAYPAL", label: "PayPal", logo: paypalLogo }
@@ -1246,22 +1397,19 @@ export default function ProfileForm({
                 );
               }
             }
-            return (
-              <div className="p-4.5 border border-slate-200/80 rounded-2xl text-center text-xs text-slate-400 font-semibold bg-slate-50">
-                Ningún método de pago seleccionado.
-              </div>
-            );
+            return null;
           })()}
         </div>
 
         {/* 3.3 Menú desplegable */}
         {renderAccordionPaymentMethods()}
-
       </div>
     );
   };
 
   const renderAccordionPaymentMethods = () => {
+    const linkedPlatforms = getLinkedPlatformsForEmail(correoPago);
+    console.log("DEBUG ACCORDION:", { correoPago, linkedPlatforms });
     return (
       <div className="space-y-2">
         <button
@@ -1275,154 +1423,97 @@ export default function ProfileForm({
         {showOtherPaymentMethods && (
           <div className="bg-white border border-slate-200/60 rounded-3xl p-4.5 space-y-4 text-left animate-fade-in mt-2">
             
-            <div className="grid grid-cols-1 gap-3">
-              
-              {/* Linked Credit/Debit Cards (Rendered with the same format as digital wallets) */}
-              {cards
-                .filter((card) => card.last4 !== "Cuenta Vinculada")
-                .map((card) => {
-                  const isSelected = selectedCardForPlan === card.id;
-                  return (
-                    <button
-                      key={card.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedCardForPlan(card.id);
-                        // Auto-save this choice as default
-                        const updated = cards.map(c => ({
-                          ...c,
-                          isDefault: c.id === card.id
-                        }));
-                        setCards(updated);
-                        onSave({
-                          userId: initialProfile?.userId || "guest",
-                          rfc: rfc || initialProfile?.rfc || "",
-                          razonSocial: razonSocial || initialProfile?.razonSocial || "",
-                          regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                          codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
-                          usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                          createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                          personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                          plan: initialProfile?.plan || "gratuito",
-                          paymentCards: updated
-                        }).catch(() => {});
-                      }}
-                      className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
-                        isSelected 
-                          ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
-                          : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#0B53F4] hover:shadow-2xs"
-                      }`}
-                    >
-                      {renderVisualBrandBlock(card, "md")}
-                      <div className="leading-tight">
-                        <span className="text-sm font-black text-slate-800 block">
-                          {card.bankName || (card.brand === "VISA" ? "Visa" : card.brand === "AMEX" ? "American Express" : "Mastercard")}
-                        </span>
-                        <span className="text-xs text-slate-400 font-semibold block mt-1">
-                          **** {card.last4} &nbsp;|&nbsp; Expira: {card.expiry}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-                
+            {linkedPlatforms.length === 0 ? (
+              <div className="p-4.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-center text-xs text-slate-400 font-semibold w-full">
+                Este correo no tiene cuentas de pago vinculadas (Stripe, Google Pay, PayPal o Mercado Pago).
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
                 {/* Stripe */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedCardForPlan("stripe_wallet")}
-                  className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
-                    selectedCardForPlan === "stripe_wallet" 
-                      ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
-                      : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#635BFF] hover:shadow-2xs"
-                  }`}
-                >
-                  <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                    <img src={stripeLogo} className="w-full h-full object-contain" alt="Stripe" />
-                  </div>
-                  <div className="leading-tight">
-                    <span className="text-sm font-black text-slate-800 block">Stripe Checkout</span>
-                    <span className="text-xs text-slate-400 font-semibold block mt-1">Pago seguro con tarjeta</span>
-                  </div>
-                </button>
+                {linkedPlatforms.includes("Stripe") && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCardForPlan("stripe_wallet")}
+                    className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
+                      selectedCardForPlan === "stripe_wallet" 
+                        ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
+                        : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#0B53F4] hover:shadow-2xs"
+                    }`}
+                  >
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                      <img src={stripeLogo} className="w-full h-full object-contain" alt="Stripe" />
+                    </div>
+                    <div className="leading-tight">
+                      <span className="text-sm font-black text-slate-800 block">Tarjeta de Crédito o Débito</span>
+                      <span className="text-xs text-slate-400 font-semibold block mt-1">Pago seguro procesado por Stripe</span>
+                    </div>
+                  </button>
+                )}
 
                 {/* Mercado Pago */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedCardForPlan("mercadopago_wallet")}
-                  className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
-                    selectedCardForPlan === "mercadopago_wallet" 
-                      ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
-                      : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#00A6EA] hover:shadow-2xs"
-                  }`}
-                >
-                  <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                    <img src={mercadoPagoLogo} className="w-full h-full object-contain" alt="Mercado Pago" />
-                  </div>
-                  <div className="leading-tight">
-                    <span className="text-sm font-black text-slate-800 block">Mercado Pago</span>
-                    <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
-                  </div>
-                </button>
+                {linkedPlatforms.includes("Mercado Pago") && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCardForPlan("mercadopago_wallet")}
+                    className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
+                      selectedCardForPlan === "mercadopago_wallet" 
+                        ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
+                        : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#00A6EA] hover:shadow-2xs"
+                    }`}
+                  >
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                      <img src={mercadoPagoLogo} className="w-full h-full object-contain" alt="Mercado Pago" />
+                    </div>
+                    <div className="leading-tight">
+                      <span className="text-sm font-black text-slate-800 block">Mercado Pago</span>
+                      <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
+                    </div>
+                  </button>
+                )}
 
                 {/* Google Pay */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedCardForPlan("googlepay_wallet")}
-                  className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
-                    selectedCardForPlan === "googlepay_wallet" 
-                      ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
-                      : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#202124] hover:shadow-2xs"
-                  }`}
-                >
-                  <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                    <img src={googlePayLogo} className="w-full h-full object-contain" alt="Google Pay" />
-                  </div>
-                  <div className="leading-tight">
-                    <span className="text-sm font-black text-slate-800 block">Google Pay</span>
-                    <span className="text-xs text-slate-400 font-semibold block mt-1">Disponible dentro de Stripe Checkout</span>
-                  </div>
-                </button>
+                {linkedPlatforms.includes("Google Pay") && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCardForPlan("googlepay_wallet")}
+                    className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
+                      selectedCardForPlan === "googlepay_wallet" 
+                        ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
+                        : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#202124] hover:shadow-2xs"
+                    }`}
+                  >
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                      <img src={googlePayLogo} className="w-full h-full object-contain" alt="Google Pay" />
+                    </div>
+                    <div className="leading-tight">
+                      <span className="text-sm font-black text-slate-800 block">Google Pay</span>
+                      <span className="text-xs text-slate-400 font-semibold block mt-1">Disponible dentro de Stripe Checkout</span>
+                    </div>
+                  </button>
+                )}
 
                 {/* PayPal */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedCardForPlan("paypal_wallet")}
-                  className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
-                    selectedCardForPlan === "paypal_wallet" 
-                      ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
-                      : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#003087] hover:shadow-2xs"
-                  }`}
-                >
-                  <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                    <img src={paypalLogo} className="w-full h-full object-contain" alt="PayPal" />
-                  </div>
-                  <div className="leading-tight">
-                    <span className="text-sm font-black text-slate-800 block">PayPal</span>
-                    <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
-                  </div>
-                </button>
+                {linkedPlatforms.includes("PayPal") && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCardForPlan("paypal_wallet")}
+                    className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
+                      selectedCardForPlan === "paypal_wallet" 
+                        ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
+                        : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#003087] hover:shadow-2xs"
+                    }`}
+                  >
+                    <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                      <img src={paypalLogo} className="w-full h-full object-contain" alt="PayPal" />
+                    </div>
+                    <div className="leading-tight">
+                      <span className="text-sm font-black text-slate-800 block">PayPal</span>
+                      <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
+                    </div>
+                  </button>
+                )}
               </div>
-
-            {/* Agregar tarjeta inside accordion */}
-            <div className="pt-3 border-t border-slate-100 flex justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  const nextState = !addingCard;
-                  setAddingCard(nextState);
-                  if (nextState) {
-                    setAddingMethodStep("card");
-                  }
-                }}
-                className="bg-[#ebf1ff] hover:bg-[#dee8ff] text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
-              >
-                {addingCard ? "Cancelar Registro" : "+ Registrar Otra Tarjeta / Vincular"}
-              </button>
-            </div>
-
-            {/* Formulario de agregar tarjeta inside accordion */}
-            {addingCard && renderAddingCardForm()}
-
+            )}
           </div>
         )}
       </div>
@@ -1639,7 +1730,7 @@ export default function ProfileForm({
   const userFullName = nombreCompleto || currentUser?.displayName || sessionName || sessionEmail || "Usuario";
   const userDisplayEmail = correoElectronico || currentUser?.email || sessionEmail || "";
   const paymentAccountName = currentUser?.displayName || sessionName || userFullName;
-  const paymentAccountEmail = correoRecepcion || userDisplayEmail || sessionEmail;
+  const paymentAccountEmail = correoPago || correoRecepcion || userDisplayEmail || sessionEmail;
 
   const handleLogout = async () => {
     try {
@@ -2116,17 +2207,163 @@ export default function ProfileForm({
 
         <div className="bg-white border border-slate-200/60 rounded-3xl p-5 space-y-4 shadow-2xs mb-6">
           {/* Cambiar Contraseña list row */}
-          <button
-            type="button"
-            onClick={() => toast.info("Por favor revise su bandeja de entrada. Le enviaremos un correo de restablecimiento de contraseña.", "Seguridad")}
-            className="w-full flex items-center justify-between p-3.5 bg-slate-50/50 hover:bg-[#EBF1FF]/20 border border-slate-100 rounded-2xl transition text-left focus:outline-none cursor-pointer group"
-          >
-            <div className="flex items-center gap-3">
-              <Lock className="w-5 h-5 text-[#0B53F4]/80 stroke-[2.2]" />
-              <span className="text-sm font-bold text-slate-800">Cambiar Contraseña</span>
-            </div>
-            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
-          </button>
+          {(() => {
+            const hasPasswordProvider = auth.currentUser?.providerData.some(p => p.providerId === "password");
+            return (
+              <div className="border border-slate-150 rounded-2xl overflow-hidden bg-slate-50/50">
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordForm(!showPasswordForm)}
+                  className="w-full flex items-center justify-between p-4 hover:bg-[#EBF1FF]/20 transition text-left focus:outline-none cursor-pointer group"
+                >
+                  <div className="flex items-center gap-3">
+                    <Lock className="w-5 h-5 text-[#0B53F4]/80 stroke-[2.2]" />
+                    <span className="text-sm font-bold text-slate-800">
+                      {hasPasswordProvider ? "Cambiar Contraseña" : "Crear / Establecer Contraseña"}
+                    </span>
+                  </div>
+                  <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${showPasswordForm ? "rotate-180" : ""}`} />
+                </button>
+
+                {showPasswordForm && (
+                  <div className="p-4.5 bg-white border-t border-slate-100 space-y-4 text-left animate-fade-in">
+                    {!hasPasswordProvider && tempPassword && (
+                      <div className="bg-blue-50 border border-blue-200/50 rounded-2xl p-4 flex gap-3 text-xs leading-relaxed text-slate-700 font-semibold mb-2">
+                        <Info className="w-4 h-4 text-[#0B53F4] shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          Iniciaste sesión con Google y no tienes una contraseña definida en la app. 
+                          Tu contraseña temporal por defecto es: <strong className="text-slate-800 font-black select-all bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 font-mono">{tempPassword}</strong>
+                          <button
+                            type="button"
+                            onClick={handleCopyTemp}
+                            className="ml-2 inline-flex items-center gap-1 text-[#0B53F4] hover:underline cursor-pointer font-bold align-middle"
+                          >
+                            {copiedTemp ? (
+                              <>
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Copiado</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5" />
+                                <span>Copiar</span>
+                              </>
+                            )}
+                          </button>. 
+                          Te recomendamos crear una contraseña personalizada abajo para poder ingresar sin Google.
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-3.5">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">
+                          Nueva Contraseña
+                        </label>
+                        <div className="relative">
+                          <input 
+                            type={showNewPasswordText ? "text" : "password"}
+                            placeholder="Mínimo 6 caracteres"
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            className="w-full text-xs font-semibold bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] rounded-xl pl-3.5 pr-10 py-2.5 text-slate-800 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewPasswordText(!showNewPasswordText)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer focus:outline-none flex items-center justify-center"
+                          >
+                            {showNewPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">
+                          Confirmar Nueva Contraseña
+                        </label>
+                        <div className="relative">
+                          <input 
+                            type={showConfirmPasswordText ? "text" : "password"}
+                            placeholder="Repite la contraseña"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            className="w-full text-xs font-semibold bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] rounded-xl pl-3.5 pr-10 py-2.5 text-slate-800 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmPasswordText(!showConfirmPasswordText)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer focus:outline-none flex items-center justify-center"
+                          >
+                            {showConfirmPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isUpdatingPassword || newPassword.length < 6 || confirmPassword.length < 6}
+                        onClick={async () => {
+                          if (newPassword !== confirmPassword) {
+                            toast.error("Las contraseñas no coinciden.", "Error de confirmación");
+                            return;
+                          }
+                          setIsUpdatingPassword(true);
+                          try {
+                            const user = auth.currentUser;
+                            if (!user) throw new Error("No hay usuario autenticado.");
+
+                            // Link credential if password provider does not exist
+                            const hasPasswordProvider = user.providerData.some(p => p.providerId === "password");
+                            if (!hasPasswordProvider && user.email) {
+                              try {
+                                const credential = EmailAuthProvider.credential(user.email, newPassword);
+                                await linkWithCredential(user, credential);
+                              } catch (linkErr) {
+                                console.warn("Failed to link credential, falling back to updatePassword:", linkErr);
+                                await updatePassword(user, newPassword);
+                              }
+                            } else {
+                              await updatePassword(user, newPassword);
+                            }
+
+                            // Remove tempPassword from Firestore collections
+                            const docRef = doc(db, "fiscalProfiles", user.uid);
+                            await setDoc(docRef, { tempPassword: "" }, { merge: true });
+
+                            try {
+                              const userRef = doc(db, "users", user.uid);
+                              await setDoc(userRef, { tempPassword: "" }, { merge: true });
+                            } catch (uErr) {
+                              console.warn("Failed to clear tempPassword in users collection:", uErr);
+                            }
+
+                            setTempPassword("");
+                            toast.success("Tu contraseña ha sido guardada. Ahora puedes iniciar sesión con tu correo y esta contraseña.", "Contraseña Guardada");
+                            setNewPassword("");
+                            setConfirmPassword("");
+                            setShowPasswordForm(false);
+                          } catch (err: any) {
+                            console.error("Error updating password:", err);
+                            if (err.code === "auth/requires-recent-login") {
+                              toast.error("Por seguridad, debes volver a iniciar sesión antes de cambiar tu contraseña.");
+                            } else {
+                              toast.error(err.message || "No se pudo actualizar la contraseña.");
+                            }
+                          } finally {
+                            setIsUpdatingPassword(false);
+                          }
+                        }}
+                        className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-40 text-white text-xs font-black py-2.5 rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-md shadow-[#0B53F4]/10"
+                      >
+                        {isUpdatingPassword ? "Guardando..." : "Guardar Contraseña"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Autenticación en dos pasos switch wrapper */}
           <div className="flex items-center justify-between gap-4 py-2 border-t border-slate-100/70">
@@ -3350,160 +3587,6 @@ export default function ProfileForm({
           </button>
         )}
       </div>
-
-      {false && bankAuthVisible && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl overflow-hidden max-w-md w-full shadow-2xl border border-slate-100 flex flex-col text-slate-800 animate-scale-up">
-            
-            {/* Bank Header Section */}
-            {(() => {
-              const bankInfo = getCardBankInfo(bankAuthCard?.last4 ? "4" + bankAuthCard.last4 : "4");
-              return (
-                <div className={`bg-gradient-to-r ${bankInfo.bgColor} text-white p-6 relative overflow-hidden text-left`}>
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-white/5 rounded-full -mr-4 -mt-4 opacity-40" />
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[9px] font-black tracking-widest text-white/70 bg-white/10 px-2 py-0.5 rounded uppercase font-sans">
-                      Gateway Transaccional Seguro
-                    </span>
-                    <Lock className="w-4 h-4 text-white/80" />
-                  </div>
-                  <h3 className="text-xl font-black font-display tracking-tight text-white">{bankInfo.bankName}</h3>
-                  <p className="text-[10px] text-white/80 font-mono mt-1">
-                    Conexion Encriptada - Protocolo 3D Secure v2.2
-                  </p>
-                </div>
-              );
-            })()}
-
-            {/* Main Content Area */}
-            <div className="p-6 text-left space-y-4">
-              {bankAuthStatus === "connecting" && (
-                <div className="py-8 text-center space-y-4 flex flex-col items-center justify-center">
-                  <div className="w-12 h-12 border-3 border-[#0B53F4] border-t-transparent rounded-full animate-spin" />
-                  <div className="space-y-1.5">
-                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-wide">Estableciendo Handshake Seguro...</h4>
-                    <p className="text-[11px] text-slate-500 max-w-[280px] mx-auto leading-relaxed">
-                      Sincronizando claves criptográficas con el procesador emisor de {getCardBankInfo(bankAuthCard?.last4 || "4").bankName} para certificar la autenticidad e integridad del plástico real...
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {bankAuthStatus === "otp_prompt" && (
-                <div className="space-y-4">
-                  <div className="bg-blue-50/50 border border-blue-100/50 rounded-2xl p-4 flex gap-3">
-                    <Smartphone className="w-5 h-5 text-[#0B53F4] shrink-0 mt-0.5" />
-                    <div className="text-[11px] text-slate-600 leading-relaxed font-semibold">
-                      Su banco emisor ha solicitado la verificacion de identidad telefonica (SCA/OTP) por seguridad. Hemos enviado un mensaje de texto SMS con su clave temporal al numero de telefono celular registrado para la tarjeta terminada en <span className="font-mono font-black text-slate-800 bg-white px-1.5 py-0.5 border border-slate-100 rounded">**** {bankAuthCard?.last4}</span>.
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block">
-                      Código de Validación OTP
-                    </label>
-                    <input 
-                      type="text"
-                      placeholder="Ingresa los 6 dígitos recibidos"
-                      maxLength={6}
-                      value={bankAuthOtpInput}
-                      onChange={(e) => setBankAuthOtpInput(e.target.value.replace(/\D/g, ""))}
-                      className="w-full text-center text-sm font-mono tracking-widest font-black leading-none bg-slate-50 border border-slate-200 focus:border-[#0B53F4] rounded-2xl px-4 py-3.5 text-slate-800 outline-none"
-                    />
-                  </div>
-
-                  {/* Fast Complete test buttons */}
-                  <div className="bg-slate-50 rounded-2xl p-3 flex flex-col gap-2 border border-slate-200/50 text-center">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Autocompletado Seguro (Test)</span>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setBankAuthOtpInput("481920")}
-                        className="bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] text-[10px] font-black py-1.5 px-2 rounded-xl border-none transition cursor-pointer text-center shadow-2xs"
-                      >
-                        OTP: 481920
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setBankAuthOtpInput("994123")}
-                        className="bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] text-[10px] font-black py-1.5 px-2 rounded-xl border-none transition cursor-pointer text-center shadow-2xs"
-                      >
-                        OTP: 994123
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setBankAuthVisible(false)}
-                      className="flex-1 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] text-xs font-black py-3 rounded-xl transition cursor-pointer text-center border-none shadow-2xs"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      disabled={bankAuthOtpInput.length < 6}
-                      onClick={() => {
-                        setBankAuthStatus("authenticating");
-                        setTimeout(() => {
-                          setBankAuthStatus("completed");
-                        }, 1800);
-                      }}
-                      className="flex-2 bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-40 text-white text-xs font-black py-3 rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-md shadow-[#0B53F4]/10"
-                    >
-                      Verificar Clave SMS
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {bankAuthStatus === "authenticating" && (
-                <div className="py-8 text-center space-y-4 flex flex-col items-center justify-center">
-                  <div className="w-12 h-12 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-                  <div className="space-y-1.5">
-                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-wide">Validando Clave con Emisor...</h4>
-                    <p className="text-[11px] text-slate-500 max-w-[280px] mx-auto leading-relaxed">
-                      Confirmando firma OTP única y autenticando fondos reales en bóveda segura de dispersión interbancaria...
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {bankAuthStatus === "completed" && (
-                <div className="text-center py-4 space-y-5 flex flex-col items-center justify-center">
-                  <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-500 animate-bounce">
-                    <ShieldCheck className="w-10 h-10 stroke-[2.3]" />
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <h4 className="text-base font-black text-slate-800">Tarjeta Autenticada Real</h4>
-                    <p className="text-xs text-slate-500 max-w-[320px] leading-relaxed mx-auto">
-                      Su banco emisor ha validado y aprobado exitosamente la vinculación real de su tarjeta. Ha quedado enlazada de manera permanente para transacciones seguras dentro de ZenTicket.
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setBankAuthVisible(false);
-                      if (bankAuthSuccessCallback) {
-                        await bankAuthSuccessCallback();
-                        toast.success(`La operación con tu tarjeta real ha sido procesada con éxito y el banco emisor emitió su folio de aprobación.`, "Bóveda Segura Actualizada");
-                      }
-                    }}
-                    className="w-full bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-black py-3 rounded-2xl transition cursor-pointer shadow-md shadow-[#0B53F4]/10 text-center uppercase tracking-wide"
-                  >
-                    Activar y Finalizar Transaccion
-                  </button>
-                </div>
-              )}
-
-            </div>
-
-          </div>
-        </div>
-      )}
 
     </div>
   );

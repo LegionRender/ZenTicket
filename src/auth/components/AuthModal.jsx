@@ -9,8 +9,29 @@ import {
   DialogDescription,
 } from "@/shared/ui/dialog";
 import { doc, setDoc, getDoc } from "firebase/firestore";
-import { db } from "@/services/firebase/firebase";
+import { db, auth } from "@/services/firebase/firebase";
 import { ZenLogo } from "@/shared/brand/ZenLogo";
+import { updatePassword, linkWithCredential, EmailAuthProvider } from "firebase/auth";
+
+const generateComplexPassword = () => {
+  const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const lowercase = "abcdefghijklmnopqrstuvwxyz";
+  const numbers = "0123456789";
+  const symbols = "!@#$%&*";
+  const allChars = uppercase + lowercase + numbers + symbols;
+  
+  let pass = "";
+  pass += uppercase[Math.floor(Math.random() * uppercase.length)];
+  pass += lowercase[Math.floor(Math.random() * lowercase.length)];
+  pass += numbers[Math.floor(Math.random() * numbers.length)];
+  pass += symbols[Math.floor(Math.random() * symbols.length)];
+  
+  for (let i = 0; i < 10; i++) {
+    pass += allChars[Math.floor(Math.random() * allChars.length)];
+  }
+  
+  return pass.split('').sort(() => 0.5 - Math.random()).join('');
+};
 
 export const AuthModal = ({ open, onOpenChange, initialMode = "signin" }) => {
   const [mode, setMode] = useState(initialMode); // "signin" or "signup"
@@ -37,11 +58,31 @@ export const AuthModal = ({ open, onOpenChange, initialMode = "signin" }) => {
           } catch (e) {
             console.warn("Unable to save signup flag:", e);
           }
+          
+          const defaultPass = generateComplexPassword();
+          
+          try {
+            if (user.email) {
+              const credential = EmailAuthProvider.credential(user.email, defaultPass);
+              await linkWithCredential(user, credential);
+            } else {
+              await updatePassword(user, defaultPass);
+            }
+          } catch (authErr) {
+            console.warn("Failed to link credential, falling back to updatePassword:", authErr);
+            try {
+              await updatePassword(user, defaultPass);
+            } catch (innerErr) {
+              console.warn("Failed to set temporary password on Google signup:", innerErr);
+            }
+          }
+
           await setDoc(userRef, {
             uid: user.uid,
             name: user.displayName || "Usuario de ZenTicket",
             email: user.email,
             createdAt: new Date().toISOString(),
+            tempPassword: defaultPass,
           });
         }
       } catch (dbErr) {
