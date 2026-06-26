@@ -13,6 +13,7 @@ import { auth, db } from "@/services/firebase/firebase";
 import { signOut, sendPasswordResetEmail, updatePassword, EmailAuthProvider, linkWithCredential } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { useToast } from "@/shared/feedback/Toast";
+import { getApiUrl } from "@/services/api/api-client";
 
 // Bank and payment method logos
 import santanderLogo from "@/assets/logos pagos/Banco_Santander_Logotipo.png";
@@ -101,7 +102,7 @@ const loadScript = (src: string): Promise<void> => {
 
 const fetchPayPalClientId = async (): Promise<string> => {
   try {
-    const res = await fetch("/api/config/paypal-client-id");
+    const res = await fetch(getApiUrl("/api/config/paypal-client-id"));
     const data = await res.json();
     return data.clientId;
   } catch (err) {
@@ -332,7 +333,7 @@ export default function ProfileForm({
     try {
       const checkoutPlan = checkoutPlanType || "brisa";
       const endpoint = getCheckoutEndpointForWallet(walletName);
-      const response = await fetch(endpoint, {
+      const response = await fetch(getApiUrl(endpoint), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
