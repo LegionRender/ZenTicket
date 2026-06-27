@@ -783,7 +783,7 @@ app.post("/api/billing/checkout/mercadopago", async (req, res) => {
 
 // 2. Mercado Pago Subscription (Preapproval)
 app.post("/api/billing/subscription/mercadopago", async (req, res) => {
-  const { userId, planId, payerEmail } = req.body;
+  const { userId, planId } = req.body;
   if (!userId || !planId) {
     res.status(400).json({ error: "Faltan parámetros userId o planId" });
     return;
@@ -820,9 +820,7 @@ app.post("/api/billing/subscription/mercadopago", async (req, res) => {
   try {
     const baseUrl = getSafeBaseUrl(req);
 
-    const response = await axios.post(
-      "https://api.mercadopago.com/preapproval",
-      {
+    const preapprovalBody = {
         back_url: process.env.BILLING_SUCCESS_URL || `${baseUrl}/workspace?tab=cuenta&status=success`,
         reason: title,
         auto_recurring: {
@@ -831,9 +829,16 @@ app.post("/api/billing/subscription/mercadopago", async (req, res) => {
           transaction_amount: price,
           currency_id: "MXN"
         },
-        payer_email: payerEmail || "payer@zenticket.mx",
         external_reference: `${userId}:${planId}`
-      },
+    };
+    // IMPORTANT: Do NOT include payer_email for subscriptions.
+    // Mercado Pago will ask the payer to log in at checkout.
+    // Sending it causes "Payer and collector cannot be the same user"
+    // when the user's email matches the collector account.
+
+    const response = await axios.post(
+      "https://api.mercadopago.com/preapproval",
+      preapprovalBody,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -957,7 +962,7 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
 });
 
 app.post("/api/billing/checkout/stripe", async (req, res) => {
-  const { userId, planId, payerEmail } = req.body;
+  const { userId, planId, payerEmail, autoRenew = true } = req.body;
   if (!userId || !planId) {
     res.status(400).json({ error: "Faltan parámetros userId o planId" });
     return;
@@ -999,11 +1004,14 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
       "line_items[0][price_data][product_data][name]": title,
       "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
       "line_items[0][quantity]": "1",
-      "mode": "payment",
+      "mode": autoRenew ? "subscription" : "payment",
       "success_url": process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
       "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
       "client_reference_id": `${userId}:${planId}`
     });
+    if (autoRenew) {
+      stripeParams.append("line_items[0][price_data][recurring][interval]", "month");
+    }
     if (payerEmail) {
       stripeParams.append("customer_email", payerEmail);
     }

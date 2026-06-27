@@ -22,14 +22,8 @@ import aztecaLogo from "@/assets/logos pagos/Logo_Banco_Azteca.png";
 import banamexLogo from "@/assets/logos pagos/Logo_de_Banamex.png";
 import banorteLogo from "@/assets/logos pagos/Logo_de_Banorte.png";
 import inbursaLogo from "@/assets/logos pagos/Logo_de_Inbursa.png";
-import mercadoPagoLogo from "@/assets/logos pagos/Mercado Pago Logo.png";
 import scotiabankLogo from "@/assets/logos pagos/Scotiabank_logo.png";
-import stripeLogo from "@/assets/logos pagos/Stripe_Logo.png";
-import applePayLogo from "@/assets/logos pagos/apple-pay-logo.png";
 import bbvaLogo from "@/assets/logos pagos/bbva-logo.png";
-import googlePayLogo from "@/assets/logos pagos/google-pay-logo.png";
-import paypalLogo from "@/assets/logos pagos/paypal-logo-2.png";
-import spinLogo from "@/assets/logos pagos/SPIN-BY-OXXO.png";
 
 interface ProfileFormProps {
   initialProfile: any; // Allow flexible properties like planStartDate, autoRenew
@@ -84,32 +78,6 @@ function getDeviceModel(): { name: string; os: string } {
 
   return { name, os };
 }
-
-const loadScript = (src: string): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
-      resolve();
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = (err) => reject(err);
-    document.body.appendChild(script);
-  });
-};
-
-const fetchPayPalClientId = async (): Promise<string> => {
-  try {
-    const res = await fetch(getApiUrl("/api/config/paypal-client-id"));
-    const data = await res.json();
-    return data.clientId;
-  } catch (err) {
-    console.error("Error fetching PayPal client ID:", err);
-    return "";
-  }
-};
 
 export default function ProfileForm({ 
   initialProfile, 
@@ -176,7 +144,7 @@ export default function ProfileForm({
     if (clean.startsWith("4")) {
       return { bankName: "Visa Internacional", bgColor: "from-blue-950 to-slate-900", logoColor: "text-blue-300", label: "VISA" };
     }
-    if (clean.startsWith("5")) {
+    if (clean.startsWith("5") || clean.startsWith("2")) {
       return { bankName: "Mastercard Internacional", bgColor: "from-rose-950 to-slate-900", logoColor: "text-orange-300", label: "MASTERCARD" };
     }
     if (clean.startsWith("3")) {
@@ -186,12 +154,6 @@ export default function ProfileForm({
   };
 
   const getCardLogo = (card: any) => {
-    if (card.brand === "MERCADOPAGO") return mercadoPagoLogo;
-    if (card.brand === "PAYPAL") return paypalLogo;
-    if (card.brand === "APPLEPAY") return applePayLogo;
-    if (card.brand === "GOOGLEPAY") return googlePayLogo;
-    if (card.brand === "SPINBYOXXO") return spinLogo;
-
     let bankName = card.bankName || "";
     if (!bankName) {
       const bankInfo = getCardBankInfo(card.last4 ? "4" + card.last4 : "4");
@@ -235,48 +197,6 @@ export default function ProfileForm({
         </div>
       );
     }
-    if (card.brand === "AMEX") {
-      return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 ${size === "sm" ? "text-[8.5px]" : "text-[9.5px]"} text-[#00829B] font-mono font-black tracking-widest select-none shadow-sm shrink-0`}>
-          AMEX
-        </div>
-      );
-    }
-    if (card.brand === "MERCADOPAGO") {
-      return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-[#00A6EA] font-sans font-black select-none shadow-sm shrink-0`}>
-          MP
-        </div>
-      );
-    }
-    if (card.brand === "APPLEPAY") {
-      return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-black font-sans font-black select-none shadow-sm shrink-0`}>
-          Apple Pay
-        </div>
-      );
-    }
-    if (card.brand === "GOOGLEPAY") {
-      return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-[#202124] font-sans font-black select-none shadow-sm shrink-0`}>
-          G Pay
-        </div>
-      );
-    }
-    if (card.brand === "SPINBYOXXO") {
-      return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-[#5D2D91] font-sans font-black select-none shadow-sm shrink-0`}>
-          SPIN
-        </div>
-      );
-    }
-    if (card.brand === "PAYPAL") {
-      return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-[#003087] font-sans font-black italic select-none shadow-sm shrink-0`}>
-          PayPal
-        </div>
-      );
-    }
     return (
       <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl flex items-center justify-center border border-slate-200 text-rose-600 font-sans font-black italic select-none shadow-sm relative overflow-hidden shrink-0`}>
         <span className="relative z-10 text-[10px] uppercase tracking-tighter">MC</span>
@@ -284,25 +204,24 @@ export default function ProfileForm({
     );
   };
 
-  const getLinkedPlatformsForEmail = (email: string) => {
-    // Standard SaaS pattern: all major payment gateways are universally available to all users.
-    return ["Stripe", "Google Pay", "PayPal", "Mercado Pago"];
-  };
-
   const isValidLuhn = (cardNumber: string) => {
     const clean = cardNumber.replace(/\s+/g, "");
-    if (!clean || clean.length < 13 || !/^\d+$/.test(clean)) return false;
-    // Always permit numeric entries in this range for true testing flexibility without mathematically restrictive checks.
-    return true;
+    if (!/^\d{13,19}$/.test(clean)) return false;
+    let sum = 0;
+    let doubleDigit = false;
+    for (let index = clean.length - 1; index >= 0; index -= 1) {
+      let digit = Number(clean[index]);
+      if (doubleDigit) {
+        digit *= 2;
+        if (digit > 9) digit -= 9;
+      }
+      sum += digit;
+      doubleDigit = !doubleDigit;
+    }
+    return sum % 10 === 0;
   };
 
-  const getCheckoutEndpointForWallet = (walletName: string) => {
-    if (walletName === "Mercado Pago") {
-      return autoRenewChoice ? "/api/billing/subscription/mercadopago" : "/api/billing/checkout/mercadopago";
-    }
-    if (walletName === "PayPal") return "/api/billing/checkout/paypal";
-    return "/api/billing/checkout/stripe";
-  };
+  const getCheckoutEndpointForWallet = () => "/api/billing/checkout/stripe";
 
   const openOfficialCheckoutPopup = (checkoutUrl: string, walletName: string) => {
     const width = 480;
@@ -327,20 +246,23 @@ export default function ProfileForm({
     if (isProcessingWallet || isProcessingPayment) return;
     setIsProcessingWallet(true);
 
-    const providerForMessage = walletName === "Google Pay" ? "Stripe Checkout" : walletName;
+    const providerForMessage = walletName;
     toast.info(`Abriendo checkout oficial de ${providerForMessage}...`, "Pago seguro");
 
     try {
       const checkoutPlan = checkoutPlanType || "brisa";
-      const endpoint = getCheckoutEndpointForWallet(walletName);
+      const endpoint = getCheckoutEndpointForWallet();
+      const payerEmail = correoPago || correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail || undefined;
+      const requestBody: Record<string, string | boolean | undefined> = {
+        userId: initialProfile?.userId || "guest",
+        planId: checkoutPlan,
+        autoRenew: autoRenewChoice
+      };
+      requestBody.payerEmail = payerEmail;
       const response = await fetch(getApiUrl(endpoint), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: initialProfile?.userId || "guest",
-          planId: checkoutPlan,
-          payerEmail: correoPago || correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail || undefined
-        })
+        body: JSON.stringify(requestBody)
       });
 
       const data = await response.json().catch(() => ({}));
@@ -472,7 +394,9 @@ export default function ProfileForm({
   // Cards saved in Firestore. New cards are captured only by the official processor checkout.
   const [cards, setCards] = useState<PaymentCard[]>(() => {
     if (initialProfile?.paymentCards && initialProfile.paymentCards.length > 0) {
-      const filtered = initialProfile.paymentCards.filter((card) => card.last4 !== "Cuenta Vinculada");
+      const filtered = initialProfile.paymentCards.filter(
+        (card) => card.last4 !== "Cuenta Vinculada" && (card.brand === "VISA" || card.brand === "MASTERCARD")
+      );
       const unique: PaymentCard[] = [];
       const seen = new Set<string>();
       for (const card of filtered) {
@@ -490,7 +414,9 @@ export default function ProfileForm({
   // Keep cards in sync with backend profile snapshot.
   React.useEffect(() => {
     if (initialProfile?.paymentCards) {
-      const filtered = initialProfile.paymentCards.filter((card) => card.last4 !== "Cuenta Vinculada");
+      const filtered = initialProfile.paymentCards.filter(
+        (card) => card.last4 !== "Cuenta Vinculada" && (card.brand === "VISA" || card.brand === "MASTERCARD")
+      );
       const unique: PaymentCard[] = [];
       const seen = new Set<string>();
       for (const card of filtered) {
@@ -546,13 +472,12 @@ export default function ProfileForm({
 
   // Add Card Form State
   const [addingCard, setAddingCard] = useState(false);
-  const [addingMethodStep, setAddingMethodStep] = useState<"select" | "card" | "connecting">("select");
-  const [selectedMethodToAdd, setSelectedMethodToAdd] = useState<"MERCADOPAGO" | "GOOGLEPAY" | "PAYPAL" | null>(null);
+  const [addingMethodStep, setAddingMethodStep] = useState<"select" | "card">("select");
   const [newCardNumber, setNewCardNumber] = useState("");
   const [newCardExpiry, setNewCardExpiry] = useState("");
   const [newCardCvv, setNewCardCvv] = useState("");
   const [newCardHolder, setNewCardHolder] = useState("");
-  const [newCardBrand, setNewCardBrand] = useState<"VISA" | "MASTERCARD" | "AMEX">("VISA");
+  const [newCardBrand, setNewCardBrand] = useState<"VISA" | "MASTERCARD">("VISA");
 
   const currentPlan = initialProfile?.plan || "gratuito";
 
@@ -575,7 +500,7 @@ export default function ProfileForm({
   const [selectedCardForPlan, setSelectedCardForPlan] = useState<string>(
     (initialProfile?.paymentCards || []).find(c => c.isDefault)?.id || 
     (initialProfile?.paymentCards || [])[0]?.id || 
-    "mercadopago_wallet"
+    "visa_wallet"
   );
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [showOtherPaymentMethods, setShowOtherPaymentMethods] = useState(false);
@@ -800,118 +725,6 @@ export default function ProfileForm({
     return (
       <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 mb-4 animate-fade-in text-left space-y-4">
         
-        {false && addingMethodStep === "select" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs font-black text-slate-850 uppercase tracking-wide block">Seleccionar Método de Pago</span>
-                <span className="text-[9px] text-slate-450 font-bold block mt-0.5">Elige cómo deseas pagar tus planes</span>
-              </div>
-              <button 
-                onClick={() => {
-                  setAddingCard(false);
-                  setAddingMethodStep("select");
-                }} 
-                className="text-slate-450 hover:text-slate-655 font-bold text-xs p-1 cursor-pointer"
-              >
-                Cerrar
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3">
-              {/* Tarjeta Bancaria */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedCardForPlan("stripe_wallet");
-                  setAddingCard(false);
-                }}
-                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#0B53F4] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-              >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 text-[#0B53F4] flex items-center justify-center transition shrink-0">
-                  <CreditCard className="w-6 h-6" />
-                </div>
-                <div>
-                  <span className="text-sm font-black text-slate-850 block">Tarjeta Bancaria</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">Crédito o débito por Stripe Checkout</span>
-                </div>
-              </button>
-
-              {/* Stripe Checkout */}
-              <button
-                type="button"
-                onClick={() => {
-                  setAddingCard(false);
-                  handleDigitalWalletPayment("Stripe");
-                }}
-                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#635BFF] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-              >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0 p-2 shadow-3xs">
-                  <img src={stripeLogo} className="w-full h-full object-contain" alt="Stripe" />
-                </div>
-                <div>
-                  <span className="text-sm font-black text-slate-850 block">Stripe Checkout</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">Pago seguro con tarjeta</span>
-                </div>
-              </button>
-
-              {/* Mercado Pago */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedCardForPlan("mercadopago_wallet");
-                  setAddingCard(false);
-                }}
-                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#00A6EA] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-              >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                  <img src={mercadoPagoLogo} className="w-full h-full object-contain" alt="Mercado Pago" />
-                </div>
-                <div>
-                  <span className="text-sm font-black text-slate-850 block">Mercado Pago</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
-                </div>
-              </button>
-
-              {/* Google Pay */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedCardForPlan("googlepay_wallet");
-                  setAddingCard(false);
-                }}
-                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#202124] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-              >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                  <img src={googlePayLogo} className="w-full h-full object-contain" alt="Google Pay" />
-                </div>
-                <div>
-                  <span className="text-sm font-black text-slate-850 block">Google Pay</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">Disponible dentro de Stripe Checkout</span>
-                </div>
-              </button>
-
-              {/* PayPal */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedCardForPlan("paypal_wallet");
-                  setAddingCard(false);
-                }}
-                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#003087] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-              >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                  <img src={paypalLogo} className="w-full h-full object-contain" alt="PayPal" />
-                </div>
-                <div>
-                  <span className="text-sm font-black text-slate-850 block">PayPal</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">Pago seguro con PayPal</span>
-                </div>
-              </button>
-            </div>
-          </div>
-        )}
-
         {addingMethodStep === "card" && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -936,8 +749,7 @@ export default function ProfileForm({
             {(() => {
               const bankInfo = getCardBankInfo(newCardNumber);
               return (
-                <div className={`bg-gradient-to-br ${bankInfo.bgColor} text-white rounded-2xl p-5 relative overflow-hidden shadow-lg font-mono select-none h-38 flex flex-col justify-between transition-all duration-300 border border-white/10`}>
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-tr from-white/10 to-transparent rounded-full blur-xl pointer-events-none" />
+                <div className="bg-[#0B53F4] text-white rounded-2xl p-5 relative overflow-hidden shadow-lg font-mono select-none h-38 flex flex-col justify-between transition-colors duration-200 border border-white/10">
                   <div className="flex justify-between items-start z-10">
                     <div className="text-left">
                       <span className="text-[8px] font-black tracking-widest text-white/50 block font-sans">RED DE PAGOS GLOBAL</span>
@@ -950,7 +762,9 @@ export default function ProfileForm({
                     </span>
                   </div>
                   <div className="text-base tracking-widest font-black my-2 z-10 text-center text-white drop-shadow-sm">
-                    {newCardNumber ? newCardNumber.replace(/(\d{4})/g, "$1 ").trim() : "**** **** **** ****"}
+                    {newCardNumber
+                      ? `•••• •••• •••• ${newCardNumber.slice(-4).padStart(4, "•")}`
+                      : "•••• •••• •••• ••••"}
                   </div>
                   <div className="flex justify-between text-[9px] items-end font-sans z-10 border-t border-white/10 pt-1.5">
                     <div>
@@ -981,15 +795,14 @@ export default function ProfileForm({
                 </div>
                 <input 
                   type="text" 
-                  maxLength={19} 
+                  maxLength={19}
                   placeholder="4111 2222 3333 4444"
                   value={newCardNumber}
                   onChange={(e) => {
                     let val = e.target.value.replace(/\D/g, "");
                     if (val.startsWith("4")) setNewCardBrand("VISA");
-                    else if (val.startsWith("5")) setNewCardBrand("MASTERCARD");
-                    else if (val.startsWith("3")) setNewCardBrand("AMEX");
-                    if (val.length <= 16) {
+                    else if (val.startsWith("5") || val.startsWith("2")) setNewCardBrand("MASTERCARD");
+                    if (val.length <= 19) {
                       setNewCardNumber(val);
                     }
                   }}
@@ -1045,6 +858,10 @@ export default function ProfileForm({
                 const cleanNum = newCardNumber.replace(/\s+/g, "");
                 if (cleanNum.length < 13) {
                   toast.error("Por favor completa un numero de tarjeta valido.", "Numero invalido");
+                  return;
+                }
+                if (!cleanNum.startsWith("4") && !cleanNum.startsWith("5") && !cleanNum.startsWith("2")) {
+                  toast.error("Por ahora solo se aceptan tarjetas Visa o Mastercard.", "Tarjeta no compatible");
                   return;
                 }
                 if (!isValidLuhn(cleanNum)) {
@@ -1122,38 +939,6 @@ export default function ProfileForm({
           </div>
         )}
 
-        {false && addingMethodStep === "connecting" && (
-          <div className="flex flex-col items-center justify-center py-8 px-4 text-center space-y-4 animate-pulse">
-            <div className="relative">
-              <div className="w-16 h-16 border-4 border-[#ebf1ff] border-t-[#0B53F4] rounded-full animate-spin" />
-              <div className="absolute inset-0 flex items-center justify-center font-sans font-black text-xs text-slate-500">
-                {selectedMethodToAdd === "MERCADOPAGO" ? "MP" : 
-                 selectedMethodToAdd === "GOOGLEPAY" ? "G" : "PP"}
-              </div>
-            </div>
-            <div className="space-y-1">
-              <span className="text-xs font-black text-slate-850 uppercase tracking-wider block">
-                Conectando con {selectedMethodToAdd === "MERCADOPAGO" ? "Mercado Pago" : 
-                                selectedMethodToAdd === "GOOGLEPAY" ? "Google Pay" : "PayPal"}
-              </span>
-              <p className="text-[10px] text-slate-400 font-bold leading-normal max-w-xs">
-                Estableciendo conexión encriptada y autorizando token de facturación recurrente. Por favor espera...
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedMethodToAdd(null);
-                setAddingMethodStep("select");
-                setAddingCard(false);
-              }}
-              className="text-[10px] font-black text-[#0B53F4] hover:underline uppercase tracking-wider cursor-pointer"
-            >
-              Cancelar conexión
-            </button>
-          </div>
-        )}
-
       </div>
     );
   };
@@ -1211,7 +996,7 @@ export default function ProfileForm({
           {/* Correo para Cuentas de Pago */}
           <div className="space-y-1 bg-white border border-slate-200/60 rounded-2xl p-4 mt-3 mb-3 text-left">
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-              Correo para Cuentas de Pago (Stripe/PayPal/Mercado Pago)
+              Correo para Stripe Link
             </label>
             <div className="flex gap-2 mt-1.5">
               <input
@@ -1235,29 +1020,16 @@ export default function ProfileForm({
                       correoPago: trimmedEmail
                     });
                     
-                    // Auto-select first matching platform
-                    const linked = getLinkedPlatformsForEmail(trimmedEmail);
-                    if (linked.length > 0) {
-                      const first = linked[0];
-                      if (first === "Stripe") setSelectedCardForPlan("stripe_wallet");
-                      else if (first === "Mercado Pago") setSelectedCardForPlan("mercadopago_wallet");
-                      else if (first === "Google Pay") setSelectedCardForPlan("googlepay_wallet");
-                      else if (first === "PayPal") setSelectedCardForPlan("paypal_wallet");
-                    } else {
-                      setSelectedCardForPlan("");
-                    }
-                    
                     setCorreoPago(trimmedEmail);
-                    setShowOtherPaymentMethods(true);
-                    
-                    toast.success("Correo de pagos vinculado y sincronizado.", "Conexiones actualizadas");
+                    if (!selectedCardForPlan) setSelectedCardForPlan("visa_wallet");
+                    toast.success("Stripe usará este correo para ofrecer tarjetas guardadas en Link.", "Correo guardado");
                   } catch (e) {
                     toast.error("No se pudo vincular el correo de pagos.");
                   }
                 }}
                 className="bg-[#0B53F4] hover:bg-[#0747D1] text-white text-[11px] font-black px-4 py-2.5 rounded-xl transition cursor-pointer shrink-0 active:scale-95 animate-fade-in"
               >
-                Vincular
+                Guardar
               </button>
             </div>
             <p className="text-[10px] text-slate-400 mt-1 ml-1 leading-normal">
@@ -1307,34 +1079,11 @@ export default function ProfileForm({
                 return;
               }
 
-              const isDirectWallet = selectedCardForPlan.endsWith("_wallet");
-
-              if (isDirectWallet) {
-                const walletMapping: Record<string, string> = {
-                  "stripe_wallet": "Stripe",
-                  "mercadopago_wallet": "Mercado Pago",
-                  "googlepay_wallet": "Google Pay",
-                  "paypal_wallet": "PayPal"
-                };
-                const walletName = walletMapping[selectedCardForPlan];
-                await handleDigitalWalletPayment(walletName);
-              } else {
-                const targetCard = cards.find(c => c.id === selectedCardForPlan);
-                if (targetCard) {
-                  const walletMapping: Record<string, string> = {
-                    "MERCADOPAGO": "Mercado Pago",
-                    "GOOGLEPAY": "Google Pay",
-                    "PAYPAL": "PayPal"
-                  };
-                  if (targetCard.brand in walletMapping) {
-                    await handleDigitalWalletPayment(walletMapping[targetCard.brand]);
-                  } else {
-                    await handleDigitalWalletPayment("Stripe");
-                  }
-                } else {
-                  toast.error("Método de pago no encontrado.");
-                }
-              }
+              const targetCard = cards.find(c => c.id === selectedCardForPlan);
+              const network = targetCard?.brand === "MASTERCARD" || selectedCardForPlan === "mastercard_wallet"
+                ? "Mastercard"
+                : "Visa";
+              await handleDigitalWalletPayment(network);
             }}
             className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-40 text-white text-sm font-black py-3.5 rounded-2xl transition cursor-pointer text-center flex items-center justify-center gap-2 shadow-md shadow-[#0B53F4]/10 active:scale-98"
           >
@@ -1362,19 +1111,23 @@ export default function ProfileForm({
           
           {(() => {
             if (selectedCardForPlan.endsWith("_wallet")) {
-              const walletMapping: Record<string, { brand: string; label: string; logo: any }> = {
-                "stripe_wallet": { brand: "STRIPE", label: "Tarjeta de Crédito / Débito (Stripe)", logo: stripeLogo },
-                "mercadopago_wallet": { brand: "MERCADOPAGO", label: "Mercado Pago", logo: mercadoPagoLogo },
-                "googlepay_wallet": { brand: "GOOGLEPAY", label: "Google Pay via Stripe", logo: googlePayLogo },
-                "paypal_wallet": { brand: "PAYPAL", label: "PayPal", logo: paypalLogo }
+              const walletMapping: Record<string, { brand: string; label: string; logo: any; bgColor?: string }> = {
+                "visa_wallet": { brand: "VISA", label: "Visa", logo: null, bgColor: "#1A1F71" },
+                "mastercard_wallet": { brand: "MASTERCARD", label: "Mastercard", logo: null, bgColor: "#EB001B" }
               };
               const w = walletMapping[selectedCardForPlan];
               if (w) {
                 return (
                   <div className="flex items-center gap-3.5 p-4.5 bg-slate-50 border border-slate-200/80 rounded-2xl w-full">
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 shadow-3xs flex items-center justify-center shrink-0 p-2">
-                      <img src={w.logo} className="w-full h-full object-contain select-none" alt={w.brand} />
-                    </div>
+                    {w.logo ? (
+                      <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 shadow-3xs flex items-center justify-center shrink-0 p-2">
+                        <img src={w.logo} className="w-full h-full object-contain select-none" alt={w.brand} />
+                      </div>
+                    ) : (
+                      <div style={{ backgroundColor: w.bgColor || '#1A1F71' }} className="w-14 h-14 rounded-xl shadow-3xs flex items-center justify-center shrink-0">
+                        <span className="text-white font-black text-xs tracking-wide">{w.label}</span>
+                      </div>
+                    )}
                     <div className="text-left leading-tight">
                       <span className="text-sm font-black text-slate-800 block">{w.label}</span>
                       <span className="text-xs text-slate-400 font-semibold block mt-1">
@@ -1409,8 +1162,6 @@ export default function ProfileForm({
   };
 
   const renderAccordionPaymentMethods = () => {
-    const linkedPlatforms = getLinkedPlatformsForEmail(correoPago);
-    console.log("DEBUG ACCORDION:", { correoPago, linkedPlatforms });
     return (
       <div className="space-y-2">
         <button
@@ -1418,103 +1169,46 @@ export default function ProfileForm({
           onClick={() => setShowOtherPaymentMethods(!showOtherPaymentMethods)}
           className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100/70 border border-slate-200/80 rounded-2xl transition cursor-pointer text-left text-xs font-black text-slate-700 active:scale-98"
         >
-          Mostrar otros métodos de pago
+          Tarjetas aceptadas
           <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${showOtherPaymentMethods ? "rotate-180" : ""}`} />
         </button>
         {showOtherPaymentMethods && (
           <div className="bg-white border border-slate-200/60 rounded-3xl p-4.5 space-y-4 text-left animate-fade-in mt-2">
-            
-            {linkedPlatforms.length === 0 ? (
-              <div className="p-4.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-center text-xs text-slate-400 font-semibold w-full">
-                Este correo no tiene cuentas de pago vinculadas (Stripe, Google Pay, PayPal o Mercado Pago).
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3">
-                {/* Stripe */}
-                {linkedPlatforms.includes("Stripe") && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCardForPlan("stripe_wallet")}
-                    className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
-                      selectedCardForPlan === "stripe_wallet" 
-                        ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
-                        : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#0B53F4] hover:shadow-2xs"
-                    }`}
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                      <img src={stripeLogo} className="w-full h-full object-contain" alt="Stripe" />
-                    </div>
-                    <div className="leading-tight">
-                      <span className="text-sm font-black text-slate-800 block">Tarjeta de Crédito o Débito</span>
-                      <span className="text-xs text-slate-400 font-semibold block mt-1">Pago seguro procesado por Stripe</span>
-                    </div>
-                  </button>
-                )}
-
-                {/* Mercado Pago */}
-                {linkedPlatforms.includes("Mercado Pago") && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCardForPlan("mercadopago_wallet")}
-                    className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
-                      selectedCardForPlan === "mercadopago_wallet" 
-                        ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
-                        : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#00A6EA] hover:shadow-2xs"
-                    }`}
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                      <img src={mercadoPagoLogo} className="w-full h-full object-contain" alt="Mercado Pago" />
-                    </div>
-                    <div className="leading-tight">
-                      <span className="text-sm font-black text-slate-800 block">Mercado Pago</span>
-                      <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
-                    </div>
-                  </button>
-                )}
-
-                {/* Google Pay */}
-                {linkedPlatforms.includes("Google Pay") && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCardForPlan("googlepay_wallet")}
-                    className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
-                      selectedCardForPlan === "googlepay_wallet" 
-                        ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
-                        : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#202124] hover:shadow-2xs"
-                    }`}
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                      <img src={googlePayLogo} className="w-full h-full object-contain" alt="Google Pay" />
-                    </div>
-                    <div className="leading-tight">
-                      <span className="text-sm font-black text-slate-800 block">Google Pay</span>
-                      <span className="text-xs text-slate-400 font-semibold block mt-1">Disponible dentro de Stripe Checkout</span>
-                    </div>
-                  </button>
-                )}
-
-                {/* PayPal */}
-                {linkedPlatforms.includes("PayPal") && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCardForPlan("paypal_wallet")}
-                    className={`flex items-center gap-4.5 p-4.5 border rounded-2xl transition text-left cursor-pointer group ${
-                      selectedCardForPlan === "paypal_wallet" 
-                        ? "border-2 border-[#0B53F4] bg-[#EBF1FF]/10" 
-                        : "bg-slate-50 border-slate-200 hover:bg-slate-100/70 hover:border-[#003087] hover:shadow-2xs"
-                    }`}
-                  >
-                    <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                      <img src={paypalLogo} className="w-full h-full object-contain" alt="PayPal" />
-                    </div>
-                    <div className="leading-tight">
-                      <span className="text-sm font-black text-slate-800 block">PayPal</span>
-                      <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
-                    </div>
-                  </button>
-                )}
-              </div>
-            )}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedCardForPlan("visa_wallet")}
+                className={`p-4 border rounded-2xl text-left transition ${
+                  selectedCardForPlan === "visa_wallet" ? "border-[#0B53F4] bg-[#EBF1FF]" : "border-slate-200 bg-slate-50"
+                }`}
+              >
+                <span className="block text-lg font-black italic text-[#1A1F71]">VISA</span>
+                <span className="text-xs font-semibold text-slate-500">Crédito o débito</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedCardForPlan("mastercard_wallet")}
+                className={`p-4 border rounded-2xl text-left transition ${
+                  selectedCardForPlan === "mastercard_wallet" ? "border-[#0B53F4] bg-[#EBF1FF]" : "border-slate-200 bg-slate-50"
+                }`}
+              >
+                <span className="block text-sm font-black text-[#EB001B]">Mastercard</span>
+                <span className="text-xs font-semibold text-slate-500">Crédito o débito</span>
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setAddingCard(true);
+                setAddingMethodStep("card");
+              }}
+              className="w-full bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-bold py-3 rounded-xl transition"
+            >
+              Agregar otra tarjeta
+            </button>
+            <p className="text-[10px] leading-relaxed text-slate-500">
+              El cobro se procesa en Stripe. Si el correo tiene Stripe Link, el checkout ofrecerá sus tarjetas guardadas.
+            </p>
           </div>
         )}
       </div>
@@ -2608,7 +2302,7 @@ export default function ProfileForm({
                     type="button"
                     onClick={() => {
                       setCheckoutPlanType("brisa");
-                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "visa_wallet");
                     }}
                     className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
                       selectedPlan === "brisa"
@@ -2658,7 +2352,7 @@ export default function ProfileForm({
                     type="button"
                     onClick={() => {
                       setCheckoutPlanType("serenidad");
-                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "visa_wallet");
                     }}
                     className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
                       selectedPlan === "serenidad"
@@ -2704,7 +2398,7 @@ export default function ProfileForm({
                     type="button"
                     onClick={() => {
                       setCheckoutPlanType("nirvana");
-                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "visa_wallet");
                     }}
                     className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
                       selectedPlan === "nirvana"
@@ -3398,12 +3092,12 @@ export default function ProfileForm({
                   const nextState = !addingCard;
                   setAddingCard(nextState);
                   if (nextState) {
-                    setAddingMethodStep("select");
+                    setAddingMethodStep("card");
                   }
                 }}
                 className="bg-[#ebf1ff] hover:bg-[#dee8ff] text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
               >
-                {addingCard ? "Cancelar" : "+ Agregar Método de Pago"}
+                {addingCard ? "Cancelar" : "+ Agregar otra tarjeta"}
               </button>
             )}
           </div>
