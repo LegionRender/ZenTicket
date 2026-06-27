@@ -831,11 +831,6 @@ app.post("/api/billing/subscription/mercadopago", async (req, res) => {
         },
         external_reference: `${userId}:${planId}`
     };
-    // IMPORTANT: Do NOT include payer_email for subscriptions.
-    // Mercado Pago will ask the payer to log in at checkout.
-    // Sending it causes "Payer and collector cannot be the same user"
-    // when the user's email matches the collector account.
-
     const response = await axios.post(
       "https://api.mercadopago.com/preapproval",
       preapprovalBody,
@@ -961,6 +956,76 @@ app.post("/api/billing/checkout/paypal", async (req, res) => {
   }
 });
 
+app.post("/api/billing/setup/stripe", async (req, res) => {
+  const { userId, payerEmail, holderName, bankName } = req.body;
+  if (!userId || !payerEmail) {
+    res.status(400).json({ error: "Faltan userId o payerEmail" });
+    return;
+  }
+  const stripeSecretKey = secretOrEnv(stripeSecretKeyParam, "STRIPE_SECRET_KEY");
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuración de Stripe incompleta" });
+    return;
+  }
+
+  try {
+    const profileRef = db.collection("fiscalProfiles").doc(userId);
+    const profileSnapshot = await profileRef.get();
+    let stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+
+    if (!stripeCustomerId) {
+      const customerParams = new URLSearchParams({
+        email: payerEmail,
+        "metadata[userId]": userId
+      });
+      const customerResponse = await axios.post(
+        "https://api.stripe.com/v1/customers",
+        customerParams.toString(),
+        {
+          headers: {
+            Authorization: `Bearer ${stripeSecretKey}`,
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        }
+      );
+      stripeCustomerId = customerResponse.data.id;
+      await profileRef.set({ stripeCustomerId, correoPago: payerEmail }, { merge: true });
+    }
+
+    const baseUrl = getSafeBaseUrl(req);
+    const setupSuccessUrl = process.env.BILLING_SUCCESS_URL
+      ? process.env.BILLING_SUCCESS_URL.replace("status=success", "status=card_setup_success")
+      : `${baseUrl}/workspace?tab=cuenta&status=card_setup_success`;
+    const setupCancelUrl = process.env.BILLING_FAILURE_URL
+      ? process.env.BILLING_FAILURE_URL.replace("status=failure", "status=card_setup_cancelled")
+      : `${baseUrl}/workspace?tab=cuenta&status=card_setup_cancelled`;
+    const setupParams = new URLSearchParams({
+      mode: "setup",
+      customer: stripeCustomerId,
+      "payment_method_types[0]": "card",
+      client_reference_id: userId,
+      success_url: setupSuccessUrl,
+      cancel_url: setupCancelUrl,
+      "metadata[holderName]": holderName || "",
+      "metadata[bankName]": bankName || ""
+    });
+    const setupResponse = await axios.post(
+      "https://api.stripe.com/v1/checkout/sessions",
+      setupParams.toString(),
+      {
+        headers: {
+          Authorization: `Bearer ${stripeSecretKey}`,
+          "Content-Type": "application/x-www-form-urlencoded"
+        }
+      }
+    );
+    res.json({ checkoutUrl: setupResponse.data.url });
+  } catch (error) {
+    console.error("Error al vincular tarjeta en Stripe:", error.response?.data || error.message);
+    res.status(500).json({ error: "No se pudo iniciar el registro seguro de la tarjeta" });
+  }
+});
+
 app.post("/api/billing/checkout/stripe", async (req, res) => {
   const { userId, planId, payerEmail, autoRenew = true } = req.body;
   if (!userId || !planId) {
@@ -1012,7 +1077,11 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
     if (autoRenew) {
       stripeParams.append("line_items[0][price_data][recurring][interval]", "month");
     }
-    if (payerEmail) {
+    const profileSnapshot = await db.collection("fiscalProfiles").doc(userId).get();
+    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    if (stripeCustomerId) {
+      stripeParams.append("customer", stripeCustomerId);
+    } else if (payerEmail) {
       stripeParams.append("customer_email", payerEmail);
     }
 
@@ -1338,6 +1407,39 @@ app.post("/api/billing/webhooks/stripe", async (req, res) => {
         const externalReference = session.client_reference_id; // "userId:planId"
 
         console.log(`[Stripe] Checkout Session retrieve: status=${session.status}, payment_status=${paymentStatus}, ref=${externalReference}`);
+
+        if (session.mode === "setup" && session.setup_intent && externalReference) {
+          const setupResponse = await axios.get(
+            `https://api.stripe.com/v1/setup_intents/${session.setup_intent}?expand[]=payment_method`,
+            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+          );
+          const paymentMethod = setupResponse.data.payment_method;
+          const card = paymentMethod?.card;
+          if (card && (card.brand === "visa" || card.brand === "mastercard")) {
+            const profileRef = db.collection("fiscalProfiles").doc(externalReference);
+            const profileSnapshot = await profileRef.get();
+            const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
+              ? profileSnapshot.data().paymentCards
+              : [];
+            const nextCard = {
+              id: paymentMethod.id,
+              brand: card.brand === "visa" ? "VISA" : "MASTERCARD",
+              last4: card.last4,
+              expiry: `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`,
+              holderName: session.metadata?.holderName || paymentMethod.billing_details?.name || "Titular",
+              bankName: session.metadata?.bankName || (card.brand === "visa" ? "Tarjeta Visa" : "Mastercard"),
+              isDefault: existingCards.length === 0,
+              stripePaymentMethodId: paymentMethod.id
+            };
+            const paymentCards = [
+              ...existingCards.filter((item) => item.id !== paymentMethod.id),
+              nextCard
+            ];
+            await profileRef.set({ paymentCards, stripeCustomerId: session.customer }, { merge: true });
+          }
+          res.status(200).send("OK");
+          return;
+        }
 
         if (paymentStatus === "paid" && externalReference) {
           const [userId, planId] = externalReference.split(":");
