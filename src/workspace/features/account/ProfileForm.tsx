@@ -22,9 +22,11 @@ import aztecaLogo from "@/assets/logos pagos/Logo_Banco_Azteca.png";
 import banamexLogo from "@/assets/logos pagos/Logo_de_Banamex.png";
 import banorteLogo from "@/assets/logos pagos/Logo_de_Banorte.png";
 import inbursaLogo from "@/assets/logos pagos/Logo_de_Inbursa.png";
+import mastercardLogo from "@/assets/logos pagos/MasterCard.png";
 import mercadoPagoLogo from "@/assets/logos pagos/Mercado Pago Logo.png";
 import scotiabankLogo from "@/assets/logos pagos/Scotiabank_logo.png";
 import stripeLogo from "@/assets/logos pagos/Stripe_Logo.png";
+import visaLogo from "@/assets/logos pagos/Visa.png";
 import applePayLogo from "@/assets/logos pagos/apple-pay-logo.png";
 import bbvaLogo from "@/assets/logos pagos/bbva-logo.png";
 import googlePayLogo from "@/assets/logos pagos/google-pay-logo.png";
@@ -186,6 +188,8 @@ export default function ProfileForm({
   };
 
   const getCardLogo = (card: any) => {
+    if (card.brand === "VISA") return visaLogo;
+    if (card.brand === "MASTERCARD") return mastercardLogo;
     if (card.brand === "MERCADOPAGO") return mercadoPagoLogo;
     if (card.brand === "PAYPAL") return paypalLogo;
     if (card.brand === "APPLEPAY") return applePayLogo;
@@ -1202,6 +1206,8 @@ export default function ProfileForm({
   const renderCheckoutSection = () => {
     return (
       <div className="space-y-4">
+        {addingCard && renderAddingCardForm()}
+
         {/* 3.1 Caja del Plan Seleccionado */}
         <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 shadow-2xs relative text-left">
           <div className="flex justify-between items-start mb-2">
