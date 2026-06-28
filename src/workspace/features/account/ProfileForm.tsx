@@ -587,11 +587,7 @@ export default function ProfileForm({
         return saved as any;
       }
     }
-    const profilePlan = initialProfile?.plan;
-    if (profilePlan === "brisa" || profilePlan === "personal" || profilePlan === "serenidad" || profilePlan === "empresa" || profilePlan === "nirvana") {
-      return profilePlan as any;
-    }
-    return "brisa";
+    return null;
   });
   const selectedPlan = checkoutPlanType !== null ? checkoutPlanType : currentPlan;
   const [selectedCardForPlan, setSelectedCardForPlan] = useState<string>(
@@ -904,7 +900,7 @@ export default function ProfileForm({
               <button
                 type="button"
                 onClick={() => {
-                  setAddingMethodStep("card");
+                  setAddingMethodStep("select");
                 }}
                 className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-slate-400 hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
               >
@@ -1551,6 +1547,51 @@ export default function ProfileForm({
             })
           )}
         </div>
+          {/* Correo para Cuentas de Pago */}
+          <div className="space-y-1 bg-white border border-slate-200/60 rounded-2xl p-4 mt-4 text-left">
+            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+              Correo para Cuentas de Pago (Stripe/PayPal/Mercado Pago)
+            </label>
+            <div className="flex gap-2 mt-1.5">
+              <input
+                type="email"
+                value={correoPago}
+                onChange={(e) => setCorreoPago(e.target.value)}
+                placeholder="Ej. mi-cuenta-de-pago@email.com"
+                className="flex-grow text-xs font-semibold bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-xl px-3.5 py-2.5 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!correoPago.trim()) {
+                    toast.error("El correo no puede estar vacío.");
+                    return;
+                  }
+                  try {
+                    const trimmedEmail = correoPago.trim();
+                    await onSave({
+                      ...initialProfile,
+                      correoPago: trimmedEmail
+                    });
+                    
+                    setCorreoPago(trimmedEmail);
+                    if (!selectedCardForPlan && cards.length > 0) {
+                      setSelectedCardForPlan(cards.find(card => card.isDefault)?.id || cards[0].id);
+                    }
+                    toast.success("Correo guardado para Stripe Checkout y Stripe Link.", "Correo actualizado");
+                  } catch (e) {
+                    toast.error("No se pudo vincular el correo de pagos.");
+                  }
+                }}
+                className="bg-[#0B53F4] hover:bg-[#0747D1] text-white text-[11px] font-black px-4 py-2.5 rounded-xl transition cursor-pointer shrink-0 active:scale-95"
+              >
+                Guardar
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1 ml-1 leading-normal">
+              Vincula automáticamente las tarjetas predeterminadas y pre-llena tus datos en las pasarelas al pagar.
+            </p>
+          </div>
       </>
     );
   };
@@ -1698,18 +1739,23 @@ export default function ProfileForm({
     setMessage(null);
 
     // Basic SAT field validations
+    // Basic SAT field validations (only if fiscal data is being filled/changed)
     const cleanedRFC = rfc.trim().toUpperCase();
-    if (cleanedRFC.length < 12 || cleanedRFC.length > 13) {
-      toast.error("El RFC debe tener exactamente 12 o 13 caracteres.", "Error de Validación");
-      return;
-    }
-    if (!razonSocial.trim()) {
-      toast.error("Debe ingresar una Razón Social o Nombre Legal.", "Error de Validación");
-      return;
-    }
-    if (codigoPostal.length !== 5 || isNaN(Number(codigoPostal))) {
-      toast.error("El Código Postal de la dirección fiscal debe tener 5 dígitos.", "Error de Validación");
-      return;
+    const hasFiscalInput = cleanedRFC.length > 0 || razonSocial.trim().length > 0 || codigoPostal.trim().length > 0;
+    
+    if (hasFiscalInput) {
+      if (cleanedRFC.length < 12 || cleanedRFC.length > 13) {
+        toast.error("El RFC debe tener exactamente 12 o 13 caracteres.", "Error de Validación");
+        return;
+      }
+      if (!razonSocial.trim()) {
+        toast.error("Debe ingresar una Razón Social o Nombre Legal.", "Error de Validación");
+        return;
+      }
+      if (codigoPostal.length !== 5 || isNaN(Number(codigoPostal))) {
+        toast.error("El Código Postal de la dirección fiscal debe tener 5 dígitos.", "Error de Validación");
+        return;
+      }
     }
 
     try {
@@ -3371,6 +3417,87 @@ export default function ProfileForm({
         </div>
       </div>
 
+      <div className="pt-2">
+              {/* 4. CONFIGURACION Header & Options List with interactive components */}
+              <div className="space-y-2.5">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                  Configuración
+                </span>
+        
+                <div className="bg-white border border-slate-200/50 rounded-3xl overflow-hidden divide-y divide-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.02)]">
+                  
+                  {/* Item #1: Apariencia */}
+                  <div 
+                    onClick={() => setActiveModal("apariencia")}
+                    className="flex items-center justify-between p-4.5 hover:bg-slate-50 transition cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-9 h-9 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
+                        <Palette className="w-5 h-5 stroke-[2]" />
+                      </div>
+                      <span className="text-sm font-bold text-slate-800">Apariencia</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-slate-400 font-bold">
+                        {themeChoice === "light" ? "Claro" : themeChoice === "dark" ? "Oscuro" : "Sistema"}
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-slate-350" />
+                    </div>
+                  </div>
+        
+                  {/* Item #2: Notificaciones */}
+                  <div 
+                    onClick={() => setActiveModal("notificaciones")}
+                    className="flex items-center justify-between p-4.5 hover:bg-slate-50 transition cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-9 h-9 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
+                        <Bell className="w-5 h-5 stroke-[2]" />
+                      </div>
+                      <span className="text-sm font-bold text-slate-800">Notificaciones</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-350" />
+                  </div>
+        
+                  {/* Item #3: Idioma */}
+                  <div 
+                    onClick={() => setActiveModal("idioma")}
+                    className="flex items-center justify-between p-4.5 hover:bg-slate-50 transition cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-9 h-9 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
+                        <Globe className="w-5 h-5 stroke-[2]" />
+                      </div>
+                      <span className="text-sm font-bold text-slate-800">Idioma</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-slate-400 font-bold">
+                        {languageChoice === "es-MX" ? "Espanol (MX)" : languageChoice === "en-US" ? "English (US)" : "Portugues (BR)"}
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-slate-350" />
+                    </div>
+                  </div>
+        
+        
+        
+                  {/* Item #4: Seguridad y Privacidad -> triggers editable Form! */}
+                  <div 
+                    onClick={() => setIsEditingFiscal(true)}
+                    className="flex items-center justify-between p-4.5 hover:bg-slate-55 transition cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-9 h-9 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
+                        <Shield className="w-5 h-5 stroke-[2]" />
+                      </div>
+                      <div className="text-left leading-tight">
+                        <span className="text-sm font-bold text-slate-800 block">Datos Fiscales (SAT)</span>
+                        <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">Seguridad y timbrado CFDI v4.0</span>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-[#0B53F4]" />
+                  </div>
+                </div>
+      </div>
       </div> {/* Close Left Column (lg:col-span-6) */}
 
       {/* RIGHT COLUMN: PAYMENT METHODS & CONFIGURATION */}
@@ -3399,89 +3526,10 @@ export default function ProfileForm({
             )}
           </div>
 
-          {renderCheckoutSection()}
+          {checkoutPlanType !== null ? renderCheckoutSection() : renderNormalSection()}
         </div>
 
 
-      {/* 4. CONFIGURACION Header & Options List with interactive components */}
-      <div className="space-y-2.5">
-        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
-          Configuración
-        </span>
-
-        <div className="bg-white border border-slate-200/50 rounded-3xl overflow-hidden divide-y divide-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.02)]">
-          
-          {/* Item #1: Apariencia */}
-          <div 
-            onClick={() => setActiveModal("apariencia")}
-            className="flex items-center justify-between p-4.5 hover:bg-slate-50 transition cursor-pointer"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
-                <Palette className="w-5 h-5 stroke-[2]" />
-              </div>
-              <span className="text-sm font-bold text-slate-800">Apariencia</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-slate-400 font-bold">
-                {themeChoice === "light" ? "Claro" : themeChoice === "dark" ? "Oscuro" : "Sistema"}
-              </span>
-              <ChevronRight className="w-4 h-4 text-slate-350" />
-            </div>
-          </div>
-
-          {/* Item #2: Notificaciones */}
-          <div 
-            onClick={() => setActiveModal("notificaciones")}
-            className="flex items-center justify-between p-4.5 hover:bg-slate-50 transition cursor-pointer"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
-                <Bell className="w-5 h-5 stroke-[2]" />
-              </div>
-              <span className="text-sm font-bold text-slate-800">Notificaciones</span>
-            </div>
-            <ChevronRight className="w-4 h-4 text-slate-350" />
-          </div>
-
-          {/* Item #3: Idioma */}
-          <div 
-            onClick={() => setActiveModal("idioma")}
-            className="flex items-center justify-between p-4.5 hover:bg-slate-50 transition cursor-pointer"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
-                <Globe className="w-5 h-5 stroke-[2]" />
-              </div>
-              <span className="text-sm font-bold text-slate-800">Idioma</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-slate-400 font-bold">
-                {languageChoice === "es-MX" ? "Espanol (MX)" : languageChoice === "en-US" ? "English (US)" : "Portugues (BR)"}
-              </span>
-              <ChevronRight className="w-4 h-4 text-slate-350" />
-            </div>
-          </div>
-
-
-
-          {/* Item #4: Seguridad y Privacidad -> triggers editable Form! */}
-          <div 
-            onClick={() => setIsEditingFiscal(true)}
-            className="flex items-center justify-between p-4.5 hover:bg-slate-55 transition cursor-pointer"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-full bg-[#ebf1ff] flex items-center justify-center text-[#0B53F4]">
-                <Shield className="w-5 h-5 stroke-[2]" />
-              </div>
-              <div className="text-left leading-tight">
-                <span className="text-sm font-bold text-slate-800 block">Datos Fiscales (SAT)</span>
-                <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">Seguridad y timbrado CFDI v4.0</span>
-              </div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-[#0B53F4]" />
-          </div>
-        </div>
       </div>
 
       </div> {/* Close Right Column (lg:col-span-6) */}
