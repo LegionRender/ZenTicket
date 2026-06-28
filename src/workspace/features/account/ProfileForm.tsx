@@ -1241,30 +1241,6 @@ export default function ProfileForm({
   const renderCheckoutSection = () => {
     return (
       <div className="space-y-4">
-        {/* 3.1 Caja del Plan Seleccionado */}
-        <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 shadow-2xs relative text-left">
-          <div className="flex justify-between items-start mb-2">
-            <div>
-              <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">
-                PLAN SELECCIONADO
-              </span>
-              <h4 className="text-base font-black text-slate-800">
-                {getPlanLabel(checkoutPlanType || "gratuito")}
-              </h4>
-              <p className="text-[11px] text-slate-455 font-semibold mt-1 max-w-xs leading-relaxed">
-                {getPlanDescription(checkoutPlanType || "gratuito")}
-              </p>
-            </div>
-            <div className="text-right leading-none shrink-0">
-              <span className="text-lg font-black text-[#0B53F4]">
-                {getPlanPrice(checkoutPlanType || "gratuito")}
-              </span>
-              <span className="text-[9px] text-[#0B53F4] font-black block mt-1 uppercase tracking-wider">
-                MXN / mes
-              </span>
-            </div>
-          </div>
-        </div>
 
           <div className="flex items-center gap-2.5 p-3.5 bg-white rounded-2xl border border-slate-200/60 text-xs text-slate-700 leading-tight select-none mt-4 mb-2">
             <input
@@ -2785,6 +2761,29 @@ export default function ProfileForm({
                   </button>
                 </div>
 
+                {/* Botón flotante inferior para confirmar cambio de plan */}
+                <div className="pt-6 border-t border-slate-100 flex justify-end gap-3 select-none">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveModal(null);
+                    }}
+                    className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition cursor-pointer text-xs"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveModal(null);
+                      toast.success(`Plan seleccionado: ${getPlanLabel(checkoutPlanType || "gratuito")}. Completa el pago en tu cuenta para activarlo.`, "Plan Elegido");
+                    }}
+                    className="px-8 py-3.5 bg-[#0B53F4] hover:bg-[#0747D1] text-white font-black rounded-2xl transition shadow-md shadow-[#0B53F4]/10 cursor-pointer text-xs active:scale-[0.98]"
+                  >
+                    Cambiar Plan
+                  </button>
+                </div>
+
               </div>
             </div>
           )}
@@ -3449,6 +3448,32 @@ export default function ProfileForm({
         </div>
       </div>
 
+        {/* 3. MÉTODOS DE PAGO */}
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              Métodos de pago
+            </span>
+            {checkoutPlanType === null && (
+              <button 
+                type="button"
+                onClick={handleAddCardWithStripe}
+                disabled={isAddingCardStripe}
+                className="bg-[#ebf1ff] hover:bg-[#dee8ff] disabled:opacity-50 text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
+              >
+                {isAddingCardStripe ? "Iniciando..." : "+ Agregar otra tarjeta"}
+              </button>
+            )}
+          </div>
+
+          {checkoutPlanType !== null ? renderCheckoutSection() : renderNormalSection()}
+        </div>
+
+ {/* Close Left Column (lg:col-span-6) */}
+
+      {/* RIGHT COLUMN: PAYMENT METHODS & CONFIGURATION */}
+      <div className="lg:col-span-6 space-y-6">
+
       <div className="pt-2">
               {/* 4. CONFIGURACION Header & Options List with interactive components */}
               <div className="space-y-2.5">
@@ -3530,31 +3555,9 @@ export default function ProfileForm({
                   </div>
                 </div>
       </div>
-      </div> {/* Close Left Column (lg:col-span-6) */}
+      </div>
 
-      {/* RIGHT COLUMN: PAYMENT METHODS & CONFIGURATION */}
-      <div className="lg:col-span-6 space-y-6">
 
-        {/* 3. MÉTODOS DE PAGO */}
-        <div className="space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              Métodos de pago
-            </span>
-            {checkoutPlanType === null && (
-              <button 
-                type="button"
-                onClick={handleAddCardWithStripe}
-                disabled={isAddingCardStripe}
-                className="bg-[#ebf1ff] hover:bg-[#dee8ff] disabled:opacity-50 text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
-              >
-                {isAddingCardStripe ? "Iniciando..." : "+ Agregar otra tarjeta"}
-              </button>
-            )}
-          </div>
-
-          {checkoutPlanType !== null ? renderCheckoutSection() : renderNormalSection()}
-        </div>
 
 
       </div>
