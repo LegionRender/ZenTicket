@@ -2340,6 +2340,32 @@ app.post("/api/billing/webhooks/stripe", async (req: Request, res: Response) => 
   }
 
   try {
+    // Webhook additions for setup_intent, payment_method, and payment_intent sync
+    if (event.type === "setup_intent.succeeded" || event.type === "payment_method.attached" || event.type === "payment_method.detached") {
+      const stripeCustomerId = event.data?.object?.customer;
+      if (stripeCustomerId) {
+        await syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, adminDb);
+      }
+    }
+
+    if (event.type === "payment_intent.succeeded") {
+      const paymentIntentObj = event.data?.object;
+      const paymentIntentId = paymentIntentObj?.id;
+      if (paymentIntentId) {
+        const paymentQuery = await adminDb.collection("payments")
+          .where("providerPaymentId", "==", paymentIntentId)
+          .limit(1)
+          .get();
+        if (!paymentQuery.empty) {
+          await paymentQuery.docs[0].ref.set({
+            status: "paid",
+            paidAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
+      }
+    }
+
     // Record raw event in Firestore
     await adminDb.collection("billingEvents").add({
       provider: "stripe",
@@ -2490,6 +2516,310 @@ app.get("/api/billing/status/:userId", async (req: Request, res: Response) => {
 });
 
 // 7. Cancel Subscription
+
+async function syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, dbRef) {
+  if (!stripeCustomerId) return;
+  try {
+    const snapshot = await dbRef.collection("fiscalProfiles")
+      .where("stripeCustomerId", "==", stripeCustomerId)
+      .limit(1)
+      .get();
+      
+    if (snapshot.empty) {
+      console.log(`[Stripe Webhook] No user found with customer ID: ${stripeCustomerId}`);
+      return;
+    }
+    const docRef = snapshot.docs[0].ref;
+    
+    // Fetch default payment method from Customer
+    const customerRes = await axios.get(
+      `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+    const defaultPaymentMethodId = customerRes.data?.invoice_settings?.default_payment_method;
+
+    // Fetch all card methods
+    const pmRes = await axios.get(
+      `https://api.stripe.com/v1/payment_methods?customer=${stripeCustomerId}&type=card`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+
+    const paymentMethods = pmRes.data?.data || [];
+    const pms = paymentMethods.map(pm => {
+      const card = pm.card;
+      const formattedBrand = String(card.brand || "VISA").toUpperCase();
+      return {
+        id: pm.id,
+        brand: formattedBrand,
+        last4: card.last4,
+        expiry: `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`,
+        holderName: pm.billing_details?.name || "Titular",
+        bankName: formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand,
+        isDefault: pm.id === defaultPaymentMethodId,
+        stripePaymentMethodId: pm.id
+      };
+    });
+
+    if (pms.length > 0 && !defaultPaymentMethodId) {
+      pms[0].isDefault = true;
+      const fallbackId = pms[0].id;
+      try {
+        await axios.post(
+          `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
+          `invoice_settings[default_payment_method]=${fallbackId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${stripeSecretKey}`,
+              "Content-Type": "application/x-www-form-urlencoded"
+            }
+          }
+        );
+      } catch (err) {
+        console.warn("Could not set default in webhook fallback:", err.message);
+      }
+    }
+
+    await docRef.set({ paymentCards: pms }, { merge: true });
+    console.log(`[Stripe Webhook] Sincronizados ${pms.length} métodos de pago para el cliente ${stripeCustomerId}`);
+  } catch (error) {
+    console.error(`[Stripe Webhook] Error al sincronizar métodos de pago para ${stripeCustomerId}:`, error.message);
+  }
+}
+
+app.post("/api/billing/sync-customer", async (req: any, res: any) => {
+  const { userId, email, name } = req.body;
+  if (!userId || !email) {
+    res.status(400).json({ error: "Faltan parámetros userId o email" });
+    return;
+  }
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuración de Stripe incompleta" });
+    return;
+  }
+  try {
+    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
+    const profileSnapshot = await profileRef.get();
+    let stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+
+    if (!stripeCustomerId) {
+      // Search Stripe for customer by email
+      const searchRes = await axios.get(
+        `https://api.stripe.com/v1/customers?email=${encodeURIComponent(email)}`,
+        { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+      );
+      if (searchRes.data?.data && searchRes.data.data.length > 0) {
+        stripeCustomerId = searchRes.data.data[0].id;
+      } else {
+        // Create new customer
+        const customerParams = new URLSearchParams({
+          email: email,
+          name: name || "",
+          "metadata[userId]": userId
+        });
+        const customerResponse = await axios.post(
+          "https://api.stripe.com/v1/customers",
+          customerParams.toString(),
+          {
+            headers: {
+              Authorization: `Bearer ${stripeSecretKey}`,
+              "Content-Type": "application/x-www-form-urlencoded"
+            }
+          }
+        );
+        stripeCustomerId = customerResponse.data.id;
+      }
+      await profileRef.set({ stripeCustomerId, correoPago: email }, { merge: true });
+    }
+    res.json({ stripeCustomerId });
+  } catch (error) {
+    console.error("Error al sincronizar cliente en Stripe:", error.response?.data || error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/billing/payment-methods/:userId", async (req: any, res: any) => {
+  const { userId } = req.params;
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuración de Stripe incompleta" });
+    return;
+  }
+  try {
+    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
+    const profileSnapshot = await profileRef.get();
+    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    if (!stripeCustomerId) {
+      res.json([]);
+      return;
+    }
+
+    // Fetch customer to check default payment method
+    const customerRes = await axios.get(
+      `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+    let defaultPaymentMethodId = customerRes.data?.invoice_settings?.default_payment_method;
+
+    // Fetch payment methods from Stripe
+    const pmRes = await axios.get(
+      `https://api.stripe.com/v1/payment_methods?customer=${stripeCustomerId}&type=card`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+
+    const paymentMethods = pmRes.data?.data || [];
+    let pms = paymentMethods.map(pm => {
+      const card = pm.card;
+      const formattedBrand = String(card.brand || "VISA").toUpperCase();
+      return {
+        id: pm.id,
+        brand: formattedBrand,
+        last4: card.last4,
+        expiry: `${String(card.exp_month).padStart(2, "0")}/&nbsp;${String(card.exp_year).slice(-2)}`.replace('&nbsp;', ''),
+        holderName: pm.billing_details?.name || "Titular",
+        bankName: formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand,
+        isDefault: pm.id === defaultPaymentMethodId,
+        stripePaymentMethodId: pm.id
+      };
+    });
+
+    // If there is no default method set on Stripe but there are cards, set the first one as default
+    if (pms.length > 0 && !defaultPaymentMethodId) {
+      const fallbackDefaultId = pms[0].id;
+      pms[0].isDefault = true;
+      try {
+        await axios.post(
+          `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
+          `invoice_settings[default_payment_method]=${fallbackDefaultId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${stripeSecretKey}`,
+              "Content-Type": "application/x-www-form-urlencoded"
+            }
+          }
+        );
+      } catch (err) {
+        console.warn("Could not set fallback default payment method in Stripe:", err.message);
+      }
+    }
+
+    // Cache to Firestore fiscalProfile
+    await profileRef.set({ paymentCards: pms }, { merge: true });
+
+    res.json(pms);
+  } catch (error) {
+    console.error("Error al obtener métodos de pago de Stripe:", error.response?.data || error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/billing/payment-methods/set-default", async (req: any, res: any) => {
+  const { userId, paymentMethodId } = req.body;
+  if (!userId || !paymentMethodId) {
+    res.status(400).json({ error: "Faltan parámetros userId o paymentMethodId" });
+    return;
+  }
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuración de Stripe incompleta" });
+    return;
+  }
+  try {
+    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
+    const profileSnapshot = await profileRef.get();
+    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    if (!stripeCustomerId) {
+      res.status(400).json({ error: "El usuario no tiene un cliente de Stripe creado." });
+      return;
+    }
+
+    // Set default in Stripe
+    await axios.post(
+      `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
+      `invoice_settings[default_payment_method]=${paymentMethodId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${stripeSecretKey}`,
+          "Content-Type": "application/x-www-form-urlencoded"
+        }
+      }
+    );
+
+    // Sync Firestore cached paymentCards list
+    const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
+      ? profileSnapshot.data().paymentCards
+      : [];
+    const updatedCards = existingCards.map(c => ({
+      ...c,
+      isDefault: c.id === paymentMethodId
+    }));
+    await profileRef.set({ paymentCards: updatedCards }, { merge: true });
+
+    res.json({ success: true, paymentCards: updatedCards });
+  } catch (error) {
+    console.error("Error al establecer tarjeta predeterminada en Stripe:", error.response?.data || error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/billing/payment-methods/delete", async (req: any, res: any) => {
+  const { userId, paymentMethodId } = req.body;
+  if (!userId || !paymentMethodId) {
+    res.status(400).json({ error: "Faltan parámetros userId o paymentMethodId" });
+    return;
+  }
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuración de Stripe incompleta" });
+    return;
+  }
+  try {
+    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
+    const profileSnapshot = await profileRef.get();
+    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+
+    // Detach from Stripe
+    await axios.post(
+      `https://api.stripe.com/v1/payment_methods/${paymentMethodId}/detach`,
+      "",
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+
+    // Retrieve active list to recalculate default card if deleted was default
+    const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
+      ? profileSnapshot.data().paymentCards
+      : [];
+    const deletedCard = existingCards.find(c => c.id === paymentMethodId);
+    let updatedCards = existingCards.filter(c => c.id !== paymentMethodId);
+
+    if (deletedCard?.isDefault && updatedCards.length > 0 && stripeCustomerId) {
+      // Set the first remaining as new default
+      const newDefaultId = updatedCards[0].id;
+      updatedCards[0].isDefault = true;
+      try {
+        await axios.post(
+          `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
+          `invoice_settings[default_payment_method]=&nbsp;${newDefaultId}`.replace('&nbsp;', ''),
+          {
+            headers: {
+              Authorization: `Bearer ${stripeSecretKey}`,
+              "Content-Type": "application/x-www-form-urlencoded"
+            }
+          }
+        );
+      } catch (err) {
+        console.warn("Could not set new default payment method in Stripe during delete:", err.message);
+      }
+    }
+
+    await profileRef.set({ paymentCards: updatedCards }, { merge: true });
+    res.json({ success: true, paymentCards: updatedCards });
+  } catch (error) {
+    console.error("Error al eliminar tarjeta en Stripe:", error.response?.data || error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post("/api/billing/cancel-subscription", async (req: Request, res: Response) => {
   const { userId } = req.body;
   if (!userId) {

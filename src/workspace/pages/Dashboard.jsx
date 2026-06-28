@@ -38,6 +38,7 @@ import VaultScreen from "@/workspace/features/expenses/VaultScreen";
 import ProfileForm from "@/workspace/features/account/ProfileForm";
 import AdminScreen from "@/admin/pages/AdminScreen";
 import Logo from "@/shared/brand/Logo";
+import { getApiUrl } from "@/services/api/api-client";
 import { ZenLogo } from "@/shared/brand/ZenLogo";
 import { OnboardingFlow } from "@/auth/components/OnboardingFlow";
 
@@ -796,6 +797,25 @@ export const Dashboard = () => {
 
   useEffect(() => {
     if (user) {
+      // Sync/Create Stripe Customer
+      const syncStripeCustomer = async () => {
+        try {
+          await fetch(getApiUrl("/api/billing/sync-customer"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              userId: user.uid,
+              email: user.email || "",
+              name: user.displayName || ""
+            })
+          });
+        } catch (err) {
+          console.warn("Could not sync Stripe customer details on login:", err);
+        }
+      };
+      syncStripeCustomer();
       recoverUserHistoryByMatchingDetails(user.email, null, null);
     }
   }, [user]);

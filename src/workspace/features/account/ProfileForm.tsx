@@ -526,6 +526,55 @@ export default function ProfileForm({
     }
   }, [initialProfile?.paymentCards]);
 
+  const [isAddingCardStripe, setIsAddingCardStripe] = useState(false);
+
+  const handleAddCardWithStripe = async () => {
+    setIsAddingCardStripe(true);
+    const toastId = toast.loading("Iniciando conexión segura con Stripe...");
+    try {
+      const payerEmail = correoPago || correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail;
+      const response = await fetch(getApiUrl("/api/billing/setup/stripe"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: initialProfile?.userId || auth.currentUser?.uid,
+          payerEmail,
+          holderName: "Tarjeta Stripe",
+          bankName: "Stripe Wallet"
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.checkoutUrl) {
+        throw new Error(data.error || "Stripe no devolvió una sesión de registro.");
+      }
+      toast.dismiss(toastId);
+      openOfficialCheckoutPopup(data.checkoutUrl, "Stripe");
+    } catch (error: any) {
+      toast.dismiss(toastId);
+      toast.error(error.message || "No se pudo iniciar el registro con Stripe.");
+    } finally {
+      setIsAddingCardStripe(false);
+    }
+  };
+
+  React.useEffect(() => {
+    const fetchPaymentMethods = async () => {
+      const userId = initialProfile?.userId || auth.currentUser?.uid;
+      if (!userId) return;
+      try {
+        const response = await fetch(getApiUrl(`/api/billing/payment-methods/${userId}`));
+        if (response.ok) {
+          const data = await response.json();
+          setCards(data);
+        }
+      } catch (err) {
+        console.warn("Could not load Stripe payment methods:", err);
+      }
+    };
+    fetchPaymentMethods();
+  }, [initialProfile?.userId, isAddingCardStripe]);
+
+
   // Synchronize custom display names from the saved profile only; do not fabricate fiscal or payment data.
   React.useEffect(() => {
     const userEmail = currentUserEmail || auth.currentUser?.email;
@@ -1397,21 +1446,13 @@ export default function ProfileForm({
         ))}
         <button
           type="button"
-          onClick={() => {
-            const nextState = !addingCard;
-            setAddingCard(nextState);
-            if (nextState) setAddingMethodStep("select");
-          }}
-          aria-expanded={addingCard}
-          className={`w-full text-xs font-bold py-3 rounded-xl transition cursor-pointer ${
-            addingCard
-              ? "bg-slate-100 hover:bg-slate-200 text-slate-700"
-              : "bg-[#0B53F4] hover:bg-[#0747D1] text-white"
-          }`}
+          onClick={handleAddCardWithStripe}
+          disabled={isAddingCardStripe}
+          className="w-full text-xs font-bold py-3 rounded-xl transition cursor-pointer bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-50 text-white"
         >
-          {addingCard ? "Cancelar registro" : "Agregar otra tarjeta"}
+          {isAddingCardStripe ? "Cargando Stripe..." : "Agregar otra tarjeta"}
         </button>
-        {addingCard && renderAddingCardForm()}
+
       </div>
     );
   };
@@ -1434,27 +1475,24 @@ export default function ProfileForm({
                   <button
                     type="button"
                     onClick={async () => {
-                      const updated = cards.map(c => ({
-                        ...c,
-                        isDefault: c.id === card.id
-                      }));
-                      setCards(updated);
                       try {
-                        await onSave({
-                          userId: initialProfile?.userId || "guest",
-                          rfc: rfc || initialProfile?.rfc || "",
-                          razonSocial: razonSocial || initialProfile?.razonSocial || "",
-                          regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                          codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
-                          usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                          createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                          personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                          plan: initialProfile?.plan || "gratuito",
-                          paymentCards: updated
+                        const res = await fetch(getApiUrl("/api/billing/payment-methods/set-default"), {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            userId: initialProfile?.userId || auth.currentUser?.uid || "guest",
+                            paymentMethodId: card.id
+                          })
                         });
-                        toast.success("Se ha cambiado tu tarjeta predeterminada.", "Tarjeta Actualizada");
+                        if (res.ok) {
+                          const data = await res.json();
+                          setCards(data.paymentCards);
+                          toast.success("Se ha cambiado tu tarjeta predeterminada.", "Tarjeta Actualizada");
+                        } else {
+                          throw new Error("API error");
+                        }
                       } catch (err) {
-                        toast.error("Ocurrió un error al persistir la tarjeta predeterminada.");
+                        toast.error("Ocurrió un error al predeterminar tu tarjeta.");
                       }
                     }}
                     className="flex items-center gap-3.5 flex-1 text-left cursor-pointer hover:opacity-85 transition bg-transparent border-none outline-none p-0 mr-4"
@@ -1480,25 +1518,22 @@ export default function ProfileForm({
                       <button
                         type="button"
                         onClick={async () => {
-                          const updated = cards.map(c => ({
-                            ...c,
-                            isDefault: c.id === card.id
-                          }));
-                          setCards(updated);
                           try {
-                            await onSave({
-                              userId: initialProfile?.userId || "guest",
-                              rfc: rfc || initialProfile?.rfc || "",
-                              razonSocial: razonSocial || initialProfile?.razonSocial || "",
-                              regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                              codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
-                              usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                              createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                              personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                              plan: initialProfile?.plan || "gratuito",
-                              paymentCards: updated
+                            const res = await fetch(getApiUrl("/api/billing/payment-methods/set-default"), {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                userId: initialProfile?.userId || auth.currentUser?.uid || "guest",
+                                paymentMethodId: card.id
+                              })
                             });
-                            toast.success("Se ha cambiado tu tarjeta predeterminada.", "Tarjeta Actualizada");
+                            if (res.ok) {
+                              const data = await res.json();
+                              setCards(data.paymentCards);
+                              toast.success("Se ha cambiado tu tarjeta predeterminada.", "Tarjeta Actualizada");
+                            } else {
+                              throw new Error("API error");
+                            }
                           } catch (err) {
                             toast.error("Ocurrió un error al predeterminar tu tarjeta.");
                           }
@@ -1513,25 +1548,22 @@ export default function ProfileForm({
                     <button 
                       type="button"
                       onClick={async () => {
-                        const updated = cards.filter(c => c.id !== card.id);
-                        if (card.isDefault && updated.length > 0) {
-                          updated[0].isDefault = true;
-                        }
-                        setCards(updated);
                         try {
-                          await onSave({
-                            userId: initialProfile?.userId || "guest",
-                            rfc: rfc || initialProfile?.rfc || "",
-                            razonSocial: razonSocial || initialProfile?.razonSocial || "",
-                            regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "626",
-                            codigoPostal: codigoPostal || initialProfile?.codigoPostal || "",
-                            usoCFDI: usoCFDI || initialProfile?.usoCFDI || "G03",
-                            createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                            personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
-                            plan: initialProfile?.plan || "gratuito",
-                            paymentCards: updated
+                          const res = await fetch(getApiUrl("/api/billing/payment-methods/delete"), {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              userId: initialProfile?.userId || auth.currentUser?.uid || "guest",
+                              paymentMethodId: card.id
+                            })
                           });
-                          toast.success("Método de pago eliminado con éxito.", "Tarjeta Eliminada");
+                          if (res.ok) {
+                            const data = await res.json();
+                            setCards(data.paymentCards);
+                            toast.success("Método de pago eliminado con éxito.", "Tarjeta Eliminada");
+                          } else {
+                            throw new Error("API error");
+                          }
                         } catch (err) {
                           toast.error("Ocurrió un error al eliminar tu tarjeta.");
                         }
@@ -3512,16 +3544,11 @@ export default function ProfileForm({
             {checkoutPlanType === null && (
               <button 
                 type="button"
-                onClick={() => {
-                  const nextState = !addingCard;
-                  setAddingCard(nextState);
-                  if (nextState) {
-                    setAddingMethodStep("card");
-                  }
-                }}
-                className="bg-[#ebf1ff] hover:bg-[#dee8ff] text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
+                onClick={handleAddCardWithStripe}
+                disabled={isAddingCardStripe}
+                className="bg-[#ebf1ff] hover:bg-[#dee8ff] disabled:opacity-50 text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
               >
-                {addingCard ? "Cancelar" : "+ Agregar otra tarjeta"}
+                {isAddingCardStripe ? "Iniciando..." : "+ Agregar otra tarjeta"}
               </button>
             )}
           </div>
