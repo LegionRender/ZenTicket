@@ -1211,8 +1211,6 @@ export default function ProfileForm({
   const renderCheckoutSection = () => {
     return (
       <div className="space-y-4">
-        {addingCard && renderAddingCardForm()}
-
         {/* 3.1 Caja del Plan Seleccionado */}
         <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 shadow-2xs relative text-left">
           <div className="flex justify-between items-start mb-2">
@@ -1405,7 +1403,7 @@ export default function ProfileForm({
   const renderAccordionPaymentMethods = () => {
     return (
       <div className="space-y-3">
-        {cards.filter((card) => card.id !== selectedCardForPlan).map((card) => (
+        {!addingCard && cards.filter((card) => card.id !== selectedCardForPlan).map((card) => (
           <button
             key={card.id}
             type="button"
@@ -1429,13 +1427,20 @@ export default function ProfileForm({
         <button
           type="button"
           onClick={() => {
-            setAddingCard(true);
-            setAddingMethodStep("card");
+            const nextState = !addingCard;
+            setAddingCard(nextState);
+            if (nextState) setAddingMethodStep("card");
           }}
-          className="w-full bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-bold py-3 rounded-xl transition"
+          aria-expanded={addingCard}
+          className={`w-full text-xs font-bold py-3 rounded-xl transition ${
+            addingCard
+              ? "bg-slate-100 hover:bg-slate-200 text-slate-700"
+              : "bg-[#0B53F4] hover:bg-[#0747D1] text-white"
+          }`}
         >
-          Agregar otra tarjeta
+          {addingCard ? "Cancelar registro" : "Agregar otra tarjeta"}
         </button>
+        {addingCard && renderAddingCardForm()}
       </div>
     );
   };
