@@ -482,7 +482,10 @@ export default function ProfileForm({
   const [cards, setCards] = useState<PaymentCard[]>(() => {
     if (initialProfile?.paymentCards && initialProfile.paymentCards.length > 0) {
       const filtered = initialProfile.paymentCards.filter(
-        (card) => card.last4 !== "Cuenta Vinculada" && (card.brand === "VISA" || card.brand === "MASTERCARD")
+        (card) =>
+          card.last4 !== "Cuenta Vinculada" &&
+          (card.brand === "VISA" || card.brand === "MASTERCARD") &&
+          (card.stripePaymentMethodId?.startsWith("pm_") || card.id?.startsWith("pm_"))
       );
       const unique: PaymentCard[] = [];
       const seen = new Set<string>();
@@ -502,7 +505,10 @@ export default function ProfileForm({
   React.useEffect(() => {
     if (initialProfile?.paymentCards) {
       const filtered = initialProfile.paymentCards.filter(
-        (card) => card.last4 !== "Cuenta Vinculada" && (card.brand === "VISA" || card.brand === "MASTERCARD")
+        (card) =>
+          card.last4 !== "Cuenta Vinculada" &&
+          (card.brand === "VISA" || card.brand === "MASTERCARD") &&
+          (card.stripePaymentMethodId?.startsWith("pm_") || card.id?.startsWith("pm_"))
       );
       const unique: PaymentCard[] = [];
       const seen = new Set<string>();
@@ -716,13 +722,14 @@ export default function ProfileForm({
     const params = new URLSearchParams(window.location.search);
     const status = params.get("status");
     const plan = params.get("plan");
+    const sessionId = params.get("session_id");
     if (window.opener && status === "card_setup_success") {
       window.opener.postMessage({ type: "stripe_card_setup_success" }, "*");
       window.close();
       return;
     }
     if (window.opener && status === "success") {
-      window.opener.postMessage({ type: "stripe_payment_success", plan }, "*");
+      window.opener.postMessage({ type: "stripe_payment_success", plan, sessionId }, "*");
       window.close();
     }
   }, []);
@@ -736,39 +743,29 @@ export default function ProfileForm({
         return;
       }
       if (event.data?.type === "stripe_payment_success" || event.data?.type === "wallet_payment_success") {
-        const { plan, wallet } = event.data;
-        const targetPlan = plan || checkoutPlanType || "brisa";
-        const targetWallet = wallet || localStorage.getItem("pendingCheckoutWallet") || "Stripe";
-        const cost = targetPlan === "brisa" ? 2 : 
-                     targetPlan === "serenidad" ? 250 : 
-                     targetPlan === "nirvana" ? 500 : 0;
+        const { sessionId } = event.data;
         
         setIsProcessingPayment(true);
         try {
-          await onSave({
-            userId: initialProfile?.userId || "guest",
-            rfc: rfc || "CABE850101ABC",
-            razonSocial: razonSocial.trim().toUpperCase(),
-            regimenFiscal,
-            codigoPostal,
-            usoCFDI,
-            createdAt: initialProfile?.createdAt || new Date().toISOString(),
-            personalGeminiKey: personalGeminiKey || "",
-            plan: targetPlan,
-            planStartDate: new Date().toISOString(),
-            autoRenew: autoRenewChoice,
-            paymentCards: cards,
-            correoElectronico: correoElectronico || sessionEmail,
-            correoRecepcion: correoRecepcion || sessionEmail,
-            correoPago: correoPago || sessionEmail
+          const response = await fetch(getApiUrl("/api/billing/checkout/stripe/confirm"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId,
+              userId: initialProfile?.userId || auth.currentUser?.uid
+            })
           });
-          
+          const confirmation = await response.json().catch(() => ({}));
+          if (!response.ok || !confirmation.success) {
+            throw new Error(confirmation.error || "Stripe todavía no confirma el pago.");
+          }
           toast.success(
-            `Suscripción al Plan ${targetPlan.toUpperCase()} activada con éxito. Se cobró $${cost} MXN a través de ${targetWallet}.`,
-            "Plan activado"
+            `Pago confirmado. ${confirmation.planName} ya está activo con ${confirmation.invoicesLimit} facturas disponibles.`,
+            "Pago exitoso"
           );
+          window.setTimeout(() => window.location.reload(), 1400);
         } catch (err) {
-          toast.error("Error al actualizar la suscripción.");
+          toast.error(err instanceof Error ? err.message : "No se pudo confirmar el pago.");
         } finally {
           setIsProcessingPayment(false);
           localStorage.removeItem("pendingCheckoutWallet");
@@ -778,7 +775,7 @@ export default function ProfileForm({
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [onSave, initialProfile, rfc, razonSocial, regimenFiscal, codigoPostal, usoCFDI, personalGeminiKey, autoRenewChoice, cards, checkoutPlanType]);
+  }, [initialProfile?.userId]);
 
   // States for active dialog/modal settings
   const [activeModal, setActiveModal] = useState<"apariencia" | "notificaciones" | "idioma" | "faq" | "tutorial" | "soporte" | "plan" | null>(null);
@@ -802,7 +799,7 @@ export default function ProfileForm({
     return "Plan Gratuito";
   };
   const getPlanPrice = (plan?: string) => {
-    if (plan === "brisa") return "$2";
+    if (plan === "brisa") return "$5";
     if (plan === "serenidad") return "$250";
     if (plan === "nirvana") return "$500";
     if (plan === "personal") return "$150";
@@ -1235,7 +1232,7 @@ export default function ProfileForm({
             </div>
             <div className="text-right leading-none shrink-0">
               <span className="text-lg font-black text-[#0B53F4]">
-                {checkoutPlanType === "brisa" ? "$2" : 
+                {checkoutPlanType === "brisa" ? "$5" :
                  checkoutPlanType === "serenidad" ? "$250" : 
                  checkoutPlanType === "nirvana" ? "$500" : "$0"}
               </span>
@@ -2508,7 +2505,7 @@ export default function ProfileForm({
                       <p className="text-[11px] text-slate-455 dark:text-slate-400 font-semibold mt-0.5">Para personas con consumos bajos.</p>
                     </div>
                     <div className="text-right leading-none">
-                      <span className={`text-base font-extrabold ${selectedPlan === "brisa" ? "text-[#0B53F4]" : "text-slate-900 dark:text-white"}`}>$2</span>
+                      <span className={`text-base font-extrabold ${selectedPlan === "brisa" ? "text-[#0B53F4]" : "text-slate-900 dark:text-white"}`}>$5</span>
                       <span className={`text-[9px] font-black block mt-1 uppercase tracking-wider ${selectedPlan === "brisa" ? "text-[#0B53F4]" : "text-slate-400"}`}>MXN/mes</span>
                     </div>
                   </div>

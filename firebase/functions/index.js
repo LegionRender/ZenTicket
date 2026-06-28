@@ -1043,8 +1043,8 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
   let price = 0;
   let title = "";
   if (planId === "brisa") {
-    price = 15.00;
-    title = "Plan Brisa (Prueba Stripe Mínima $15) - ZenTicket";
+    price = 5.00;
+    title = "Plan Brisa - ZenTicket";
   } else if (planId === "serenidad") {
     price = 250.00;
     title = "Plan Serenidad - ZenTicket";
@@ -1077,12 +1077,16 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
       "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
       "line_items[0][quantity]": "1",
       "mode": autoRenew ? "subscription" : "payment",
-      "success_url": process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
+      "success_url": process.env.BILLING_SUCCESS_URL
+        ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}&session_id={CHECKOUT_SESSION_ID}`
+        : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}&session_id={CHECKOUT_SESSION_ID}`,
       "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
       "client_reference_id": `${userId}:${planId}`
     });
     if (autoRenew) {
       stripeParams.append("line_items[0][price_data][recurring][interval]", "month");
+      stripeParams.append("subscription_data[metadata][userId]", userId);
+      stripeParams.append("subscription_data[metadata][planId]", planId);
     }
     const profileSnapshot = await db.collection("fiscalProfiles").doc(userId).get();
     const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
@@ -1131,6 +1135,118 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
         ? "La clave secreta de Stripe configurada en Firebase no es válida o fue revocada."
         : stripeError?.message || "Error al comunicarse con Stripe"
     });
+  }
+});
+
+app.post("/api/billing/checkout/stripe/confirm", async (req, res) => {
+  const { sessionId, userId } = req.body;
+  if (!sessionId || !userId) {
+    res.status(400).json({ error: "Faltan sessionId o userId" });
+    return;
+  }
+  const stripeSecretKey = secretOrEnv(stripeSecretKeyParam, "STRIPE_SECRET_KEY");
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuración de Stripe incompleta" });
+    return;
+  }
+
+  try {
+    const response = await axios.get(
+      `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription.default_payment_method&expand[]=payment_intent.payment_method`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+    const session = response.data;
+    const [sessionUserId, planId] = String(session.client_reference_id || "").split(":");
+    if (sessionUserId !== userId || !planId) {
+      res.status(403).json({ error: "La sesión de Stripe no pertenece a este usuario." });
+      return;
+    }
+    if (session.status !== "complete" || session.payment_status !== "paid") {
+      res.status(409).json({ error: "Stripe todavía no confirma el pago." });
+      return;
+    }
+
+    const limits = { brisa: 10, serenidad: 30, nirvana: 100, personal: 20, empresa: 60 };
+    const invoicesLimit = limits[planId] || 5;
+    const planName = planId === "personal"
+      ? "Plan Personal"
+      : planId === "empresa"
+        ? "Plan Empresa"
+        : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`;
+    const isSubscription = session.mode === "subscription";
+    const stripeSubscriptionId = typeof session.subscription === "string"
+      ? session.subscription
+      : session.subscription?.id;
+    const paymentMethod = session.subscription?.default_payment_method ||
+      session.payment_intent?.payment_method;
+    const nowIso = new Date().toISOString();
+    const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    await db.collection("payments").doc(`stripe_payment_${session.id}`).set({
+      userId,
+      planId,
+      provider: "stripe",
+      providerPaymentId: session.id,
+      amount: session.amount_total ? session.amount_total / 100 : 0,
+      currency: session.currency?.toUpperCase() || "MXN",
+      status: "paid",
+      paidAt: nowIso,
+      updatedAt: nowIso
+    }, { merge: true });
+
+    await db.collection("subscriptions").doc(userId).set({
+      userId,
+      planId,
+      planName,
+      status: isSubscription ? "subscription_active" : "paid",
+      provider: "stripe",
+      providerSubscriptionId: stripeSubscriptionId || session.id,
+      stripeCustomerId: session.customer || null,
+      currentPeriodStart: nowIso,
+      currentPeriodEnd: periodEnd,
+      invoicesLimit,
+      invoicesUsed: 0,
+      updatedAt: nowIso
+    }, { merge: true });
+
+    await db.collection("fiscalProfiles").doc(userId).set({
+      plan: planId,
+      planStartDate: nowIso,
+      paymentStatus: isSubscription ? "subscription_active" : "paid",
+      autoRenew: isSubscription,
+      stripeCustomerId: session.customer || null,
+      invoicesLimit
+    }, { merge: true });
+
+    if (paymentMethod?.id && paymentMethod.card) {
+      const profileRef = db.collection("fiscalProfiles").doc(userId);
+      const profileSnapshot = await profileRef.get();
+      const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
+        ? profileSnapshot.data().paymentCards
+        : [];
+      const stripeCard = {
+        id: paymentMethod.id,
+        stripePaymentMethodId: paymentMethod.id,
+        brand: paymentMethod.card.brand === "mastercard" ? "MASTERCARD" : "VISA",
+        last4: paymentMethod.card.last4,
+        expiry: `${String(paymentMethod.card.exp_month).padStart(2, "0")}/${String(paymentMethod.card.exp_year).slice(-2)}`,
+        holderName: paymentMethod.billing_details?.name || session.customer_details?.name || "Titular",
+        bankName: paymentMethod.card.brand === "mastercard" ? "Mastercard" : "Tarjeta Visa",
+        isDefault: true
+      };
+      const paymentCards = [
+        stripeCard,
+        ...existingCards
+          .filter((card) => card.id !== paymentMethod.id)
+          .map((card) => ({ ...card, isDefault: false }))
+      ];
+      await profileRef.set({ paymentCards }, { merge: true });
+    }
+
+    res.json({ success: true, planId, planName, invoicesLimit });
+  } catch (error) {
+    console.error("Error al confirmar pago de Stripe:", error.response?.data || error.message);
+    res.status(500).json({ error: error.response?.data?.error?.message || "No se pudo confirmar el pago con Stripe." });
   }
 });
 
@@ -1401,6 +1517,65 @@ app.post("/api/billing/webhooks/stripe", async (req, res) => {
       receivedAt: new Date().toISOString()
     });
 
+    if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
+      const invoice = event.data?.object;
+      const subscriptionId = invoice?.subscription ||
+        invoice?.parent?.subscription_details?.subscription;
+      if (subscriptionId) {
+        const subscriptionResponse = await axios.get(
+          `https://api.stripe.com/v1/subscriptions/${subscriptionId}`,
+          { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+        );
+        const stripeSubscription = subscriptionResponse.data;
+        const userId = stripeSubscription.metadata?.userId;
+        const planId = stripeSubscription.metadata?.planId;
+        if (userId && planId) {
+          const isPaid = event.type === "invoice.paid";
+          const periodStart = stripeSubscription.current_period_start ||
+            stripeSubscription.items?.data?.[0]?.current_period_start;
+          const periodEnd = stripeSubscription.current_period_end ||
+            stripeSubscription.items?.data?.[0]?.current_period_end;
+          await db.collection("subscriptions").doc(userId).set({
+            status: isPaid ? "subscription_active" : "requires_payment_method",
+            providerSubscriptionId: subscriptionId,
+            currentPeriodStart: periodStart
+              ? new Date(periodStart * 1000).toISOString()
+              : new Date().toISOString(),
+            currentPeriodEnd: periodEnd
+              ? new Date(periodEnd * 1000).toISOString()
+              : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            invoicesUsed: isPaid ? 0 : admin.firestore.FieldValue.delete(),
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+          await db.collection("fiscalProfiles").doc(userId).set({
+            plan: planId,
+            paymentStatus: isPaid ? "subscription_active" : "requires_payment_method",
+            autoRenew: true
+          }, { merge: true });
+        }
+      }
+      res.status(200).send("OK");
+      return;
+    }
+
+    if (event.type === "customer.subscription.deleted") {
+      const stripeSubscription = event.data?.object;
+      const userId = stripeSubscription?.metadata?.userId;
+      if (userId) {
+        await db.collection("subscriptions").doc(userId).set({
+          status: "subscription_cancelled",
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        await db.collection("fiscalProfiles").doc(userId).set({
+          plan: "gratuito",
+          paymentStatus: "subscription_cancelled",
+          autoRenew: false
+        }, { merge: true });
+      }
+      res.status(200).send("OK");
+      return;
+    }
+
     if (event.type === "checkout.session.completed") {
       const sessionObj = event.data?.object;
       if (sessionObj && sessionObj.id) {
@@ -1458,6 +1633,7 @@ app.post("/api/billing/webhooks/stripe", async (req, res) => {
         if (paymentStatus === "paid" && externalReference) {
           const [userId, planId] = externalReference.split(":");
           const amount = session.amount_total ? session.amount_total / 100 : 0;
+          const isSubscription = session.mode === "subscription";
 
           const paymentDocId = `stripe_payment_${session.id}`;
           await db.collection("payments").doc(paymentDocId).set({
@@ -1485,9 +1661,10 @@ app.post("/api/billing/webhooks/stripe", async (req, res) => {
             userId,
             planId,
             planName: planId === "personal" ? "Plan Personal" : planId === "empresa" ? "Plan Empresa" : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
-            status: "subscription_active",
+            status: isSubscription ? "subscription_active" : "paid",
             provider: "stripe",
-            providerSubscriptionId: session.id,
+            providerSubscriptionId: session.subscription || session.id,
+            stripeCustomerId: session.customer || null,
             currentPeriodStart: new Date().toISOString(),
             currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
             invoicesLimit: limit,
@@ -1499,8 +1676,10 @@ app.post("/api/billing/webhooks/stripe", async (req, res) => {
           await db.collection("fiscalProfiles").doc(userId).set({
             plan: planId,
             planStartDate: new Date().toISOString(),
-            paymentStatus: "paid",
-            autoRenew: true
+            paymentStatus: isSubscription ? "subscription_active" : "paid",
+            autoRenew: isSubscription,
+            stripeCustomerId: session.customer || null,
+            invoicesLimit: limit
           }, { merge: true });
         }
       }

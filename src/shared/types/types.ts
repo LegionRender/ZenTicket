@@ -6,6 +6,7 @@ export interface PaymentCard {
   isDefault: boolean;
   holderName: string;
   bankName?: string;
+  stripePaymentMethodId?: string;
   isGooglePaySynced?: boolean;
 }
 
