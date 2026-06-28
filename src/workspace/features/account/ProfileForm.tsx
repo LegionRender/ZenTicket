@@ -844,12 +844,12 @@ export default function ProfileForm({
     return (
       <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 mb-4 animate-fade-in text-left space-y-4">
         
-        {false && addingMethodStep === "select" && (
+        {addingMethodStep === "select" && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-xs font-black text-slate-850 uppercase tracking-wide block">Seleccionar Método de Pago</span>
-                <span className="text-[9px] text-slate-450 font-bold block mt-0.5">Elige cómo deseas pagar tus planes</span>
+                <span className="text-xs font-black text-slate-850 uppercase tracking-wide block">Seleccionar Método de Registro</span>
+                <span className="text-[9px] text-slate-450 font-bold block mt-0.5">Elige cómo deseas dar de alta tu tarjeta</span>
               </div>
               <button 
                 onClick={() => {
@@ -862,94 +862,58 @@ export default function ProfileForm({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-3">
-              {/* Tarjeta Bancaria */}
+            <div className="grid grid-cols-1 gap-3 text-left">
+              {/* Opción 1: Stripe Checkout (Google Pay, Link y Tarjeta Real) */}
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedCardForPlan("stripe_wallet");
-                  setAddingCard(false);
+                onClick={async () => {
+                  try {
+                    const payerEmail = correoPago || correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail;
+                    const response = await fetch(getApiUrl("/api/billing/setup/stripe"), {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        userId: initialProfile?.userId || auth.currentUser?.uid,
+                        payerEmail,
+                        holderName: "Tarjeta Stripe",
+                        bankName: "Stripe Wallet"
+                      })
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok || !data.checkoutUrl) {
+                      throw new Error(data.error || "Stripe no devolvió una sesión de registro.");
+                    }
+                    openOfficialCheckoutPopup(data.checkoutUrl, "Stripe");
+                    setAddingCard(false);
+                  } catch (error: any) {
+                    toast.error(error.message || "No se pudo iniciar el registro con Stripe.");
+                  }
                 }}
                 className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#0B53F4] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
               >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 text-[#0B53F4] flex items-center justify-center transition shrink-0">
-                  <CreditCard className="w-6 h-6" />
-                </div>
-                <div>
-                  <span className="text-sm font-black text-slate-850 block">Tarjeta Bancaria</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">Crédito o débito por Stripe Checkout</span>
-                </div>
-              </button>
-
-              {/* Stripe Checkout */}
-              <button
-                type="button"
-                onClick={() => {
-                  setAddingCard(false);
-                  handleDigitalWalletPayment("Stripe");
-                }}
-                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#635BFF] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-              >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center transition shrink-0 p-2 shadow-3xs">
+                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
                   <img src={stripeLogo} className="w-full h-full object-contain" alt="Stripe" />
                 </div>
                 <div>
-                  <span className="text-sm font-black text-slate-850 block">Stripe Checkout</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">Pago seguro con tarjeta</span>
+                  <span className="text-sm font-black text-slate-850 block">Tarjeta / Google Pay / Stripe Link</span>
+                  <span className="text-xs text-slate-400 font-semibold block mt-1">Registra tu tarjeta real o vincula con Google Pay de forma rápida y segura</span>
                 </div>
               </button>
 
-              {/* Mercado Pago */}
+              {/* Opción 2: Formulario Local Manual */}
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedCardForPlan("mercadopago_wallet");
-                  setAddingCard(false);
+                  setAddingMethodStep("card");
                 }}
-                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#00A6EA] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
+                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-slate-400 hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
               >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                  <img src={mercadoPagoLogo} className="w-full h-full object-contain" alt="Mercado Pago" />
+                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 text-slate-500 flex items-center justify-center transition shrink-0">
+                  <CreditCard className="w-6 h-6" />
                 </div>
                 <div>
-                  <span className="text-sm font-black text-slate-850 block">Mercado Pago</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">Tu cuenta digital</span>
-                </div>
-              </button>
-
-              {/* Google Pay */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedCardForPlan("googlepay_wallet");
-                  setAddingCard(false);
-                }}
-                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#202124] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-              >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                  <img src={googlePayLogo} className="w-full h-full object-contain" alt="Google Pay" />
-                </div>
-                <div>
-                  <span className="text-sm font-black text-slate-850 block">Google Pay</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">Disponible dentro de Stripe Checkout</span>
-                </div>
-              </button>
-
-              {/* PayPal */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedCardForPlan("paypal_wallet");
-                  setAddingCard(false);
-                }}
-                className="flex items-center gap-4.5 p-4.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 hover:border-[#003087] hover:shadow-xs rounded-2xl transition text-left cursor-pointer group"
-              >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                  <img src={paypalLogo} className="w-full h-full object-contain" alt="PayPal" />
-                </div>
-                <div>
-                  <span className="text-sm font-black text-slate-850 block">PayPal</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">Pago seguro con PayPal</span>
+                  <span className="text-sm font-black text-slate-850 block">Formulario Manual Local</span>
+                  <span className="text-xs text-slate-400 font-semibold block mt-1">Escribe los datos de la tarjeta en esta página</span>
                 </div>
               </button>
             </div>
@@ -1440,7 +1404,7 @@ export default function ProfileForm({
           onClick={() => {
             const nextState = !addingCard;
             setAddingCard(nextState);
-            if (nextState) setAddingMethodStep("card");
+            if (nextState) setAddingMethodStep("select");
           }}
           aria-expanded={addingCard}
           className={`w-full text-xs font-bold py-3 rounded-xl transition cursor-pointer ${
