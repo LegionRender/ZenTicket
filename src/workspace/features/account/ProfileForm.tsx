@@ -221,11 +221,16 @@ export default function ProfileForm({
     const sizeClasses = size === "sm" ? "w-12 h-12 text-[10px]" : "w-14 h-14 text-[12px]" ;
     
     if (logoSrc) {
+      const isVisa = card.brand === "VISA";
+      const isMastercard = card.brand === "MASTERCARD";
       return (
-        <div style={{ backgroundColor: '#ffffff' }} className={`${sizeClasses} rounded-xl p-1.5 border border-slate-200 shadow-3xs flex items-center justify-center shrink-0`}>
+        <div
+          style={{ backgroundColor: isVisa ? "#1A1F71" : "#ffffff" }}
+          className={`${sizeClasses} rounded-xl border ${isVisa ? "border-[#1A1F71]" : "border-slate-200"} shadow-3xs flex items-center justify-center shrink-0 overflow-hidden`}
+        >
           <img 
             src={logoSrc} 
-            className="w-full h-full object-contain select-none" 
+            className={`${isMastercard ? "w-[82%] h-[82%]" : "w-[76%] h-[76%]"} object-contain object-center select-none`}
             alt={card.brand} 
           />
         </div>
@@ -1400,7 +1405,7 @@ export default function ProfileForm({
   const renderAccordionPaymentMethods = () => {
     return (
       <div className="space-y-3">
-        {cards.map((card) => (
+        {cards.filter((card) => card.id !== selectedCardForPlan).map((card) => (
           <button
             key={card.id}
             type="button"

@@ -1022,7 +1022,14 @@ app.post("/api/billing/setup/stripe", async (req, res) => {
     res.json({ checkoutUrl: setupResponse.data.url });
   } catch (error) {
     console.error("Error al vincular tarjeta en Stripe:", error.response?.data || error.message);
-    res.status(500).json({ error: "No se pudo iniciar el registro seguro de la tarjeta" });
+    const stripeError = error.response?.data?.error;
+    const invalidKey = stripeError?.type === "invalid_request_error" &&
+      /invalid api key/i.test(stripeError?.message || "");
+    res.status(500).json({
+      error: invalidKey
+        ? "La clave secreta de Stripe configurada en Firebase no es válida o fue revocada."
+        : stripeError?.message || "No se pudo iniciar el registro seguro de la tarjeta"
+    });
   }
 });
 
@@ -1116,7 +1123,14 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
     res.json({ checkoutUrl: session.url });
   } catch (error) {
     console.error("Error al crear sesión en Stripe:", error.response?.data || error.message);
-    res.status(500).json({ error: "Error al comunicarse con Stripe" });
+    const stripeError = error.response?.data?.error;
+    const invalidKey = stripeError?.type === "invalid_request_error" &&
+      /invalid api key/i.test(stripeError?.message || "");
+    res.status(500).json({
+      error: invalidKey
+        ? "La clave secreta de Stripe configurada en Firebase no es válida o fue revocada."
+        : stripeError?.message || "Error al comunicarse con Stripe"
+    });
   }
 });
 
