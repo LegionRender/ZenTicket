@@ -1611,7 +1611,7 @@ app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response
 
 // 2. Mercado Pago Subscription (Preapproval)
 app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Response) => {
-  const { userId, planId } = req.body;
+  const { userId, planId, payerEmail } = req.body;
   if (!userId || !planId) {
     res.status(400).json({ error: "Faltan parámetros userId o planId" });
     return;
@@ -1659,10 +1659,11 @@ app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Resp
       },
       external_reference: `${userId}:${planId}`
     };
-    // IMPORTANT: Do NOT include payer_email for subscriptions.
-    // Mercado Pago will ask the payer to log in at checkout.
-    // Sending it causes "Payer and collector cannot be the same user"
-    // when the user's email matches the collector account.
+    // Only include payer_email when a real verified email is provided;
+    // omitting it lets the payer enter their own Mercado Pago email at checkout.
+    if (payerEmail && (payerEmail as string).trim()) {
+      preapprovalBody.payer_email = (payerEmail as string).trim();
+    }
 
     const response = await axios.post(
       "https://api.mercadopago.com/preapproval",
@@ -1792,9 +1793,197 @@ app.post("/api/billing/checkout/paypal", async (req: Request, res: Response) => 
   }
 });
 
+// 3.4. Stripe Setup Intent (Card Registration)
+app.post("/api/billing/setup/stripe", async (req: Request, res: Response) => {
+  const { userId, payerEmail, holderName, bankName } = req.body;
+  if (!userId || !payerEmail) {
+    res.status(400).json({ error: "Faltan userId o payerEmail" });
+    return;
+  }
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuración de Stripe incompleta" });
+    return;
+  }
+
+  try {
+    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
+    const profileSnapshot = await profileRef.get();
+    let stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+
+    if (!stripeCustomerId) {
+      const customerParams = new URLSearchParams({
+        email: payerEmail,
+        "metadata[userId]": userId
+      });
+      const customerResponse = await axios.post(
+        "https://api.stripe.com/v1/customers",
+        customerParams.toString(),
+        {
+          headers: {
+            Authorization: `Bearer ${stripeSecretKey}`,
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        }
+      );
+      stripeCustomerId = customerResponse.data.id;
+      await profileRef.set({ stripeCustomerId, correoPago: payerEmail }, { merge: true });
+    }
+
+    const baseUrl = getSafeBaseUrl(req);
+    const setupSuccessUrl = process.env.BILLING_SUCCESS_URL
+      ? process.env.BILLING_SUCCESS_URL.replace("status=success", "status=card_setup_success")
+      : `${baseUrl}/workspace?tab=cuenta&status=card_setup_success`;
+    const setupCancelUrl = process.env.BILLING_FAILURE_URL
+      ? process.env.BILLING_FAILURE_URL.replace("status=failure", "status=card_setup_cancelled")
+      : `${baseUrl}/workspace?tab=cuenta&status=card_setup_cancelled`;
+    const setupParams = new URLSearchParams({
+      mode: "setup",
+      customer: stripeCustomerId,
+      currency: "mxn",
+      client_reference_id: userId,
+      success_url: setupSuccessUrl,
+      cancel_url: setupCancelUrl,
+      "metadata[holderName]": holderName || "",
+      "metadata[bankName]": bankName || ""
+    });
+    const setupResponse = await axios.post(
+      "https://api.stripe.com/v1/checkout/sessions",
+      setupParams.toString(),
+      {
+        headers: {
+          Authorization: `Bearer ${stripeSecretKey}`,
+          "Content-Type": "application/x-www-form-urlencoded"
+        }
+      }
+    );
+    res.json({ checkoutUrl: setupResponse.data.url });
+  } catch (error: any) {
+    console.error("Error al vincular tarjeta en Stripe:", error.response?.data || error.message);
+    const stripeError = error.response?.data?.error;
+    res.status(500).json({
+      error: stripeError?.message || "No se pudo iniciar el registro seguro de la tarjeta"
+    });
+  }
+});
+
+// 3.6. Stripe Confirm Payment
+app.post("/api/billing/checkout/stripe/confirm", async (req: Request, res: Response) => {
+  const { sessionId, userId } = req.body;
+  if (!sessionId || !userId) {
+    res.status(400).json({ error: "Faltan sessionId o userId" });
+    return;
+  }
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuración de Stripe incompleta" });
+    return;
+  }
+
+  try {
+    const response = await axios.get(
+      `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription.default_payment_method&expand[]=payment_intent.payment_method`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+    const session = response.data;
+    const [sessionUserId, planId] = String(session.client_reference_id || "").split(":");
+    if (sessionUserId !== userId || !planId) {
+      res.status(403).json({ error: "La sesión de Stripe no pertenece a este usuario." });
+      return;
+    }
+    if (session.status !== "complete" || session.payment_status !== "paid") {
+      res.status(409).json({ error: "Stripe todavía no confirma el pago." });
+      return;
+    }
+
+    const limits: Record<string, number> = { brisa: 10, personal: 20, serenidad: 30, empresa: 60, nirvana: 100 };
+    const invoicesLimit = limits[planId] || 5;
+    const planName = planId === "personal"
+      ? "Plan Personal"
+      : planId === "empresa"
+        ? "Plan Empresa"
+        : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`;
+    const isSubscription = session.mode === "subscription";
+    const stripeSubscriptionId = typeof session.subscription === "string"
+      ? session.subscription
+      : session.subscription?.id;
+    const paymentMethod = session.subscription?.default_payment_method ||
+      session.payment_intent?.payment_method;
+    const nowIso = new Date().toISOString();
+    const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    await adminDb.collection("payments").doc(`stripe_payment_${session.id}`).set({
+      userId,
+      planId,
+      provider: "stripe",
+      providerPaymentId: session.id,
+      amount: session.amount_total ? session.amount_total / 100 : 0,
+      currency: session.currency?.toUpperCase() || "MXN",
+      status: "paid",
+      paidAt: nowIso,
+      updatedAt: nowIso
+    }, { merge: true });
+
+    await adminDb.collection("subscriptions").doc(userId).set({
+      userId,
+      planId,
+      planName,
+      status: isSubscription ? "subscription_active" : "paid",
+      provider: "stripe",
+      providerSubscriptionId: stripeSubscriptionId || session.id,
+      stripeCustomerId: session.customer || null,
+      currentPeriodStart: nowIso,
+      currentPeriodEnd: periodEnd,
+      invoicesLimit,
+      invoicesUsed: 0,
+      updatedAt: nowIso
+    }, { merge: true });
+
+    await adminDb.collection("fiscalProfiles").doc(userId).set({
+      plan: planId,
+      planStartDate: nowIso,
+      paymentStatus: isSubscription ? "subscription_active" : "paid",
+      autoRenew: isSubscription,
+      stripeCustomerId: session.customer || null,
+      invoicesLimit
+    }, { merge: true });
+
+    if (paymentMethod?.id && paymentMethod.card) {
+      const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
+      const profileSnapshot = await profileRef.get();
+      const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
+        ? profileSnapshot.data().paymentCards
+        : [];
+      const formattedBrand = String(paymentMethod.card.brand || "VISA").toUpperCase();
+      const stripeCard = {
+        id: paymentMethod.id,
+        stripePaymentMethodId: paymentMethod.id,
+        brand: formattedBrand,
+        last4: paymentMethod.card.last4,
+        expiry: `${String(paymentMethod.card.exp_month).padStart(2, "0")}/${String(paymentMethod.card.exp_year).slice(-2)}`,
+        holderName: paymentMethod.billing_details?.name || session.customer_details?.name || "Titular",
+        bankName: formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand,
+        isDefault: true
+      };
+      const paymentCards = [
+        stripeCard,
+        ...existingCards
+          .filter((card: any) => card.id !== paymentMethod.id)
+          .map((card: any) => ({ ...card, isDefault: false }))
+      ];
+      await profileRef.set({ paymentCards }, { merge: true });
+    }
+
+    res.json({ success: true, planId, planName, invoicesLimit });
+  } catch (error: any) {
+    console.error("Error al confirmar pago de Stripe:", error.response?.data || error.message);
+    res.status(500).json({ error: error.response?.data?.error?.message || "No se pudo confirmar el pago con Stripe." });
+  }
+});
+
 // 3.5. Stripe Checkout (Session Creation)
 app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => {
-  const { userId, planId, payerEmail, autoRenew = true } = req.body;
+  const { userId, planId, payerEmail } = req.body;
   if (!userId || !planId) {
     res.status(400).json({ error: "Faltan parámetros userId o planId" });
     return;
@@ -1840,14 +2029,11 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
       "line_items[0][price_data][product_data][name]": title,
       "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
       "line_items[0][quantity]": "1",
-      "mode": autoRenew ? "subscription" : "payment",
+      "mode": "payment",
       "success_url": successUrl,
       "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
       "client_reference_id": `${userId}:${planId}`
     });
-    if (autoRenew) {
-      stripeParams.append("line_items[0][price_data][recurring][interval]", "month");
-    }
     if (payerEmail) {
       stripeParams.append("customer_email", payerEmail);
     }
@@ -2183,6 +2369,42 @@ app.post("/api/billing/webhooks/stripe", async (req: Request, res: Response) => 
         const externalReference = session.client_reference_id; // "userId:planId"
 
         console.log(`[Stripe] Checkout Session retrieve: status=${session.status}, payment_status=${paymentStatus}, ref=${externalReference}`);
+
+        if (session.mode === "setup" && session.setup_intent && externalReference) {
+          const setupResponse = await axios.get(
+            `https://api.stripe.com/v1/setup_intents/${session.setup_intent}?expand[]=payment_method`,
+            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+          );
+          const paymentMethod = setupResponse.data.payment_method;
+          const card = paymentMethod?.card;
+          if (card) {
+            const profileRef = adminDb.collection("fiscalProfiles").doc(externalReference);
+            const profileSnapshot = await profileRef.get();
+            const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
+              ? profileSnapshot.data().paymentCards
+              : [];
+            const formattedBrand = String(card.brand || "VISA").toUpperCase();
+            const nextCard = {
+              id: paymentMethod.id,
+              brand: formattedBrand,
+              last4: card.last4,
+              expiry: `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`,
+              holderName: session.metadata?.holderName || paymentMethod.billing_details?.name || "Titular",
+              bankName: session.metadata?.bankName || (formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand),
+              isDefault: true,
+              stripePaymentMethodId: paymentMethod.id
+            };
+            const paymentCards = [
+              nextCard,
+              ...existingCards
+                .filter((item: any) => item.id !== paymentMethod.id)
+                .map((item: any) => ({ ...item, isDefault: false }))
+            ];
+            await profileRef.set({ paymentCards, stripeCustomerId: session.customer }, { merge: true });
+          }
+          res.status(200).send("OK");
+          return;
+        }
 
         if (paymentStatus === "paid" && externalReference) {
           const [userId, planId] = externalReference.split(":");

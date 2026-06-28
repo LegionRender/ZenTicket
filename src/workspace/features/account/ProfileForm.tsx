@@ -576,17 +576,17 @@ export default function ProfileForm({
   const currentPlan = initialProfile?.plan || "gratuito";
 
   // Checkout and Purchase state
-  const [checkoutPlanType, setCheckoutPlanType] = useState<"gratuito" | "brisa" | "serenidad" | "nirvana" | null>(() => {
+  const [checkoutPlanType, setCheckoutPlanType] = useState<"gratuito" | "brisa" | "personal" | "serenidad" | "empresa" | "nirvana" | null>(() => {
     const saved = localStorage.getItem("selectedPlanOnSignup");
     if (saved) {
       localStorage.removeItem("selectedPlanOnSignup");
-      if (saved === "gratuito" || saved === "brisa" || saved === "serenidad" || saved === "nirvana") {
-        return saved as "gratuito" | "brisa" | "serenidad" | "nirvana";
+      if (saved === "gratuito" || saved === "brisa" || saved === "personal" || saved === "serenidad" || saved === "empresa" || saved === "nirvana") {
+        return saved as any;
       }
     }
     const profilePlan = initialProfile?.plan;
-    if (profilePlan === "brisa" || profilePlan === "serenidad" || profilePlan === "nirvana") {
-      return profilePlan;
+    if (profilePlan === "brisa" || profilePlan === "personal" || profilePlan === "serenidad" || profilePlan === "empresa" || profilePlan === "nirvana") {
+      return profilePlan as any;
     }
     return "brisa";
   });
@@ -596,10 +596,16 @@ export default function ProfileForm({
     (initialProfile?.paymentCards || [])[0]?.id || 
     "stripe_wallet"
   );
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const [showOtherPaymentMethods, setShowOtherPaymentMethods] = useState(false);
 
-  // Extra Personal and preference parameters matching the detailed mockup
+  // Synchronize selectedCardForPlan with default card when cards array updates
+  React.useEffect(() => {
+    const defaultCard = cards.find(c => c.isDefault);
+    if (defaultCard) {
+      setSelectedCardForPlan(defaultCard.id);
+    } else if (cards.length > 0 && (selectedCardForPlan === "stripe_wallet" || !cards.some(c => c.id === selectedCardForPlan))) {
+      setSelectedCardForPlan(cards[0].id);
+    }
+  }, [cards]);
   const [nombreCompleto, setNombreCompleto] = useState(savedFiscalName || sessionName || "");
   const [correoElectronico, setCorreoElectronico] = useState(initialProfile?.correoElectronico || sessionEmail || "");
   const [telefono, setTelefono] = useState(initialProfile?.telefono || "");
@@ -789,7 +795,22 @@ export default function ProfileForm({
     return new Date(inv.createdAt) >= planStartDate;
   });
   const cycleInvoicesCount = cycleInvoices.length;
-  const currentPlanLimit = currentPlan === "nirvana" ? 100 : currentPlan === "serenidad" ? 30 : currentPlan === "brisa" ? 10 : 5;
+  const currentPlanLimit = initialProfile?.invoicesLimit || (
+    currentPlan === "nirvana" ? 100 : 
+    currentPlan === "empresa" ? 60 : 
+    currentPlan === "serenidad" ? 30 : 
+    currentPlan === "personal" ? 20 : 
+    currentPlan === "brisa" ? 10 : 5
+  );
+  const getPlanDescription = (plan?: string) => {
+    if (plan === "brisa") return "Para personas que facturan algunos consumos al mes y quieren evitar hacerlo manualmente. Incluye 10 facturas generadas al mes, historial ampliado de tickets y soporte por email.";
+    if (plan === "personal") return "Plan intermedio para profesionistas independientes que necesitan mayor volumen. Incluye 20 facturas generadas al mes, panel de gastos y soporte por email.";
+    if (plan === "serenidad") return "El plan recomendado para usuarios que facturan de forma constante y necesitan mayor control de sus tickets y gastos. Incluye 30 facturas generadas al mes, panel de gastos y soporte prioritario por email.";
+    if (plan === "empresa") return "Diseñado para pequeñas y medianas empresas con requerimientos medianos. Incluye 60 facturas generadas al mes, multi-RFC, descargas masivas y soporte prioritario.";
+    if (plan === "nirvana") return "Para usuarios de alto volumen, negocios pequeños o equipos que necesitan automatizar muchas facturas cada mes. Incluye 100 facturas generadas al mes, acceso completo a conectores disponibles y soporte prioritario.";
+    return "Ideal para probar ZenTicket y automatizar las primeras facturas sin compromiso. Incluye 5 facturas gratis en total, soporte básico.";
+  };
+
   const getPlanLabel = (plan?: string) => {
     if (plan === "brisa") return "Plan Brisa";
     if (plan === "serenidad") return "Plan Serenidad";
@@ -1216,31 +1237,22 @@ export default function ProfileForm({
                 PLAN SELECCIONADO
               </span>
               <h4 className="text-base font-black text-slate-800">
-                {checkoutPlanType === "brisa" ? "Plan Brisa" : 
-                 checkoutPlanType === "serenidad" ? "Plan Serenidad" : 
-                 checkoutPlanType === "nirvana" ? "Plan Nirvana" : "Plan Gratuito"}
+                {getPlanLabel(checkoutPlanType || "gratuito")}
               </h4>
               <p className="text-[11px] text-slate-455 font-semibold mt-1 max-w-xs leading-relaxed">
-                {checkoutPlanType === "brisa" 
-                  ? "Para personas que facturan algunos consumos al mes y quieren evitar hacerlo manualmente. Incluye 10 facturas generadas al mes, historial ampliado de tickets y soporte por email." 
-                  : checkoutPlanType === "serenidad"
-                    ? "El plan recomendado para usuarios que facturan de forma constante y necesitan mayor control de sus tickets y gastos. Incluye 30 facturas generadas al mes, panel de gastos y soporte prioritario por email."
-                    : checkoutPlanType === "nirvana"
-                      ? "Para usuarios de alto volumen, negocios pequeños o equipos que necesitan automatizar muchas facturas cada mes. Incluye 100 facturas generadas al mes, acceso completo a conectores disponibles y soporte prioritario."
-                      : "Ideal para probar ZenTicket y automatizar las primeras facturas sin compromiso. Incluye 5 facturas gratis en total, soporte básico."}
+                {getPlanDescription(checkoutPlanType || "gratuito")}
               </p>
             </div>
             <div className="text-right leading-none shrink-0">
               <span className="text-lg font-black text-[#0B53F4]">
-                {checkoutPlanType === "brisa" ? "$5" :
-                 checkoutPlanType === "serenidad" ? "$250" : 
-                 checkoutPlanType === "nirvana" ? "$500" : "$0"}
+                {getPlanPrice(checkoutPlanType || "gratuito")}
               </span>
               <span className="text-[9px] text-[#0B53F4] font-black block mt-1 uppercase tracking-wider">
                 MXN / mes
               </span>
             </div>
           </div>
+        </div>
 
           <div className="flex items-center gap-2.5 p-3.5 bg-white rounded-2xl border border-slate-200/60 text-xs text-slate-700 leading-tight select-none mt-4 mb-2">
             <input
@@ -1361,13 +1373,12 @@ export default function ProfileForm({
               Ya tienes este plan activo. Cambia de plan o agota tus facturas mensuales para volver a pagar.
             </p>
           )}
-        </div>
 
-        {/* 3.2 Pago Predeterminado */}
-        <div className="space-y-1.5 text-left">
-          <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-0.5">
-            Pago Predeterminado
-          </span>
+          {/* 3.2 Pago Predeterminado */}
+          <div className="space-y-1.5 text-left">
+            <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-0.5">
+              Pago Predeterminado
+            </span>
           
           {(() => {
             const card = cards.find(c => c.id === selectedCardForPlan) || cards.find(c => c.isDefault) || cards[0];
@@ -2541,6 +2552,52 @@ export default function ProfileForm({
                   </button>
                 </div>
 
+                {/* Plan Personal */}
+                <div className={`bg-white dark:bg-[#0d1225]/40 border rounded-3xl p-5 shadow-xs relative text-left transition-all ${
+                  selectedPlan === "personal" ? "border-2 border-[#0B53F4]" : "border-slate-200/60 dark:border-slate-800/60"
+                }`}>
+                  <div className="flex justify-between items-start mb-2.5">
+                    <div>
+                      <h4 className="text-base font-black text-slate-800 dark:text-white">Plan Personal</h4>
+                      <p className="text-[11px] text-slate-455 dark:text-slate-400 font-semibold mt-0.5">Plan intermedio para profesionistas independientes.</p>
+                    </div>
+                    <div className="text-right leading-none">
+                      <span className={`text-base font-extrabold ${selectedPlan === "personal" ? "text-[#0B53F4]" : "text-slate-900 dark:text-white"}`}>$150</span>
+                      <span className={`text-[9px] font-black block mt-1 uppercase tracking-wider ${selectedPlan === "personal" ? "text-[#0B53F4]" : "text-slate-400"}`}>MXN/mes</span>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2 pt-3 border-t border-slate-50 dark:border-slate-800/40 mb-4 flex flex-col">
+                    <div className="flex items-center gap-2.5 text-xs font-black text-[#0B53F4]">
+                      <Sparkles className="w-4 h-4 text-[#0B53F4] fill-[#0B53F4]/10 stroke-[2.2]" />
+                      <span>20 facturas/mes</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Todo lo del plan Brisa</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Soporte prioritario</span>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setCheckoutPlanType("personal");
+                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                    }}
+                    className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
+                      selectedPlan === "personal"
+                        ? "bg-[#0B53F4] text-white shadow-md shadow-[#0B53F4]/10"
+                        : "bg-[#EBF1FF]/80 hover:bg-[#DDECFF] text-[#0B53F4]"
+                    }`}
+                  >
+                    {selectedPlan === "personal" ? "Seleccionado" : "Elegir Personal"}
+                  </button>
+                </div>
+
                 {/* Plan Serenidad (RECOMMENDED) */}
                 <div className={`bg-white dark:bg-[#0d1225]/40 border rounded-3xl p-5 shadow-xs relative text-left overflow-visible transition-all ${
                   selectedPlan === "serenidad" ? "border-2 border-[#0B53F4]" : "border-slate-200/60 dark:border-slate-800/60"
@@ -2588,6 +2645,52 @@ export default function ProfileForm({
                     }`}
                   >
                     {selectedPlan === "serenidad" ? "Seleccionado" : "Elegir Serenidad"}
+                  </button>
+                </div>
+
+                {/* Plan Empresa */}
+                <div className={`bg-white dark:bg-[#0d1225]/40 border rounded-3xl p-5 shadow-xs relative text-left transition-all ${
+                  selectedPlan === "empresa" ? "border-2 border-[#0B53F4]" : "border-slate-200/60 dark:border-slate-800/60"
+                }`}>
+                  <div className="flex justify-between items-start mb-2.5">
+                    <div>
+                      <h4 className="text-base font-black text-slate-800 dark:text-white">Plan Empresa</h4>
+                      <p className="text-[11px] text-slate-455 dark:text-slate-400 font-semibold mt-0.5">Diseñado para pequeñas y medianas empresas.</p>
+                    </div>
+                    <div className="text-right leading-none">
+                      <span className={`text-base font-extrabold ${selectedPlan === "empresa" ? "text-[#0B53F4]" : "text-slate-900 dark:text-white"}`}>$300</span>
+                      <span className={`text-[9px] font-black block mt-1 uppercase tracking-wider ${selectedPlan === "empresa" ? "text-[#0B53F4]" : "text-slate-400"}`}>MXN/mes</span>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2 pt-3 border-t border-slate-50 dark:border-slate-800/40 mb-4 flex flex-col">
+                    <div className="flex items-center gap-2.5 text-xs font-black text-[#0B53F4]">
+                      <Sparkles className="w-4 h-4 text-[#0B53F4] fill-[#0B53F4]/10 stroke-[2.2]" />
+                      <span>60 facturas/mes</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Todo lo del plan Serenidad</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 text-xs font-bold text-slate-650 dark:text-slate-350">
+                      <Check className="w-4 h-4 text-[#0B53F4] stroke-[3.5]" />
+                      <span>Multi-RFC y descargas masivas</span>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setCheckoutPlanType("empresa");
+                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                    }}
+                    className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
+                      selectedPlan === "empresa"
+                        ? "bg-[#0B53F4] text-white shadow-md shadow-[#0B53F4]/10"
+                        : "bg-[#EBF1FF]/80 hover:bg-[#DDECFF] text-[#0B53F4]"
+                    }`}
+                  >
+                    {selectedPlan === "empresa" ? "Seleccionado" : "Elegir Empresa"}
                   </button>
                 </div>
 

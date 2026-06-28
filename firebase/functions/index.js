@@ -1002,7 +1002,7 @@ app.post("/api/billing/setup/stripe", async (req, res) => {
     const setupParams = new URLSearchParams({
       mode: "setup",
       customer: stripeCustomerId,
-      "payment_method_types[0]": "card",
+      currency: "mxn",
       client_reference_id: userId,
       success_url: setupSuccessUrl,
       cancel_url: setupCancelUrl,
@@ -1604,25 +1604,28 @@ app.post("/api/billing/webhooks/stripe", async (req, res) => {
           );
           const paymentMethod = setupResponse.data.payment_method;
           const card = paymentMethod?.card;
-          if (card && (card.brand === "visa" || card.brand === "mastercard")) {
+          if (card) {
             const profileRef = db.collection("fiscalProfiles").doc(externalReference);
             const profileSnapshot = await profileRef.get();
             const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
               ? profileSnapshot.data().paymentCards
               : [];
+            const formattedBrand = String(card.brand || "VISA").toUpperCase();
             const nextCard = {
               id: paymentMethod.id,
-              brand: card.brand === "visa" ? "VISA" : "MASTERCARD",
+              brand: formattedBrand,
               last4: card.last4,
               expiry: `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`,
               holderName: session.metadata?.holderName || paymentMethod.billing_details?.name || "Titular",
-              bankName: session.metadata?.bankName || (card.brand === "visa" ? "Tarjeta Visa" : "Mastercard"),
-              isDefault: existingCards.length === 0,
+              bankName: session.metadata?.bankName || (formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand),
+              isDefault: true,
               stripePaymentMethodId: paymentMethod.id
             };
             const paymentCards = [
-              ...existingCards.filter((item) => item.id !== paymentMethod.id),
-              nextCard
+              nextCard,
+              ...existingCards
+                .filter((item) => item.id !== paymentMethod.id)
+                .map((item) => ({ ...item, isDefault: false }))
             ];
             await profileRef.set({ paymentCards, stripeCustomerId: session.customer }, { merge: true });
           }
