@@ -1432,7 +1432,7 @@ export default function ProfileForm({
             if (nextState) setAddingMethodStep("card");
           }}
           aria-expanded={addingCard}
-          className={`w-full text-xs font-bold py-3 rounded-xl transition ${
+          className={`w-full text-xs font-bold py-3 rounded-xl transition cursor-pointer ${
             addingCard
               ? "bg-slate-100 hover:bg-slate-200 text-slate-700"
               : "bg-[#0B53F4] hover:bg-[#0747D1] text-white"
