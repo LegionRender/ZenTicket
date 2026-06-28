@@ -378,6 +378,9 @@ export default function ProfileForm({
   // Google Pay Sync States
   const [isSyncingGPay, setIsSyncingGPay] = useState(false);
 
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [showOtherPaymentMethods, setShowOtherPaymentMethods] = useState(false);
+
   // Fiscal Profile state registers
   const [rfc, setRfc] = useState(savedFiscalRfc || "");
   const [razonSocial, setRazonSocial] = useState(savedFiscalName || "");
