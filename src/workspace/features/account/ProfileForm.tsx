@@ -3890,51 +3890,28 @@ export default function ProfileForm({
         </div>
 
         <div className="bg-white border border-slate-200/40 rounded-3xl p-5 shadow-sm space-y-4">
-          <div className="flex items-start justify-between">
+          <div className="flex items-center justify-between">
             <div className="text-left font-body">
-              <div className="flex items-center gap-2">
-                <span className="font-display font-extrabold text-sm text-slate-800 capitalize">
+              <div className="flex flex-col">
+                <span className="font-display font-black text-xl text-slate-900 capitalize tracking-tight">
                   {getPlanLabel(selectedPlan)}
                 </span>
-                <span className={`text-[9.5px] uppercase font-black px-2 py-0.5 rounded-md tracking-wider leading-none ${
-                  selectedPlan === "gratuito"
-                    ? "bg-[#ebf1ff] text-[#0B53F4]"
-                    : (isPayingSameActivePlan
-                        ? "bg-emerald-100 text-emerald-700"
-                        : (checkoutPlanType !== null
-                            ? "bg-amber-100 text-amber-700"
-                            : "bg-emerald-100 text-emerald-700"))
-                }`}>
-                  {selectedPlan === "gratuito"
-                    ? "Gratuito"
-                    : (isPayingSameActivePlan
-                        ? "Pagado"
-                        : (checkoutPlanType !== null
-                            ? "Por pagar"
-                            : "Pagado"))}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1">
-                {checkoutPlanType !== null && !isPayingSameActivePlan
-                  ? (isPlanExpired || isMonthlyQuotaExhausted
-                      ? "Tu plan ha vencido o se han agotado las facturas del ciclo. Confirma el pago abajo para reactivarlo."
-                      : "Elegiste este plan. Por favor, confirma el pago abajo para activarlo.")
-                  : (currentPlan === "gratuito" 
-                      ? "Plan de prueba permanente" 
-                      : `Facturado mensual - Prox: ${new Date(planStartDate.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`)}
-              </p>
-              {selectedPlan !== "gratuito" && (
-                <p className="text-[9.5px] text-slate-400/80 font-medium mt-1.5 italic">
-                  * Vigencia: 1 mes de servicio o hasta agotar facturas del plan, lo que ocurra primero.
+                <p className="text-xs text-slate-450 mt-1 font-medium leading-relaxed max-w-[280px]">
+                  {selectedPlan !== "gratuito" 
+                    ? "Vigencia de 1 mes o hasta agotar el límite de facturas del plan, lo que ocurra primero."
+                    : "Plan de prueba inicial permanente."}
                 </p>
-              )}
+              </div>
             </div>
             {/* Amount details */}
-            <div className="text-right flex items-baseline gap-1">
-              <span className="text-lg font-mono font-extrabold text-slate-800">
+            <div className="text-right flex items-baseline gap-1 shrink-0">
+              <span className="text-3xl font-display font-black text-[#0B53F4]">
                 {getPlanPrice(selectedPlan)}
               </span>
-              <span className="text-[10px] text-slate-400 font-bold font-display">/mes<br/><span className="text-[8px] tracking-wide block text-right">(MXN)</span></span>
+              <div className="text-left">
+                <span className="text-xs text-slate-500 font-bold font-display block leading-none">/mes</span>
+                <span className="text-[8px] tracking-widest font-black uppercase text-slate-400 block mt-0.5">MXN</span>
+              </div>
             </div>
           </div>
 
