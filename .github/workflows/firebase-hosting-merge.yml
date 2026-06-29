@@ -28,9 +28,12 @@ jobs:
           
           if (result.status !== 0) {
             const logs = (result.stdout || '') + '\n' + (result.stderr || '');
-            const lastLines = logs.split('\n').slice(-60).join('\n');
-            const sanitized = lastLines.replace(/\r/g, '').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
-            console.log('::error::Deploy failed with exit code ' + result.status + '.%0ALast logs:%0A' + sanitized);
+            const lines = logs.split('\n');
+            const errorLines = lines.filter(l => l.toLowerCase().includes('error') || l.toLowerCase().includes('failed') || l.toLowerCase().includes('forbidden'));
+            const lastLines = lines.slice(-15);
+            const report = [...errorLines.slice(-10), '--- LAST LINES ---', ...lastLines].join('\n');
+            const sanitized = report.replace(/\r/g, '').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
+            console.log('::error::Deploy failed with exit code ' + result.status + '.%0AReport:%0A' + sanitized);
             process.exit(result.status || 1);
           }
           "
