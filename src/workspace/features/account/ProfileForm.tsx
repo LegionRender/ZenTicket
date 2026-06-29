@@ -858,20 +858,7 @@ export default function ProfileForm({
             </div>
           </div>
 
-          {/* Postal Code Input */}
-          <div className="space-y-1.5 text-left">
-            <label className="block text-[9.5px] font-black text-slate-400 uppercase tracking-widest ml-1">
-              Código postal (opcional)
-            </label>
-            <input
-              type="text"
-              maxLength={10}
-              placeholder="Código postal"
-              value={newCardZip}
-              onChange={(e) => setNewCardZip(e.target.value)}
-              className="w-full bg-white border border-slate-200 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-xs text-slate-800 font-medium placeholder-slate-350 outline-none transition"
-            />
-          </div>
+
 
           {/* Use as default checkbox */}
           <div className="flex items-center gap-2 pt-1 select-none">
