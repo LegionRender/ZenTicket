@@ -2337,6 +2337,24 @@ async function syncCustomerPaymentMethods(stripeCustomerId: string, stripeSecret
   }
 }
 
+app.get("/api/billing/debug-user-profile", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
+  try {
+    const fiscalSnap = await adminDb.collection("fiscalProfiles").doc(userId).get();
+    const subSnap = await adminDb.collection("subscriptions").doc(userId).get();
+    const billingSnap = await adminDb.collection("billingProfiles").doc(userId).get();
+    
+    res.json({
+      userId,
+      fiscalProfile: fiscalSnap.exists ? fiscalSnap.data() : null,
+      subscription: subSnap.exists ? subSnap.data() : null,
+      billingProfile: billingSnap.exists ? billingSnap.data() : null
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post("/api/billing/sync-subscription", authenticateFirebaseToken, async (req: any, res: any) => {
   const userId = req.user.uid;
   const email = req.user.email;
