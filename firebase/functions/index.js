@@ -976,7 +976,8 @@ app.post("/api/billing/setup/stripe", authenticateFirebaseToken, async (req, res
       customer: stripeCustomerId,
       success_url: `${getSafeBaseUrl(req)}/billing-setup-success.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${getSafeBaseUrl(req)}/billing-failure.html`,
-      "payment_method_types[0]": "card"
+      "payment_method_types[0]": "card",
+      "payment_method_options[link][status]": "disabled"
     });
 
     const sessionResponse = await axios.post(
