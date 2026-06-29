@@ -1906,15 +1906,6 @@ export default function ProfileForm({
             </>
           )
         )}
-        
-        <button
-          type="button"
-          onClick={handleOpenStripeSetup}
-          className="w-full text-xs font-bold py-3.5 rounded-2xl transition cursor-pointer bg-[#0B53F4] hover:bg-[#0747D1] text-white zt-btn-primary"
-        >
-          Vincular nueva tarjeta
-        </button>
-
       </div>
     );
   };
