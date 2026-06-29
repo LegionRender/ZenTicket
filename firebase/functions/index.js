@@ -731,7 +731,7 @@ async function resolveStripeCustomerId(uid, email, emailVerified) {
   const billingRef = db.collection("billingProfiles").doc(uid);
   const billingSnap = await billingRef.get();
   
-  if (billingSnap.exists()) {
+  if (billingSnap.exists) {
     const data = billingSnap.data();
     if (data?.stripeCustomerId) {
       return data.stripeCustomerId;
@@ -740,7 +740,7 @@ async function resolveStripeCustomerId(uid, email, emailVerified) {
 
   const fiscalRef = db.collection("fiscalProfiles").doc(uid);
   const fiscalSnap = await fiscalRef.get();
-  if (fiscalSnap.exists()) {
+  if (fiscalSnap.exists) {
     const historicalCustomerId = fiscalSnap.data()?.stripeCustomerId;
     if (historicalCustomerId) {
       const stripeSecretKey = secretOrEnv(stripeSecretKeyParam, "STRIPE_SECRET_KEY");

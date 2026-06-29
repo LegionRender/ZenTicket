@@ -142,7 +142,7 @@ async function resolveStripeCustomerId(uid: string, email: string, emailVerified
   const billingSnap = await billingRef.get();
   
   // 1. Si ya existe en billingProfiles, lo retornamos directo
-  if (billingSnap.exists()) {
+  if (billingSnap.exists) {
     const data = billingSnap.data();
     if (data?.stripeCustomerId) {
       return data.stripeCustomerId;
@@ -152,7 +152,7 @@ async function resolveStripeCustomerId(uid: string, email: string, emailVerified
   // 2. Si no, revisamos fiscalProfiles (migración segura e histórica)
   const fiscalRef = adminDb.collection("fiscalProfiles").doc(uid);
   const fiscalSnap = await fiscalRef.get();
-  if (fiscalSnap.exists()) {
+  if (fiscalSnap.exists) {
     const historicalCustomerId = fiscalSnap.data()?.stripeCustomerId;
     if (historicalCustomerId) {
       // VALIDACIÓN DE PROPIEDAD:
