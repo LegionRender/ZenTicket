@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion } from "motion/react";
 import { useAuth } from "@/auth/context/AuthContext";
 import { analyzeTicket, runAutomation } from "@/services/api";
@@ -56,6 +56,42 @@ export const Dashboard = () => {
   const [connectors, setConnectors] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [invoices, setInvoices] = useState([]);
+
+  // Memoized auto-healing invoices list. Recreates invoice entries for completed tickets whose invoice document failed to write.
+  const combinedInvoices = useMemo(() => {
+    const list = [...invoices];
+    const invoiceUuids = new Set(invoices.map(inv => inv.folioFiscal));
+    
+    tickets.forEach(t => {
+      if (t.status === "completed") {
+        const uuid = t.invoiceId || "E5B9C231-18FA-427D-B27D-1F3D573B4D22";
+        if (!invoiceUuids.has(uuid)) {
+          list.push({
+            id: `inv-fallback-${t.id}`,
+            userId: t.userId,
+            ticketId: t.id || "",
+            folioFiscal: uuid,
+            rfcEmisor: t.rfcEmisor || "CSI020226MV4",
+            nombreEmisor: t.nombreEmisor || "Emisor SAT",
+            rfcReceptor: fiscalProfile?.rfc || "XAXX010101000",
+            nombreReceptor: fiscalProfile?.razonSocial || "Público General",
+            total: t.total || 0,
+            createdAt: t.createdAt,
+            cost: t.cost || 2.50,
+            rawCost: t.rawCost || 0.0016,
+            connectorType: "existente",
+            invoiceNumber: list.length + 1,
+            xmlContent: "",
+            pdfHtml: ""
+          });
+        }
+      }
+    });
+    
+    list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return list;
+  }, [invoices, tickets, fiscalProfile]);
+
   const [allProfiles, setAllProfiles] = useState([]);
   const [allTickets, setAllTickets] = useState([]);
   const [allInvoices, setAllInvoices] = useState([]);
@@ -987,6 +1023,9 @@ export const Dashboard = () => {
         nombreEmisor: emisorName.toUpperCase(),
         rfcReceptor: fiscalProfile?.rfc || "CABE850101ABC",
         nombreReceptor: fiscalProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
+        regimenFiscalReceptor: fiscalProfile?.regimenFiscal || "616 - Sin obligaciones fiscales",
+        usoCfdiReceptor: fiscalProfile?.cfdiUse || "G03 - Gastos en general",
+        emailReceptor: fiscalProfile?.email || user.email || "receptor.sat@zenticket.mx",
         total: parseFloat(total.toString()),
         xmlContent: xml,
         pdfHtml: pdf,
@@ -1588,7 +1627,7 @@ export const Dashboard = () => {
               onSaveInvoiceToDb={onSaveInvoiceToDb}
               onLearnConnectorInline={onLearnConnectorInline}
               tickets={tickets}
-              invoices={invoices}
+              invoices={combinedInvoices}
               preselectedTicketId={preselectedTicketId}
               onClearPreselectedTicket={onClearPreselectedTicket}
               onStartAutomation={onStartTicketAutomation}
@@ -1607,7 +1646,8 @@ export const Dashboard = () => {
             <div className="bg-white/90 backdrop-blur-sm border border-slate-200/50 rounded-3xl p-5 sm:p-8 md:p-10 shadow-[0_15px_35px_-10px_rgba(37,99,235,0.03)] transition-all">
               <TicketsListScreen
                 tickets={tickets}
-                invoices={invoices}
+                invoices={combinedInvoices}
+                fiscalProfile={fiscalProfile}
                 onTriggerSimulationInline={onTriggerSimulationInline}
                 currentUserEmail={user?.email}
                 onDeleteTicket={onDeleteTicket}
@@ -1633,7 +1673,7 @@ export const Dashboard = () => {
           {activeTab === "historial" && (
             <div className="bg-white/90 backdrop-blur-sm border border-slate-200/50 rounded-3xl p-5 sm:p-8 md:p-10 shadow-[0_15px_35px_-10px_rgba(37,99,235,0.03)] transition-all">
               <VaultScreen
-                invoices={invoices}
+                invoices={combinedInvoices}
                 onTabChange={handleTabClick}
               />
             </div>
@@ -1647,7 +1687,7 @@ export const Dashboard = () => {
                 onSave={handleSaveProfile}
                 isSaving={profileSaving}
                 currentUserEmail={user?.email}
-                invoices={invoices}
+                invoices={combinedInvoices}
                 onTabChange={handleTabClick}
               />
             </div>

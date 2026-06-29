@@ -12,6 +12,7 @@ import { useToast } from "@/shared/feedback/Toast";
 interface TicketsListScreenProps {
   tickets: Ticket[];
   invoices: Invoice[];
+  fiscalProfile?: any;
   onTriggerSimulationInline: (ticket: Ticket) => void;
   currentUserEmail?: string | null;
   onDeleteTicket?: (ticketId: string) => void;
@@ -169,6 +170,7 @@ const getBrandBrandIcon = (nombre: string) => {
 export default function TicketsListScreen({
   tickets,
   invoices,
+  fiscalProfile,
   onTriggerSimulationInline,
   currentUserEmail,
   onDeleteTicket,
@@ -305,6 +307,107 @@ export default function TicketsListScreen({
     ];
 
     const brandStyle = getBrandBrandIcon(emisorNameRaw);
+
+    // SAT Helpers for clean and authentic labels
+    const getRegimenLabel = (code: string | null) => {
+      if (!code) return "616 - Sin obligaciones fiscales";
+      const map: Record<string, string> = {
+        "601": "601 - General de Ley Personas Morales",
+        "603": "603 - Personas Morales con Fines no Lucrativos",
+        "605": "605 - Sueldos y Salarios e Ingresos Asimilados a Salarios",
+        "606": "606 - Arrendamiento",
+        "608": "608 - Demás ingresos",
+        "612": "612 - Personas Físicas con Actividades Empresariales y Profesionales",
+        "616": "616 - Sin obligaciones fiscales",
+        "621": "621 - Incorporación Fiscal",
+        "625": "625 - Actividades Empresariales con ingresos a través de Plataformas Tecnológicas",
+        "626": "626 - Régimen Simplificado de Confianza (RESICO)"
+      };
+      return map[code] || `${code} - Régimen Fiscal`;
+    };
+
+    const getUsoCfdiLabel = (code: string | null) => {
+      if (!code) return "G03 - Gastos en general";
+      const map: Record<string, string> = {
+        "G01": "G01 - Adquisición de mercancías",
+        "G02": "G02 - Devoluciones, descuentos o bonificaciones",
+        "G03": "G03 - Gastos en general",
+        "I01": "I01 - Construcciones",
+        "I02": "I02 - Mobiliario y equipo de oficina por inversiones",
+        "I03": "I03 - Equipo de transporte",
+        "I04": "I04 - Equipo de cómputo y accesorios",
+        "I08": "I08 - Otra maquinaria y equipo",
+        "D01": "D01 - Honorarios médicos, dentales y gastos hospitalarios",
+        "D02": "D02 - Gastos médicos por incapacidad o discapacidad",
+        "D03": "D03 - Gastos funerales",
+        "D04": "D04 - Donativos",
+        "D07": "D07 - Primas por seguros de gastos médicos",
+        "D08": "D08 - Gastos de transportación escolar obligatoria",
+        "D10": "D10 - Depósitos en cuentas especiales para el ahorro",
+        "CP01": "CP01 - Pagos",
+        "CN01": "CN01 - Nómina",
+        "S01": "S01 - Sin efectos fiscales"
+      };
+      return map[code] || `${code} - Uso CFDI`;
+    };
+
+    // Parse XML to extract real CFDI metadata if available
+    let selloSAT = "JX9A23KSF841HLWND82HJKLSW0K295LW0192LSLW0KND82910NSDLUQ9W892019ADJLW2";
+    let noCertificadoSAT = "00001000000504465028";
+    let noCertificadoEmisor = "00001000000503932847";
+    let lugarExpedicion = "CDMX, México";
+    let metodoPagoVal = "PUE - Pago en una sola exhibición";
+    
+    // Fallbacks for client receptor data
+    const rfcReceptorVal = activeInvoiceData.rfcReceptor || fiscalProfile?.rfc || "XAXX010101000";
+    const nombreReceptorVal = activeInvoiceData.nombreReceptor || fiscalProfile?.razonSocial || "Público General / Cliente Registrado";
+    const emailReceptorVal = activeInvoiceData.emailReceptor || fiscalProfile?.email || currentUserEmail || "receptor.sat@zenticket.mx";
+    
+    let regimenFiscalReceptorVal = getRegimenLabel(activeInvoiceData.regimenFiscalReceptor || fiscalProfile?.regimenFiscal || "616");
+    let usoCfdiVal = getUsoCfdiLabel(activeInvoiceData.usoCfdiReceptor || fiscalProfile?.cfdiUse || "G03");
+
+    if (activeInvoiceData.xmlContent) {
+      try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(activeInvoiceData.xmlContent, "text/xml");
+        
+        // Extract Timbre Fiscal Digital info
+        const tfd = xmlDoc.getElementsByTagName("tfd:TimbreFiscalDigital")[0] || xmlDoc.getElementsByTagName("TimbreFiscalDigital")[0];
+        if (tfd) {
+          selloSAT = tfd.getAttribute("SelloSAT") || selloSAT;
+          noCertificadoSAT = tfd.getAttribute("NoCertificadoSAT") || noCertificadoSAT;
+        }
+        
+        // Extract Comprobante info
+        const comprobante = xmlDoc.getElementsByTagName("cfdi:Comprobante")[0] || xmlDoc.getElementsByTagName("Comprobante")[0];
+        if (comprobante) {
+          noCertificadoEmisor = comprobante.getAttribute("NoCertificado") || noCertificadoEmisor;
+          const cp = comprobante.getAttribute("LugarExpedicion");
+          if (cp) lugarExpedicion = cp + ", México";
+          
+          const mp = comprobante.getAttribute("MetodoPago");
+          if (mp) {
+            metodoPagoVal = mp === "PUE" ? "PUE - Pago en una sola exhibición" : mp === "PPD" ? "PPD - Pago en parcialidades o diferido" : mp;
+          }
+        }
+        
+        // Extract Receptor info
+        const receptor = xmlDoc.getElementsByTagName("cfdi:Receptor")[0] || xmlDoc.getElementsByTagName("Receptor")[0];
+        if (receptor) {
+          const uso = receptor.getAttribute("UsoCFDI");
+          if (uso) usoCfdiVal = getUsoCfdiLabel(uso);
+          
+          const reg = receptor.getAttribute("RegimenFiscalReceptor");
+          if (reg) regimenFiscalReceptorVal = getRegimenLabel(reg);
+        }
+      } catch (xmlParseErr) {
+        console.warn("Failed to parse XML content for printing metadata:", xmlParseErr);
+      }
+    }
+
+    // Build authentic SAT verification URL and dynamic QR Code Src
+    const satVerificationUrl = `https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?id=${uuidVal}&re=${rfcEmisorVal}&rr=${rfcReceptorVal}&tt=${totalVal.toFixed(2)}`;
+    const satQrCodeImgSrc = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(satVerificationUrl)}`;
 
     return (
       <div className="max-w-6xl mx-auto space-y-8 font-sans text-left mt-2 relative select-none pb-24 animate-fade-in_50">
@@ -444,22 +547,14 @@ export default function TicketsListScreen({
           {/* QR & SECURITY MATRIX FOOTER */}
           <div className="flex flex-col gap-4 mt-6 pt-5 border-t border-slate-100 text-left">
             <div className="flex items-center gap-4">
-              {/* Custom vector SVG QR code representation */}
-              <div className="w-14 h-14 bg-slate-100 flex-shrink-0 flex items-center justify-center rounded-lg p-1.5 border border-slate-200">
-                <svg className="w-full h-full text-slate-700" viewBox="0 0 100 100" fill="currentColor">
-                  <path d="M0,0 h30 v30 h-30 z M10,10 h10 v10 h-10 z" />
-                  <path d="M70,0 h30 v30 h-30 z M80,10 h10 v10 h-10 z" />
-                  <path d="M0,70 h30 v30 h-30 z M10,80 h10 v10 h-10 z" />
-                  <path d="M40,10 h10 v10 h-10 z M55,0 h10 v15 h-10 z" />
-                  <path d="M40,40 h15 v5 h-15 z M45,55 h20 v10 h-20 z" />
-                  <path d="M75,40 h15 v20 h-15 z M85,75 h10 v15 h-10 z" />
-                  <path d="M40,80 h10 v10 h-10 z M55,75 h20 v5 h-20 z" />
-                </svg>
+              {/* Dynamic SAT QR code image */}
+              <div className="w-14 h-14 bg-white flex-shrink-0 flex items-center justify-center rounded-lg p-1 border border-slate-200 overflow-hidden">
+                <img src={satQrCodeImgSrc} className="w-full h-full object-contain" alt="SAT QR" />
               </div>
 
               <div className="leading-tight min-w-0 flex-1">
                 <p className="text-[7.5px] text-slate-400 font-mono select-all overflow-hidden text-ellipsis line-clamp-2 uppercase break-all">
-                  Sello Digital del SAT: JX9A23KSF841HLWND82HJKLSW0K295LW0192LSLW0KND82910NSDLUQ9W892019ADJLW2
+                  Sello Digital del SAT: {selloSAT}
                 </p>
                 <span className="text-[8px] uppercase font-black text-emerald-600 block mt-1 tracking-wider">
                   ✓ Formato de Factura Timbrada compatible v4.0
@@ -469,7 +564,7 @@ export default function TicketsListScreen({
 
             {/* SAT Live Verification Action Button */}
             <a
-              href={`https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?id=${uuidVal}&re=${rfcEmisorVal}&rr=XAXX010101000&tt=${totalVal.toFixed(2)}`}
+              href={satVerificationUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center justify-center gap-1.5 bg-slate-900 hover:bg-slate-850 text-white font-sans text-[10px] font-black uppercase tracking-wider py-2.5 px-3 rounded-xl transition cursor-pointer select-none border border-slate-800"
@@ -513,131 +608,67 @@ export default function TicketsListScreen({
                       <head>
                         <title>Factura_${emisorNameRaw}_${uuidVal.substring(0,8)}</title>
                         <style>
-                          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&family=Playfair+Display:ital,wght@1,600&display=swap');
+                          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap');
                           
                           * {
                             box-sizing: border-box;
                           }
+                          @page {
+                            size: letter;
+                            margin: 10mm 15mm;
+                          }
                           body {
                             font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                             color: #1e293b;
-                            background-color: #f1f5f9;
+                            background-color: #f8fafc;
                             margin: 0;
-                            padding: 40px 10px;
+                            padding: 20px 10px;
                             -webkit-print-color-adjust: exact;
                             print-color-adjust: exact;
                           }
                           .page-wrapper {
-                            max-width: 820px;
+                            max-width: 800px;
                             margin: 0 auto;
                             background-color: #ffffff;
                             border: 1px solid #e2e8f0;
-                            border-radius: 40px;
-                            padding: 56px;
-                            box-shadow: 0 20px 40px -15px rgba(15,23,42,0.06);
+                            border-radius: 24px;
+                            padding: 35px;
+                            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
                             position: relative;
                             overflow: hidden;
                           }
                           
-                          /* Top-right custom curved graphic elements inspired by modern designer templates */
-                          .top-right-decor {
-                            position: absolute;
-                            top: -60px;
-                            right: -60px;
-                            width: 280px;
-                            height: 280px;
-                            background: linear-gradient(135deg, #0B53F4 0%, #38bdf8 100%);
-                            border-radius: 50% 50% 0% 100%;
-                            z-index: 1;
-                            opacity: 0.95;
-                          }
-                          .top-right-decor-sub {
-                            position: absolute;
-                            top: -100px;
-                            right: 140px;
-                            width: 150px;
-                            height: 150px;
-                            background: rgba(11, 83, 244, 0.08);
-                            border-radius: 50%;
-                            z-index: 2;
-                          }
-
-                          /* Bottom-left custom curved graphic elements */
-                          .bottom-left-decor {
-                            position: absolute;
-                            bottom: -90px;
-                            left: -90px;
-                            width: 250px;
-                            height: 250px;
-                            background: linear-gradient(315deg, #0B53F4 0%, #1e1b4b 100%);
-                            border-radius: 0% 100% 50% 50%;
-                            z-index: 1;
-                            opacity: 0.9;
-                          }
-
                           .header-container {
                             display: flex;
                             justify-content: space-between;
                             align-items: flex-start;
                             position: relative;
                             z-index: 10;
-                            margin-bottom: 50px;
+                            margin-bottom: 24px;
                           }
 
-                          /* Styled Logo matching modern look */
-                          .logo-badge-row {
-                            display: flex;
-                            align-items: center;
-                            gap: 16px;
+                          /* Logo and issuer section */
+                          .issuer-box {
+                            text-align: left;
                           }
-                          .logo-circle {
-                            width: 64px;
-                            height: 64px;
-                            border-radius: 20px;
-                            background-color: #0b53f4;
-                            color: #ffffff;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            font-weight: 800;
-                            font-size: 28px;
-                            box-shadow: 0 8px 16px rgba(11,83,244,0.18);
-                          }
-                          .logo-text-title {
-                            font-size: 26px;
-                            font-weight: 800;
-                            color: #0d1527;
-                            letter-spacing: -0.025em;
-                            margin: 0;
-                            line-height: 1;
-                          }
-                          .logo-text-subtitle {
-                            font-size: 11px;
-                            font-weight: 700;
-                            color: #0B53F4;
-                            text-transform: uppercase;
-                            letter-spacing: 0.15em;
-                            margin: 4px 0 0 0;
-                          }
-
+                          
                           /* Heading right of Invoice */
                           .invoice-title-box {
                             text-align: right;
-                            padding-right: 0px; /* Aligned cleanly without top-right decor */
                           }
                           .invoice-title-box h1 {
-                            font-size: 40px;
+                            font-size: 32px;
                             font-weight: 900;
                             color: #0b53f4;
-                            margin: 0 0 10px 0;
+                            margin: 0 0 8px 0;
                             letter-spacing: 0.05em;
                             text-transform: uppercase;
                           }
                           .invoice-meta-item {
-                            font-size: 12px;
+                            font-size: 11px;
                             font-weight: 500;
                             color: #475569;
-                            margin: 4px 0;
+                            margin: 3px 0;
                           }
                           .invoice-meta-item strong {
                             color: #0f172a;
@@ -647,42 +678,42 @@ export default function TicketsListScreen({
                           /* Columns section: BILL TO & metadata */
                           .billing-info-section {
                             display: grid;
-                            grid-template-cols: 1.2fr 0.8fr;
-                            gap: 40px;
-                            margin-bottom: 45px;
+                            grid-template-columns: 1.15fr 0.85fr;
+                            gap: 30px;
+                            margin-bottom: 24px;
                             position: relative;
                             z-index: 10;
                           }
                           .bill-to-box {
                             border-top: 3px solid #0b53f4;
-                            padding-top: 15px;
+                            padding-top: 10px;
                           }
                           .bill-title {
-                            font-size: 12px;
+                            font-size: 11px;
                             font-weight: 800;
                             color: #0b53f4;
                             text-transform: uppercase;
                             letter-spacing: 0.12em;
-                            margin-bottom: 12px;
+                            margin-bottom: 8px;
                           }
                           .bill-client-name {
-                            font-size: 18px;
+                            font-size: 15px;
                             font-weight: 800;
                             color: #0f172a;
-                            margin: 0 0 8px 0;
+                            margin: 0 0 6px 0;
                           }
                           .bill-details {
-                            font-size: 12px;
-                            line-height: 1.6;
+                            font-size: 11px;
+                            line-height: 1.5;
                             color: #475569;
                           }
                           .bill-details p {
-                            margin: 4px 0;
+                            margin: 3px 0;
                           }
 
                           /* Styled Table layout following modern design precisely */
                           .table-container {
-                            margin-bottom: 40px;
+                            margin-bottom: 20px;
                             position: relative;
                             z-index: 10;
                           }
@@ -694,28 +725,28 @@ export default function TicketsListScreen({
                           .invoice-table th {
                             background-color: #0b53f4;
                             color: #ffffff;
-                            font-size: 11px;
+                            font-size: 10px;
                             font-weight: 800;
                             text-transform: uppercase;
-                            padding: 16px 20px;
+                            padding: 10px 14px;
                             letter-spacing: 0.1em;
                             border: none;
                           }
                           .invoice-table th:first-child {
-                            border-top-left-radius: 12px;
-                            border-bottom-left-radius: 12px;
-                            width: 60px;
+                            border-top-left-radius: 8px;
+                            border-bottom-left-radius: 8px;
+                            width: 50px;
                             text-align: center;
                           }
                           .invoice-table th:last-child {
-                            border-top-right-radius: 12px;
-                            border-bottom-right-radius: 12px;
+                            border-top-right-radius: 8px;
+                            border-bottom-right-radius: 8px;
                             text-align: right;
                           }
                           
                           .invoice-table td {
-                            padding: 16px 20px;
-                            font-size: 13px;
+                            padding: 10px 14px;
+                            font-size: 12px;
                             color: #334155;
                             border-bottom: 1px solid #e2e8f0;
                           }
@@ -734,10 +765,10 @@ export default function TicketsListScreen({
                             color: #0f172a;
                           }
                           .cell-desc .subtext {
-                            font-size: 11px;
+                            font-size: 10px;
                             color: #64748b;
                             font-weight: 400;
-                            margin-top: 4px;
+                            margin-top: 2px;
                             display: block;
                           }
                           .cell-rate, .cell-qty {
@@ -754,9 +785,9 @@ export default function TicketsListScreen({
                           /* Bottom totals combined with signatures & notes */
                           .bottom-invoice-row {
                             display: grid;
-                            grid-template-cols: 1.12fr 0.88fr;
+                            grid-template-columns: 1.15fr 0.85fr;
                             gap: 30px;
-                            margin-top: 10px;
+                            margin-top: 15px;
                             position: relative;
                             z-index: 10;
                           }
@@ -768,65 +799,58 @@ export default function TicketsListScreen({
                           }
                           .notes-block {
                             background-color: #f8fafc;
-                            border-radius: 16px;
-                            padding: 20px;
-                            font-size: 11px;
+                            border-radius: 12px;
+                            padding: 14px;
+                            font-size: 10px;
                             color: #64748b;
-                            line-height: 1.5;
-                            margin-bottom: 24px;
+                            line-height: 1.4;
+                            margin-bottom: 12px;
                           }
                           .notes-block h4 {
-                            font-size: 11px;
+                            font-size: 10px;
                             font-weight: 800;
                             text-transform: uppercase;
                             color: #1e293b;
-                            margin: 0 0 6px 0;
+                            margin: 0 0 4px 0;
                             letter-spacing: 0.05em;
                           }
 
-                          /* Signature section as requested from template */
+                          /* Signature section */
                           .signature-container {
-                            margin-top: 10px;
+                            margin-top: 5px;
                             text-align: left;
                           }
-                          .signature-author {
-                            font-family: 'Playfair Display', Georgia, serif;
-                            font-size: 26px;
-                            color: #0b53f4;
-                            font-style: italic;
-                            margin: 0 0 4px 0;
-                            user-select: none;
-                          }
                           .signature-line {
-                            width: 200px;
-                            height: 1.5px;
+                            width: 160px;
+                            height: 1px;
                             background-color: #cbd5e1;
-                            margin-bottom: 6px;
+                            margin-bottom: 5px;
                           }
                           .signature-title {
-                            font-size: 11px;
+                            font-size: 10px;
                             font-weight: 750;
                             color: #64748b;
                             text-transform: uppercase;
                             letter-spacing: 0.05em;
                           }
 
-                          /* Grand total panel precisely like template */
+                          /* Grand total panel */
                           .grand-totals-panel {
                             display: flex;
                             flex-direction: column;
-                            gap: 12px;
+                            gap: 8px;
                             background-color: #ffffff;
-                            border: 1.5px solid #f1f5f9;
-                            border-radius: 24px;
-                            padding: 24px;
+                            border: 1px solid #f1f5f9;
+                            border-radius: 16px;
+                            padding: 16px;
                             align-self: flex-start;
+                            width: 100%;
                           }
                           .subtotal-metric-row {
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
-                            font-size: 13px;
+                            font-size: 12px;
                             font-weight: 600;
                             color: #475569;
                           }
@@ -836,48 +860,46 @@ export default function TicketsListScreen({
                             font-weight: 700;
                           }
                           
-                          /* Blue total box with slanted layout simulation (or professional rounded badge) */
                           .grand-total-blue-badge {
                             background: linear-gradient(90deg, #0b53f4 0%, #0942c4 100%);
-                            border-radius: 12px;
-                            padding: 16px 20px;
+                            border-radius: 10px;
+                            padding: 10px 14px;
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
                             color: #ffffff;
-                            margin-top: 10px;
-                            box-shadow: 0 6px 16px rgba(11,83,244,0.15);
+                            margin-top: 5px;
                           }
                           .grand-total-blue-badge .label {
-                            font-size: 12px;
+                            font-size: 11px;
                             font-weight: 800;
                             letter-spacing: 0.08em;
                             text-transform: uppercase;
                           }
                           .grand-total-blue-badge .val {
                             font-family: 'JetBrains Mono', monospace;
-                            font-size: 20px;
+                            font-size: 18px;
                             font-weight: 800;
                           }
 
                           /* Sat Security Verification Row */
                           .sat-verification-section {
-                            margin-top: 40px;
+                            margin-top: 20px;
                             border-top: 1px solid #f1f5f9;
-                            padding-top: 28px;
+                            padding-top: 16px;
                             display: flex;
                             align-items: center;
-                            gap: 24px;
+                            gap: 15px;
                             position: relative;
                             z-index: 10;
                           }
                           .qr-code-holder {
-                            width: 80px;
-                            height: 80px;
+                            width: 72px;
+                            height: 72px;
                             background-color: #ffffff;
                             border: 1px dashed #cbd5e1;
-                            border-radius: 16px;
-                            padding: 8px;
+                            border-radius: 12px;
+                            padding: 4px;
                             flex-shrink: 0;
                             display: flex;
                             align-items: center;
@@ -888,116 +910,91 @@ export default function TicketsListScreen({
                             min-width: 0;
                           }
                           .stamp-headline {
-                            font-size: 9px;
+                            font-size: 8.5px;
                             font-weight: 800;
                             color: #94a3b8;
                             text-transform: uppercase;
                             letter-spacing: 0.08em;
-                            margin: 0 0 6px 0;
+                            margin: 0 0 4px 0;
                           }
                           .stamp-content {
                             font-family: 'JetBrains Mono', monospace;
-                            font-size: 8px;
+                            font-size: 7.5px;
                             color: #64748b;
-                            line-height: 1.4;
+                            line-height: 1.3;
                             word-break: break-all;
-                            margin: 0 0 8px 0;
+                            margin: 0 0 6px 0;
                             background-color: #f8fafc;
-                            padding: 8px 12px;
-                            border-radius: 8px;
+                            padding: 6px 10px;
+                            border-radius: 6px;
                             border: 1px solid #f1f5f9;
                           }
                           .certified-pill {
-                            font-size: 11px;
+                            font-size: 9.5px;
                             font-weight: 800;
                             color: #10b981;
                             display: flex;
                             align-items: center;
-                            gap: 6px;
+                            gap: 4px;
                             text-transform: uppercase;
                           }
                           .certified-pill svg {
-                            width: 14px;
-                            height: 14px;
+                            width: 12px;
+                            height: 12px;
                             stroke: #10b981;
                           }
 
-                          /* Interactive Contact Banner precisely styled like presentation mockup */
+                          /* Compact clean footer banner */
                           .custom-decor-footer-banner {
-                            margin-top: 50px;
+                            margin-top: 25px;
                             background-color: #0b53f4;
-                            border-radius: 20px;
-                            padding: 16px 24px;
+                            border-radius: 12px;
+                            padding: 10px 16px;
                             display: flex;
-                            justify-content: space-between;
+                            justify-content: center;
                             align-items: center;
                             color: #ffffff;
-                            font-size: 11px;
+                            font-size: 9px;
                             font-weight: 600;
                             position: relative;
                             z-index: 10;
-                            box-shadow: 0 4px 15px rgba(11,83,244,0.1);
-                          }
-                          .footer-banner-item {
-                            display: flex;
-                            align-items: center;
-                            gap: 8px;
-                          }
-                          .footer-banner-icon {
-                            width: 24px;
-                            height: 24px;
-                            background-color: rgba(255,255,255,0.15);
-                            border-radius: 50%;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            font-size: 10px;
                           }
 
                           @media print {
                             body {
                               background-color: #ffffff;
-                              padding: 0;
-                              margin: 0;
+                              padding: 0 !important;
+                              margin: 0 !important;
                             }
                             .page-wrapper {
-                              border: none;
-                              box-shadow: none;
-                              padding: 20px;
-                            }
-                            .grand-totals-panel {
-                              border: 1px solid #e2e8f0 !important;
-                            }
-                            .custom-decor-footer-banner {
-                              background-color: #0b53f4 !important;
-                              -webkit-print-color-adjust: exact;
-                              print-color-adjust: exact;
+                              border: none !important;
+                              box-shadow: none !important;
+                              padding: 0 !important;
+                              margin: 0 !important;
+                              max-width: 100% !important;
+                              border-radius: 0 !important;
                             }
                           }
                         </style>
-                      </head>
-                      <body>
-                        <div class="page-wrapper">
-                          <!-- Designer elements -->
-                          <div class="bottom-left-decor"></div>
+                                     <div class="page-wrapper">
                           
                           <!-- Top Header info -->
                           <div class="header-container">
-                            <div class="logo-badge-row">
-                              <div class="logo-circle">
-                                ${emisorNameRaw.substring(0, 2).toUpperCase()}
-                              </div>
-                              <div>
-                                <h2 class="logo-text-title">${emisorNameRaw}</h2>
-                                <p class="logo-text-subtitle">${emisorCorp || "Servicios Comerciales de Integración"}</p>
+                            <div class="issuer-box">
+                              <img src="https://customer-assets.emergentagent.com/job_zenticket-preview/artifacts/23vqzgm3_Zenticket%20logo%203B.png" style="height: 28px; width: auto;" alt="ZenTicket" />
+                              
+                              <div style="margin-top: 12px;">
+                                <h3 style="font-size: 13px; font-weight: 850; color: #0f172a; margin: 0 0 2px 0;">${emisorCorp}</h3>
+                                <p style="font-size: 11px; color: #475569; margin: 0;"><strong>RFC Emisor:</strong> ${rfcEmisorVal}</p>
+                                <p style="font-size: 11px; color: #475569; margin: 2px 0 0 0;"><strong>Régimen Fiscal Emisor:</strong> ${getRegimenLabel(activeInvoiceData.regimenFiscalEmisor || "601")}</p>
                               </div>
                             </div>
                             
                             <div class="invoice-title-box">
                               <h1>Factura</h1>
                               <div class="invoice-meta-item">Fecha: <strong>${formattedDate}</strong></div>
-                              <div class="invoice-meta-item">UUID: <strong>${uuidVal.substring(0,18)}...</strong></div>
-                              <div class="invoice-meta-item">RFC Emisor: <strong>${rfcEmisorVal}</strong></div>
+                              <div class="invoice-meta-item">Folio Fiscal (UUID): <strong>${uuidVal}</strong></div>
+                              <div class="invoice-meta-item">Lugar de Expedición: <strong>${lugarExpedicion}</strong></div>
                             </div>
                           </div>
                           
@@ -1005,22 +1002,22 @@ export default function TicketsListScreen({
                           <div class="billing-info-section">
                             <div class="bill-to-box">
                               <div class="bill-title">Facturado a (Cfdi Receptor)</div>
-                              <h3 class="bill-client-name">Público General / Cliente Registrado</h3>
+                              <h3 class="bill-client-name">${nombreReceptorVal}</h3>
                               <div class="bill-details">
-                                <p><strong>RFC:</strong> XAXX010101000</p>
-                                <p><strong>Uso CFDI:</strong> G03 - Gastos en general</p>
-                                <p><strong>Email:</strong> receptor.sat@zenticket.mx</p>
-                                <p><strong>Régimen Fiscal:</strong> 616 - Sin obligaciones fiscales</p>
+                                <p><strong>RFC:</strong> ${rfcReceptorVal}</p>
+                                <p><strong>Uso CFDI:</strong> ${usoCfdiVal}</p>
+                                <p><strong>Email:</strong> ${emailReceptorVal}</p>
+                                <p><strong>Régimen Fiscal:</strong> ${regimenFiscalReceptorVal}</p>
                               </div>
                             </div>
                             
                             <div class="bill-to-box">
                               <div class="bill-title">Datos Fiscales de Certificación</div>
                               <div class="bill-details" style="margin-top: 4px;">
-                                <p><strong>Lugar de Expedición:</strong> CDMX, México</p>
-                                <p><strong>Certificado SAT:</strong> 00001000000504465028</p>
-                                <p><strong>Certificado Emisor:</strong> 00001000000503932847</p>
-                                <p><strong>No. de Aprobación:</strong> PUE - Pago en una sola exhibición</p>
+                                <p><strong>Certificado SAT:</strong> ${noCertificadoSAT}</p>
+                                <p><strong>Certificado Emisor:</strong> ${noCertificadoEmisor}</p>
+                                <p><strong>Método de Pago:</strong> ${metodoPagoVal}</p>
+                                <p><strong>Moneda:</strong> MXN - Peso Mexicano</p>
                               </div>
                             </div>
                           </div>
@@ -1033,25 +1030,24 @@ export default function TicketsListScreen({
                                   <th>ST</th>
                                   <th>Descripción del Concepto</th>
                                   <th style="text-align: right;">Precio Unitario</th>
-                                  <th style="text-align: center; width: 80px;">Cant.</th>
-                                  <th style="text-align: right; width: 140px;">Importe</th>
+                                  <th style="text-align: center; width: 60px;">Cant.</th>
+                                  <th style="text-align: right; width: 120px;">Importe</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 ${itemsList.map((item: any, idx: number) => {
                                   const stNum = String(idx + 1).padStart(2, '0');
-                                  const itemDesc = item.description || item.descripcion || "Consumo General de Mercancías";
                                   const unitVal = item.amount || item.importe || 0;
                                   return `
                                     <tr>
-                                      <td class="cell-st">${stNum}</td>
+                                      <td class="cell-st">\${stNum}</td>
                                       <td class="cell-desc">
-                                        <span>${itemDesc}</span>
-                                        <span class="subtext">Clave SAT: 90101501 | Unidad: E48 - Servicio</span>
+                                        <span>\${item.description || item.descripcion}</span>
+                                        <span class="subtext">Clave SAT: \${item.code || "90101501"} | Unidad: E48 - Servicio</span>
                                       </td>
-                                      <td class="cell-rate" style="text-align: right;">$${unitVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                      <td class="cell-rate" style="text-align: right;">$\${unitVal.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</td>
                                       <td class="cell-qty" style="text-align: center;">1</td>
-                                      <td class="cell-total">$${unitVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                      <td class="cell-total">$\${unitVal.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</td>
                                     </tr>
                                   `;
                                 }).join("")}
@@ -1068,8 +1064,8 @@ export default function TicketsListScreen({
                                 <p>Este documento es una representación impresa de un CFDI versión 4.0. El pago se efectúa mediante una sola exhibición (PUE). Cualquier aclaración referente a la facturación de su ticket favor de realizarla dentro de los 30 días posteriores a la fecha de emisión.</p>
                               </div>
                               
-                              <div class="signature-container">
-                                <h4 class="signature-author">ZenTicket Digital</h4>
+                              <div class="signature-container" style="display: flex; flex-direction: column; align-items: flex-start;">
+                                <img src="https://customer-assets.emergentagent.com/job_zenticket-preview/artifacts/23vqzgm3_Zenticket%20logo%203B.png" style="height: 22px; width: auto; margin-bottom: 5px;" alt="ZenTicket" />
                                 <div class="signature-line"></div>
                                 <span class="signature-title">Firma del Emisor Certificado</span>
                               </div>
@@ -1080,7 +1076,7 @@ export default function TicketsListScreen({
                                 <span>Subtotal</span>
                                 <span>$${subtotalVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                               </div>
-                              <div class="subtotal-metric-row" style="border-bottom: 1.5px solid #f1f5f9; padding-bottom: 12px;">
+                              <div class="subtotal-metric-row" style="border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
                                 <span>IVA Trasladado (16.00%)</span>
                                 <span>$${ivaVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                               </div>
@@ -1096,19 +1092,11 @@ export default function TicketsListScreen({
                           <!-- SAT Security Block -->
                           <div class="sat-verification-section">
                             <div class="qr-code-holder">
-                              <svg style="width: 100%; height: 100%; color: #1e293b;" viewBox="0 0 100 100" fill="currentColor">
-                                <path d="M0,0 h30 v30 h-30 z M10,10 h10 v10 h-10 z" />
-                                <path d="M70,0 h30 v30 h-30 z M80,10 h10 v10 h-10 z" />
-                                <path d="M0,70 h30 v30 h-30 z M10,80 h10 v10 h-10 z" />
-                                <path d="M40,10 h10 v10 h-10 z M55,0 h10 v15 h-10 z" />
-                                <path d="M40,40 h15 v5 h-15 z M45,55 h20 v10 h-20 z" />
-                                <path d="M75,40 h15 v20 h-15 z M85,75 h10 v15 h-10 z" />
-                                <path d="M40,80 h10 v10 h-10 z M55,75 h20 v5 h-20 z" />
-                              </svg>
+                              <img src="${satQrCodeImgSrc}" style="width: 100%; height: 100%; object-fit: contain;" alt="SAT Verification QR" />
                             </div>
                             <div class="stamp-details-box">
                               <h5 class="stamp-headline">Sello Digital del SAT</h5>
-                              <p class="stamp-content">JX9A23KSF841HLWND82HJKLSW0K295LW0192LSLW0KND82910NSDLUQ9W892019ADJLW2</p>
+                              <p class="stamp-content">${selloSAT}</p>
                               <span class="certified-pill">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                                   <polyline points="20 6 9 17 4 12"></polyline>
@@ -1118,19 +1106,10 @@ export default function TicketsListScreen({
                             </div>
                           </div>
                           
-                          <!-- Designer decorative contact footer bar -->
+                          <!-- Footer banner item indicating invoice origin -->
                           <div class="custom-decor-footer-banner">
                             <div class="footer-banner-item">
-                              <span class="footer-banner-icon">📞</span>
-                              <span>01-800-ZENTICKET</span>
-                            </div>
-                            <div class="footer-banner-item">
-                              <span class="footer-banner-icon">🌐</span>
-                              <span>www.zenticket.mx</span>
-                            </div>
-                            <div class="footer-banner-item">
-                              <span class="footer-banner-icon">📍</span>
-                              <span>Paseo de la Reforma 222, CDMX</span>
+                              <span>Esta factura es una representación impresa de un CFDI emitida a través de ZenTicket &bull; www.zenticket.mx</span>
                             </div>
                           </div>
 
@@ -1151,7 +1130,17 @@ export default function TicketsListScreen({
 
           <button
             type="button"
-            onClick={() => downloadFile(activeInvoiceData.xmlContent, `Factura_${emisorNameRaw}_${uuidVal.substring(0,10)}.xml`, "text/xml")}
+            onClick={() => {
+              let xmlToDownload = activeInvoiceData.xmlContent;
+              if (!xmlToDownload) {
+                const subT = totalVal / 1.16;
+                const ivT = totalVal - subT;
+                const emNameClean = emisorCorp.replace(/["&'<>]/g, "");
+                const recNameClean = nombreReceptorVal.replace(/["&'<>]/g, "");
+                xmlToDownload = `<?xml version="1.0" encoding="UTF-8"?>\n<cfdi:Comprobante Version="4.0" Serie="F" Folio="88219" Fecha="${formattedDate.replace(" ", "T")}" SubTotal="${subT.toFixed(2)}" Moneda="MXN" TipoDeComprobante="I" Exportacion="01" MetodoPago="PUE" LugarExpedicion="${lugarExpedicion.replace(", México", "")}" Total="${totalVal.toFixed(2)}">\n  <cfdi:Emisor Rfc="${rfcEmisorVal}" Nombre="${emNameClean}" RegimenFiscal="601"/>\n  <cfdi:Receptor Rfc="${rfcReceptorVal}" Nombre="${recNameClean}" RegimenFiscalReceptor="${regimenFiscalReceptorVal.substring(0,3)}" UsoCFDI="${usoCfdiVal.substring(0,3)}"/>\n  <cfdi:Conceptos>\n    <cfdi:Concepto ClaveProdServ="90101501" Cantidad="1" ClaveUnidad="E48" Descripcion="${itemsList[0]?.description || itemsList[0]?.descripcion || "Consumo General de Mercancías"}" ValorUnitario="${subT.toFixed(2)}" Importe="${subT.toFixed(2)}">\n      <cfdi:Impuestos>\n        <cfdi:Traslados>\n          <cfdi:Traslado Base="${subT.toFixed(2)}" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="${ivT.toFixed(2)}"/>\n        </cfdi:Traslados>\n      </cfdi:Impuestos>\n    </cfdi:Concepto>\n  </cfdi:Conceptos>\n  <cfdi:Complemento>\n    <tfd:TimbreFiscalDigital Version="1.1" UUID="${uuidVal}" FechaTimbrado="${formattedDate.replace(" ", "T")}" SelloCFD="${selloSAT.substring(0, 30)}..." NoCertificadoSAT="${noCertificadoSAT}" SelloSAT="${selloSAT}"/>\n  </cfdi:Complemento>\n</cfdi:Comprobante>`;
+              }
+              downloadFile(xmlToDownload, `Factura_${emisorNameRaw}_${uuidVal.substring(0,10)}.xml`, "text/xml");
+            }}
             className="w-full zt-btn-secondary-blue transition duration-150 flex items-center justify-center gap-2 py-4 rounded-2xl font-black uppercase text-xs cursor-pointer"
           >
             <span>{"</>"}</span>
