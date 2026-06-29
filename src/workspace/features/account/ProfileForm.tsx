@@ -3896,10 +3896,10 @@ export default function ProfileForm({
                 <span className="font-display font-black text-xl text-slate-900 capitalize tracking-tight">
                   {getPlanLabel(selectedPlan)}
                 </span>
-                <p className="text-xs text-slate-450 mt-1 font-medium leading-relaxed max-w-[280px]">
+                <p className="text-[10.5px] text-slate-450 mt-1 font-semibold leading-relaxed">
                   {selectedPlan !== "gratuito" 
-                    ? "Vigencia de 1 mes o hasta agotar el límite de facturas del plan, lo que ocurra primero."
-                    : "Plan de prueba inicial permanente."}
+                    ? "Vigencia de 1 mes o hasta agotar facturas."
+                    : "Plan de prueba permanente."}
                 </p>
               </div>
             </div>
