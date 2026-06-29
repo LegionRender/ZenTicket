@@ -2337,6 +2337,133 @@ async function syncCustomerPaymentMethods(stripeCustomerId: string, stripeSecret
   }
 }
 
+app.post("/api/billing/sync-subscription", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuración de Stripe incompleta" });
+    return;
+  }
+
+  try {
+    const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
+    if (!stripeCustomerId) {
+      res.status(400).json({ error: "El usuario no tiene un cliente de Stripe creado." });
+      return;
+    }
+
+    const subsResponse = await axios.get(
+      `https://api.stripe.com/v1/subscriptions?customer=${stripeCustomerId}&status=active&limit=1`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+    const subscriptions = subsResponse.data.data;
+
+    if (subscriptions.length > 0) {
+      const sub = subscriptions[0];
+      const planId = sub.metadata?.planId || "gratuito";
+      const limits: Record<string, number> = { brisa: 10, personal: 20, serenidad: 30, empresa: 60, nirvana: 100 };
+      const invoicesLimit = limits[planId] || 5;
+      const planName = planId === "personal" ? "Plan Personal" : planId === "empresa" ? "Plan Empresa" : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`;
+      const nowIso = new Date().toISOString();
+      const periodEnd = new Date(sub.current_period_end * 1000).toISOString();
+
+      await adminDb.collection("subscriptions").doc(userId).set({
+        userId,
+        planId,
+        planName,
+        status: "subscription_active",
+        provider: "stripe",
+        providerSubscriptionId: sub.id,
+        stripeCustomerId,
+        currentPeriodStart: new Date(sub.current_period_start * 1000).toISOString(),
+        currentPeriodEnd: periodEnd,
+        invoicesLimit,
+        invoicesUsed: 0,
+        updatedAt: nowIso
+      }, { merge: true });
+
+      await adminDb.collection("billingProfiles").doc(userId).set({
+        stripeCustomerId,
+        subscriptionId: sub.id,
+        planId,
+        subscriptionStatus: "subscription_active",
+        updatedAt: nowIso
+      }, { merge: true });
+
+      await adminDb.collection("fiscalProfiles").doc(userId).set({
+        plan: planId,
+        planStartDate: new Date(sub.current_period_start * 1000).toISOString(),
+        paymentStatus: "subscription_active",
+        autoRenew: true,
+        stripeCustomerId,
+        invoicesLimit
+      }, { merge: true });
+
+      res.json({ success: true, planId, status: "subscription_active", source: "stripe_subscription" });
+      return;
+    }
+
+    const sessionsResponse = await axios.get(
+      `https://api.stripe.com/v1/checkout/sessions?customer=${stripeCustomerId}&limit=5`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+    const sessions = sessionsResponse.data.data;
+    const paidSession = sessions.find(s => s.payment_status === "paid");
+
+    if (paidSession) {
+      const planId = paidSession.metadata?.planId || "gratuito";
+      const limits: Record<string, number> = { brisa: 10, personal: 20, serenidad: 30, empresa: 60, nirvana: 100 };
+      const invoicesLimit = limits[planId] || 5;
+      const planName = planId === "personal" ? "Plan Personal" : planId === "empresa" ? "Plan Empresa" : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`;
+      const nowIso = new Date().toISOString();
+      const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+      await adminDb.collection("subscriptions").doc(userId).set({
+        userId,
+        planId,
+        planName,
+        status: "paid",
+        provider: "stripe",
+        providerSubscriptionId: paidSession.id,
+        stripeCustomerId,
+        currentPeriodStart: nowIso,
+        currentPeriodEnd: periodEnd,
+        invoicesLimit,
+        invoicesUsed: 0,
+        updatedAt: nowIso
+      }, { merge: true });
+
+      await adminDb.collection("billingProfiles").doc(userId).set({
+        stripeCustomerId,
+        subscriptionId: null,
+        planId,
+        subscriptionStatus: "paid",
+        updatedAt: nowIso
+      }, { merge: true });
+
+      await adminDb.collection("fiscalProfiles").doc(userId).set({
+        plan: planId,
+        planStartDate: nowIso,
+        paymentStatus: "paid",
+        autoRenew: false,
+        stripeCustomerId,
+        invoicesLimit
+      }, { merge: true });
+
+      res.json({ success: true, planId, status: "paid", source: "stripe_payment" });
+      return;
+    }
+
+    res.json({ success: true, planId: "gratuito", status: "inactive", source: "none" });
+  } catch (error: any) {
+    console.error("Error al sincronizar suscripción de Stripe:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post("/api/billing/sync-customer", authenticateFirebaseToken, async (req: any, res: any) => {
   const userId = req.user.uid;
   const email = req.user.email;

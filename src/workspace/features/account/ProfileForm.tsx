@@ -2866,6 +2866,33 @@ export default function ProfileForm({
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Activo
                       </span>
                     </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const toastId = toast.loading("Sincronizando plan con Stripe...");
+                        try {
+                          const res = await fetchWithAuth("/api/billing/sync-subscription", { method: "POST" });
+                          if (res.ok) {
+                            const data = await res.json();
+                            toast.removeToast(toastId);
+                            if (data.planId && data.planId !== "gratuito") {
+                              toast.success(`¡Sincronizado! Plan ${data.planId} activo con éxito.`, "Plan Actualizado");
+                              setTimeout(() => window.location.reload(), 1500);
+                            } else {
+                              toast.info("No se encontraron suscripciones activas recientes en tu cuenta de Stripe.");
+                            }
+                          } else {
+                            throw new Error("Sync failed");
+                          }
+                        } catch (err) {
+                          toast.removeToast(toastId);
+                          toast.error("Ocurrió un error al sincronizar con Stripe.");
+                        }
+                      }}
+                      className="text-[9.5px] text-[#0B53F4] hover:underline font-bold block mt-1 cursor-pointer"
+                    >
+                      ¿Ya pagaste? Sincronizar estado
+                    </button>
                   </div>
                   <button 
                     type="button"
