@@ -30,7 +30,9 @@ var import_genai = require("@google/genai");
 var import_nodemailer = __toESM(require("nodemailer"), 1);
 var import_app = require("firebase-admin/app");
 var import_firestore = require("firebase-admin/firestore");
+var import_auth = require("firebase-admin/auth");
 var import_axios = __toESM(require("axios"), 1);
+var import_crypto = __toESM(require("crypto"), 1);
 import_dotenv.default.config();
 var hasRealCredentials = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
 var adminDb;
@@ -96,8 +98,324 @@ if (!adminDb) {
     }
   };
 }
+var authenticateFirebaseToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (process.env.NODE_ENV !== "production" && process.env.DEV_BILLING_AUTH_BYPASS === "true") {
+      const mockUid = req.headers["x-mock-user-id"];
+      const mockEmail = req.headers["x-mock-user-email"];
+      if (mockUid) {
+        req.user = {
+          uid: mockUid,
+          email: mockEmail || "mock@example.com",
+          email_verified: true
+        };
+        next();
+        return;
+      }
+    }
+    res.status(401).json({ error: "Falta el token de autorizaci\xF3n o es inv\xE1lido" });
+    return;
+  }
+  const token = authHeader.split("Bearer ")[1];
+  try {
+    if (!hasRealCredentials) {
+      if (process.env.NODE_ENV !== "production" && process.env.DEV_BILLING_AUTH_BYPASS === "true") {
+        const mockUid = req.headers["x-mock-user-id"] || "mock-local-uid";
+        const mockEmail = req.headers["x-mock-user-email"] || "mock@example.com";
+        req.user = {
+          uid: mockUid,
+          email: mockEmail,
+          email_verified: true
+        };
+        next();
+        return;
+      }
+      res.status(401).json({ error: "Desarrollo local: Habilite DEV_BILLING_AUTH_BYPASS para pruebas" });
+      return;
+    }
+    const decodedToken = await (0, import_auth.getAuth)().verifyIdToken(token);
+    req.user = {
+      uid: decodedToken.uid,
+      email: decodedToken.email || "",
+      email_verified: decodedToken.email_verified === true
+    };
+    next();
+  } catch (error) {
+    console.error("Error al verificar token de Firebase:", error.message);
+    res.status(401).json({ error: "Token de Firebase inv\xE1lido o expirado" });
+  }
+};
+async function resolveStripeCustomerId(uid, email, emailVerified) {
+  const billingRef = adminDb.collection("billingProfiles").doc(uid);
+  const billingSnap = await billingRef.get();
+  if (billingSnap.exists) {
+    const data = billingSnap.data();
+    if (data?.stripeCustomerId) {
+      return data.stripeCustomerId;
+    }
+  }
+  const fiscalRef = adminDb.collection("fiscalProfiles").doc(uid);
+  const fiscalSnap = await fiscalRef.get();
+  if (fiscalSnap.exists) {
+    const historicalCustomerId = fiscalSnap.data()?.stripeCustomerId;
+    if (historicalCustomerId) {
+      const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+      if (stripeSecretKey) {
+        try {
+          const res = await import_axios.default.get(
+            `https://api.stripe.com/v1/customers/${historicalCustomerId}`,
+            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+          );
+          const customer = res.data;
+          if (email && emailVerified && customer.email && customer.email.toLowerCase() === email.toLowerCase()) {
+            console.log(`[Migration] Migrando stripeCustomerId ${historicalCustomerId} desde fiscalProfiles a billingProfiles para ${uid}`);
+            await billingRef.set({ stripeCustomerId: historicalCustomerId }, { merge: true });
+            return historicalCustomerId;
+          } else {
+            console.warn(`[Migration warning] Email mismatch for historical stripeCustomerId ${historicalCustomerId}. Token email: ${email}, Customer email: ${customer.email}. No se migr\xF3.`);
+          }
+        } catch (err) {
+          console.error(`[Migration error] Error al validar customer hist\xF3rico ${historicalCustomerId}:`, err.message);
+        }
+      }
+    }
+  }
+  if (email && emailVerified) {
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    if (stripeSecretKey) {
+      try {
+        const response = await import_axios.default.get(
+          `https://api.stripe.com/v1/customers?email=${encodeURIComponent(email)}`,
+          { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+        );
+        const customers = response.data?.data || [];
+        if (customers.length === 1) {
+          const matchedCustomerId = customers[0].id;
+          console.log(`[Migration] Vinculando stripeCustomerId ${matchedCustomerId} de Stripe por correo verificado ${email} para ${uid}`);
+          await billingRef.set({ stripeCustomerId: matchedCustomerId }, { merge: true });
+          return matchedCustomerId;
+        } else if (customers.length > 1) {
+          console.warn(`[Migration warning] M\xFAltiples clientes encontrados para ${email}. Se requiere resoluci\xF3n manual.`);
+        }
+      } catch (err) {
+        console.error(`[Migration error] Error al buscar customer por correo:`, err.message);
+      }
+    }
+  }
+  if (email) {
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    if (stripeSecretKey) {
+      try {
+        const customerParams = new URLSearchParams({
+          email,
+          name: email.split("@")[0],
+          "metadata[userId]": uid
+        });
+        const customerResponse = await import_axios.default.post(
+          "https://api.stripe.com/v1/customers",
+          customerParams.toString(),
+          {
+            headers: {
+              Authorization: `Bearer ${stripeSecretKey}`,
+              "Content-Type": "application/x-www-form-urlencoded"
+            }
+          }
+        );
+        const stripeCustomerId = customerResponse.data.id;
+        console.log(`[Stripe Auto-Creation] Creado cliente ${stripeCustomerId} para ${uid}`);
+        await billingRef.set({ stripeCustomerId }, { merge: true });
+        return stripeCustomerId;
+      } catch (err) {
+        console.error(`[Stripe Auto-Creation error] Error al crear cliente para ${uid}:`, err.message);
+      }
+    }
+  }
+  return null;
+}
+function verifyStripeSignature(rawBody, signatureHeader, webhookSecret) {
+  if (!signatureHeader || !webhookSecret) return false;
+  const parts = signatureHeader.split(",");
+  let timestamp = "";
+  const signatures = [];
+  for (const part of parts) {
+    const [key, val] = part.split("=");
+    if (key === "t") timestamp = val;
+    if (key === "v1") signatures.push(val);
+  }
+  if (!timestamp || signatures.length === 0) return false;
+  const signedPayload = `${timestamp}.${rawBody}`;
+  const computedSig = import_crypto.default.createHmac("sha256", webhookSecret).update(signedPayload).digest("hex");
+  const computedBuffer = Buffer.from(computedSig, "hex");
+  for (const sig of signatures) {
+    const sigBuffer = Buffer.from(sig, "hex");
+    if (computedBuffer.length === sigBuffer.length && import_crypto.default.timingSafeEqual(computedBuffer, sigBuffer)) {
+      return true;
+    }
+  }
+  return false;
+}
 var app = (0, import_express.default)();
 var PORT = process.env.PORT ? parseInt(process.env.PORT) : 3e3;
+app.post("/api/billing/webhooks/stripe", import_express.default.raw({ type: "application/json" }), async (req, res) => {
+  const sig = req.headers["stripe-signature"];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!sig || !webhookSecret) {
+    console.error("[Stripe Webhook Error] Falta la firma stripe-signature o STRIPE_WEBHOOK_SECRET");
+    res.status(400).send("Webhook signature verification failed");
+    return;
+  }
+  const rawBody = req.body.toString("utf8");
+  if (!verifyStripeSignature(rawBody, sig, webhookSecret)) {
+    console.error("[Stripe Webhook Error] Firma de Stripe inv\xE1lida");
+    res.status(400).send("Webhook signature verification failed");
+    return;
+  }
+  let event;
+  try {
+    event = JSON.parse(rawBody);
+  } catch (err) {
+    res.status(400).send("Invalid JSON");
+    return;
+  }
+  console.log(`[Stripe Webhook] Recibido event verificado: ${event?.type}`);
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).send("Webhook config error: missing token");
+    return;
+  }
+  try {
+    if (event.type === "setup_intent.succeeded" || event.type === "payment_method.attached" || event.type === "payment_method.detached") {
+      const stripeCustomerId = event.data?.object?.customer;
+      if (stripeCustomerId) {
+        await syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, adminDb);
+      }
+    }
+    if (event.type === "payment_intent.succeeded") {
+      const paymentIntentObj = event.data?.object;
+      const paymentIntentId = paymentIntentObj?.id;
+      if (paymentIntentId) {
+        const paymentQuery = await adminDb.collection("payments").where("providerPaymentId", "==", paymentIntentId).limit(1).get();
+        if (!paymentQuery.empty) {
+          await paymentQuery.docs[0].ref.set({
+            status: "paid",
+            paidAt: (/* @__PURE__ */ new Date()).toISOString(),
+            updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+          }, { merge: true });
+        }
+      }
+    }
+    await adminDb.collection("billingEvents").add({
+      provider: "stripe",
+      eventType: event.type || "unknown",
+      providerEventId: event.id || "unknown",
+      processed: true,
+      receivedAt: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    if (event.type === "checkout.session.completed") {
+      const sessionObj = event.data?.object;
+      if (sessionObj && sessionObj.id) {
+        const sessionId = sessionObj.id;
+        const response = await import_axios.default.get(
+          `https://api.stripe.com/v1/checkout/sessions/${sessionId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${stripeSecretKey}`
+            }
+          }
+        );
+        const session = response.data;
+        const paymentStatus = session.payment_status;
+        const externalReference = session.client_reference_id;
+        console.log(`[Stripe] Checkout Session retrieve: status=${session.status}, payment_status=${paymentStatus}, ref=${externalReference}`);
+        if (session.mode === "setup" && session.setup_intent && externalReference) {
+          const setupResponse = await import_axios.default.get(
+            `https://api.stripe.com/v1/setup_intents/${session.setup_intent}?expand[]=payment_method`,
+            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+          );
+          const paymentMethod = setupResponse.data.payment_method;
+          const card = paymentMethod?.card;
+          if (card) {
+            const billingRef = adminDb.collection("billingProfiles").doc(externalReference);
+            const billingSnapshot = await billingRef.get();
+            const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards) ? billingSnapshot.data().paymentCards : [];
+            const formattedBrand = String(card.brand || "VISA").toUpperCase();
+            const nextCard = {
+              id: paymentMethod.id,
+              brand: formattedBrand,
+              last4: card.last4,
+              expiry: `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`,
+              holderName: session.metadata?.holderName || paymentMethod.billing_details?.name || "Titular",
+              bankName: session.metadata?.bankName || (formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand),
+              isDefault: true,
+              stripePaymentMethodId: paymentMethod.id
+            };
+            const paymentCards = [
+              nextCard,
+              ...existingCards.filter((item) => item.id !== paymentMethod.id).map((item) => ({ ...item, isDefault: false }))
+            ];
+            await billingRef.set({ paymentCards, stripeCustomerId: session.customer }, { merge: true });
+          }
+          res.status(200).send("OK");
+          return;
+        }
+        if (paymentStatus === "paid" && externalReference) {
+          const [userId, planId] = externalReference.split(":");
+          const amount = session.amount_total ? session.amount_total / 100 : 0;
+          const paymentDocId = `stripe_payment_${session.id}`;
+          await adminDb.collection("payments").doc(paymentDocId).set({
+            userId,
+            planId,
+            provider: "stripe",
+            providerPaymentId: session.id,
+            amount,
+            currency: session.currency?.toUpperCase() || "MXN",
+            status: "paid",
+            paidAt: (/* @__PURE__ */ new Date()).toISOString(),
+            createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+            updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+          }, { merge: true });
+          let limit = 5;
+          if (planId === "brisa") limit = 10;
+          else if (planId === "serenidad") limit = 30;
+          else if (planId === "nirvana") limit = 100;
+          else if (planId === "personal") limit = 20;
+          else if (planId === "empresa") limit = 60;
+          await adminDb.collection("subscriptions").doc(userId).set({
+            userId,
+            planId,
+            planName: planId === "personal" ? "Plan Personal" : planId === "empresa" ? "Plan Empresa" : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
+            status: "subscription_active",
+            provider: "stripe",
+            providerSubscriptionId: session.id,
+            currentPeriodStart: (/* @__PURE__ */ new Date()).toISOString(),
+            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString(),
+            invoicesLimit: limit,
+            invoicesUsed: 0,
+            createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+            updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+          });
+          await adminDb.collection("billingProfiles").doc(userId).set({
+            stripeCustomerId: session.customer || null,
+            planId,
+            subscriptionStatus: "paid",
+            subscriptionId: session.id
+          }, { merge: true });
+          await adminDb.collection("fiscalProfiles").doc(userId).set({
+            plan: planId,
+            planStartDate: (/* @__PURE__ */ new Date()).toISOString(),
+            paymentStatus: "paid",
+            autoRenew: true
+          }, { merge: true });
+        }
+      }
+    }
+    res.status(200).send("OK");
+  } catch (error) {
+    console.error("Error al procesar webhook de Stripe:", error.response?.data || error.message);
+    res.status(500).send("Error de procesamiento");
+  }
+});
 app.use(import_express.default.json({ limit: "15mb" }));
 app.use(import_express.default.urlencoded({ extended: true, limit: "15mb" }));
 app.get("/api/config/status", (req, res) => {
@@ -802,172 +1120,154 @@ function generateLocalPdfHtml(ticket, profile, connector, folioFiscal) {
       const itemSub = itemAmount / 1.16;
       return `
         <tr class="border-b border-zinc-100 last:border-0 hover:bg-zinc-50/50 transition">
-          <td class="py-3 px-4 font-medium text-zinc-800">1</td>
-          <td class="py-3 px-4 font-mono text-xs text-zinc-500">90101501</td>
-          <td class="py-3 px-4 text-zinc-750 text-xs">${escapeXml(item.description || "Consumo general")}</td>
-          <td class="py-3 px-4 text-right font-mono text-xs text-zinc-600">$${itemSub.toFixed(2)}</td>
-          <td class="py-3 px-4 text-right font-mono font-semibold text-xs text-zinc-900">$${itemAmount.toFixed(2)}</td>
+          <td class="py-2 px-3.5 font-medium text-zinc-800">${idx + 1}</td>
+          <td class="py-2 px-3.5 font-mono text-[10px] text-zinc-500">90101501</td>
+          <td class="py-2 px-3.5 text-zinc-700 text-xs">${escapeXml(item.description || "Consumo general")}</td>
+          <td class="py-2 px-3.5 text-right font-mono text-[10px] text-zinc-650">$${itemSub.toFixed(2)}</td>
+          <td class="py-2 px-3.5 text-right font-mono font-semibold text-xs text-zinc-900">$${itemAmount.toFixed(2)}</td>
         </tr>
       `;
     }).join("");
   } else {
     itemsRows = `
       <tr class="border-b border-zinc-100 last:border-0 hover:bg-zinc-50/50 transition">
-        <td class="py-3 px-4 font-semibold text-zinc-850">1</td>
-        <td class="py-3 px-4 font-mono text-xs text-zinc-500">90101501</td>
-        <td class="py-3 px-4 text-zinc-750 text-xs">Consumo de alimentos seg\xFAn ticket folio: ${escapeXml(ticket.folio || "M-8495")}</td>
-        <td class="py-3 px-4 text-right font-mono text-xs text-zinc-600">$${subtotal.toFixed(2)}</td>
-        <td class="py-3 px-4 text-right font-mono font-bold text-xs text-zinc-900">$${total.toFixed(2)}</td>
+        <td class="py-2 px-3.5 font-semibold text-zinc-850">1</td>
+        <td class="py-2 px-3.5 font-mono text-[10px] text-zinc-500">90101501</td>
+        <td class="py-2 px-3.5 text-zinc-700 text-xs">Consumo de alimentos seg\xFAn ticket folio: ${escapeXml(ticket.folio || "M-8495")}</td>
+        <td class="py-2 px-3.5 text-right font-mono text-[10px] text-zinc-650">$${subtotal.toFixed(2)}</td>
+        <td class="py-2 px-3.5 text-right font-mono font-bold text-xs text-zinc-900">$${total.toFixed(2)}</td>
       </tr>
     `;
   }
   return `
-    <div class="max-w-4xl mx-auto bg-white p-6 md:p-12 shadow-2xl rounded-2xl border border-zinc-150 text-zinc-800 text-sm font-sans relative overflow-hidden my-6">
-      <!-- Watermark Badge for Demo Fallback -->
-      <div class="absolute top-4 right-4 bg-amber-50 border border-amber-200 text-amber-700 font-bold px-3 py-1 rounded-full text-[10px] uppercase tracking-wider flex items-center gap-1">
-        <span>Prueba Simulada</span>
+    <div class="max-w-4xl mx-auto bg-white p-5 md:p-8 rounded-2xl border border-zinc-150 text-zinc-800 text-xs font-sans relative my-4 shadow-sm select-none print:my-0 print:border-0 print:shadow-none">
+      
+      <!-- HEADER ROW -->
+      <div class="flex flex-row justify-between items-start border-b border-zinc-100 pb-3.5 mb-3.5">
+        <div class="space-y-1">
+          <!-- ZenTicket Logo Lockup -->
+          <div class="flex items-center gap-1.5 select-none">
+            <svg width="22" height="22" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="zt-mark-pdf" x1="0" y1="0" x2="28" y2="28">
+                  <stop offset="0%" stop-color="#5B8CFF" />
+                  <stop offset="100%" stop-color="#2152EE" />
+                </linearGradient>
+              </defs>
+              <rect x="1" y="1" width="26" height="26" rx="7" fill="url(#zt-mark-pdf)" stroke="rgba(15,23,42,0.06)" />
+              <path d="M9 9h10l-9.2 10H19" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            </svg>
+            <span class="text-sm font-black text-slate-900 tracking-tight">ZenTicket</span>
+          </div>
+          <span class="text-[9px] font-black text-emerald-600 uppercase tracking-wider block">COMPROBANTE FISCAL DIGITAL POR INTERNET (CFDI 4.0)</span>
+        </div>
+        <div class="text-right leading-tight">
+          <h2 class="font-extrabold text-sm text-zinc-900 uppercase">${escapeXml(ticket.nombreEmisor || "RAZ\xD3N SOCIAL EMISOR")}</h2>
+          <p class="text-[10px] text-zinc-500 mt-0.5">RFC: <strong class="font-bold select-all">${escapeXml(ticket.rfcEmisor || "XAXX010101000")}</strong> | R\xE9gimen: 601</p>
+          <p class="text-[10px] text-zinc-450">Lugar de Expedici\xF3n CP: ${profile.codigoPostal || "01000"}</p>
+        </div>
       </div>
 
-      <!-- Header -->
-      <div class="flex flex-col md:flex-row justify-between items-start border-b border-zinc-200 pb-8 gap-6">
-        <div class="space-y-2">
-          <div class="flex items-center gap-2">
-            <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-lg select-none">F</div>
-            <span class="text-xl font-bold tracking-tight text-neutral-900 uppercase">FactuBot Automaci\xF3n</span>
+      <!-- METADATA GRID (3 columns) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 bg-zinc-50/50 p-3.5 rounded-xl border border-zinc-150">
+        <div>
+          <h4 class="text-[9px] font-black text-zinc-400 uppercase tracking-wider mb-1.5">RECEPTOR</h4>
+          <h5 class="font-extrabold text-zinc-900 uppercase text-[11px] select-all leading-tight">${escapeXml(profile.razonSocial || "RECEPTOR DEFAULT")}</h5>
+          <div class="space-y-0.5 mt-1 text-[10px] text-zinc-500">
+            <p>RFC: <strong class="font-bold select-all text-zinc-700">${escapeXml(profile.rfc || "XAXX010101000")}</strong></p>
+            <p>R\xE9gimen Receptor: ${profile.regimenFiscal || "605"}</p>
+            <p>Uso CFDI: ${profile.usoCFDI || "G03"}</p>
           </div>
-          <p class="text-[12px] text-zinc-500 max-w-sm leading-relaxed">Este documento es una representaci\xF3n impresa de un CFDI 4.0 generado mediante simulaci\xF3n de inteligencia artificial de alto nivel con backup local.</p>
         </div>
         
-        <div class="text-right space-y-1">
-          <div class="inline-block bg-indigo-50 text-indigo-700 font-bold px-3 py-1 rounded-lg text-xs uppercase tracking-wider">Factura Electr\xF3nica</div>
-          <p class="text-xs text-zinc-400">Folio Interno: <span class="font-mono text-zinc-700 font-semibold">FACT-${Math.floor(1e5 + Math.random() * 9e5)}</span></p>
-          <p class="text-xs text-zinc-400">Fecha de Timbrado: <span class="font-mono text-zinc-700">${dateStr}</span></p>
+        <div>
+          <h4 class="text-[9px] font-black text-zinc-400 uppercase tracking-wider mb-1.5">DETALLES CFDI</h4>
+          <div class="space-y-0.5 text-[10px] text-zinc-500">
+            <p>Folio Interno: <strong class="font-bold text-zinc-700">FT-${Math.floor(1e4 + Math.random() * 9e4)}</strong></p>
+            <p>Fecha Emisi\xF3n: ${dateStr}</p>
+            <p>M\xE9todo de Pago: PUE</p>
+            <p>Forma de Pago: 04 (Tarjeta o equiv.)</p>
+          </div>
+        </div>
+
+        <div>
+          <h4 class="text-[9px] font-black text-zinc-400 uppercase tracking-wider mb-1">FOLIO FISCAL (UUID)</h4>
+          <span class="text-[9.5px] font-bold font-mono text-zinc-650 block bg-white px-2.5 py-1.5 rounded-lg border border-zinc-200 break-all select-all leading-tight shadow-3xs">${folioFiscal}</span>
         </div>
       </div>
 
-      <!-- Emisor / Receptor Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 py-8 border-b border-zinc-150">
-        <div class="space-y-3">
-          <div class="text-xs text-zinc-400 font-bold uppercase tracking-wider">DATOS DEL EMISOR</div>
-          <div class="space-y-1 bg-zinc-50 p-4 rounded-xl border border-zinc-100">
-            <p class="font-bold text-zinc-900 text-base">${escapeXml(ticket.nombreEmisor || "EMISOR AUTOMATIZADO S.A. DE C.V.")}</p>
-            <p class="font-mono text-xs text-zinc-650">RFC: <span class="font-semibold text-zinc-900">${escapeXml(ticket.rfcEmisor || "XAXX010101000")}</span></p>
-            <p class="text-xs text-zinc-500">R\xE9gimen Fiscal: 601 General de Ley Personas Morales</p>
-            <p class="text-xs text-zinc-500">Portal de Origen: <span class="text-indigo-650 underline font-mono text-[10px] break-all">${escapeXml(connector.portalUrl || "https://facturacion.net")}</span></p>
-          </div>
-        </div>
+      <!-- CONCEPTS TABLE -->
+      <div class="border border-zinc-200 rounded-xl overflow-hidden mb-4 shadow-3xs">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="bg-zinc-50/70 border-b border-zinc-250 text-zinc-500 font-bold text-[9px] uppercase tracking-wider select-none">
+              <th class="py-2 px-3.5 w-10">Cant</th>
+              <th class="py-2 px-3.5 w-20">Sat ID</th>
+              <th class="py-2 px-3.5">Descripci\xF3n de Concepto</th>
+              <th class="py-2 px-3.5 text-right w-24">Precio Unit</th>
+              <th class="py-2 px-3.5 text-right w-24">Importe</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-zinc-100 text-[10.5px]">
+            ${itemsRows}
+          </tbody>
+        </table>
+      </div>
 
-        <div class="space-y-3">
-          <div class="text-xs text-zinc-400 font-bold uppercase tracking-wider">DATOS DEL RECEPTOR</div>
-          <div class="space-y-1 bg-zinc-50 p-4 rounded-xl border border-zinc-100">
-            <p class="font-bold text-zinc-900 text-base">${escapeXml(profile.razonSocial || "CLIENTE RECEPTOR S.C.")}</p>
-            <p class="font-mono text-xs text-zinc-650">RFC: <span class="font-semibold text-zinc-900">${escapeXml(profile.rfc || "XAXX010101000")}</span></p>
-            <p class="text-xs text-zinc-500">R\xE9gimen Fiscal: ${escapeXml(profile.regimenFiscal || "605 - Sueldos y Salarios")}</p>
-            <p class="text-xs text-zinc-500">C\xF3digo Postal Fiscal: <span class="font-mono">${escapeXml(profile.codigoPostal || "01000")}</span></p>
-            <p class="text-xs text-zinc-500">Uso de CFDI: <span class="font-semibold">${escapeXml(profile.usoCFDI || "G03 - Gastos en general")}</span></p>
+      <!-- TOTALS & QR ROW -->
+      <div class="flex flex-row justify-between items-end gap-6 border-b border-zinc-150 pb-3.5 mb-3.5">
+        <div class="flex items-center gap-3 bg-zinc-50 border border-zinc-150 rounded-lg p-2.5">
+          <div class="bg-white border rounded-md p-1 shrink-0 shadow-3xs">
+            <svg class="w-12 h-12 text-zinc-800" viewBox="0 0 100 100">
+              <rect width="100" height="100" fill="white" />
+              <rect x="10" y="10" width="10" height="10" fill="black" />
+              <rect x="30" y="10" width="10" height="10" fill="black" />
+              <rect x="10" y="30" width="10" height="10" fill="black" />
+              <rect x="70" y="10" width="10" height="10" fill="black" />
+              <rect x="80" y="10" width="10" height="10" fill="black" />
+              <rect x="70" y="30" width="10" height="10" fill="black" />
+              <rect x="10" y="70" width="10" height="10" fill="black" />
+              <rect x="20" y="70" width="10" height="10" fill="black" />
+              <rect x="10" y="80" width="10" height="10" fill="black" />
+              <rect x="40" y="40" width="20" height="20" fill="black" />
+              <rect x="50" y="70" width="30" height="10" fill="black" />
+              <rect x="70" y="50" width="10" height="30" fill="black" />
+            </svg>
+          </div>
+          <p class="text-[8.5px] text-zinc-400 max-w-[190px] leading-snug">
+            C\xF3digo bidimensional QR para verificaci\xF3n inmediata del CFDI directamente en los canales del SAT.
+          </p>
+        </div>
+        
+        <div class="w-64 space-y-1 text-xs">
+          <div class="flex justify-between text-zinc-500 font-semibold">
+            <span>Subtotal:</span>
+            <span class="font-mono">$${subtotal.toFixed(2)}</span>
+          </div>
+          <div class="flex justify-between text-zinc-500 font-semibold">
+            <span>IVA (16%):</span>
+            <span class="font-mono">$${iva.toFixed(2)}</span>
+          </div>
+          <div class="flex justify-between border-t border-zinc-200 pt-1.5 font-black text-base text-[#0B53F4]">
+            <span>Total MXN:</span>
+            <span class="font-mono select-all">$${total.toFixed(2)}</span>
           </div>
         </div>
       </div>
 
-      <!-- Partidas / Conceptos Table -->
-      <div class="py-8">
-        <div class="text-[11px] text-zinc-400 font-bold uppercase tracking-wider mb-3">CONCEPTOS INCLUIDOS EN FACTURA</div>
-        <div class="border border-zinc-155 rounded-xl overflow-hidden">
-          <table class="w-full text-left border-collapse">
-            <thead class="bg-zinc-50 text-xs text-zinc-500 font-semibold border-b border-zinc-150">
-              <tr>
-                <th class="py-3 px-4 w-12">Cant</th>
-                <th class="py-3 px-4 w-28">Clave SAT</th>
-                <th class="py-3 px-4">Descripci\xF3n</th>
-                <th class="py-3 px-4 text-right w-28">Pr. Unitario</th>
-                <th class="py-3 px-4 text-right w-28">Importe</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemsRows}
-            </tbody>
-          </table>
+      <!-- DIGITAL STAMPS (3 columns) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-[7px] text-zinc-400 font-mono leading-tight break-all">
+        <div>
+          <p class="font-black text-zinc-500 uppercase tracking-wider text-[7.5px] mb-0.5">Cadena Original SAT</p>
+          <p class="bg-zinc-50 p-2 rounded-lg border border-zinc-150 select-all">||1.1|${folioFiscal}|${dateStr}|SAT970701NN3|SIM_SELLOS_CFD_SAT_OK|00001000000504465028||</p>
         </div>
-      </div>
-
-      <!-- Totales y Sello Fiscal Digital -->
-      <div class="grid grid-cols-1 md:grid-cols-12 gap-8 pt-6 border-t border-zinc-150 items-start">
-        <!-- SAT Stamp Metadata -->
-        <div class="md:col-span-7 col-span-1 border border-zinc-100 rounded-xl p-4 bg-zinc-50 space-y-4">
-          <div class="flex items-start gap-4">
-            <!-- Simulated QR Code representing CFDI verification -->
-            <div class="w-24 h-24 bg-white border border-zinc-250 flex flex-col items-center justify-center p-1 rounded-lg shadow-sm shrink-0">
-              <svg class="w-full h-full text-zinc-800" viewBox="0 0 100 100">
-                <rect x="5" y="5" width="25" height="25" fill="currentColor" />
-                <rect x="10" y="10" width="15" height="15" fill="white" />
-                <rect x="13" y="13" width="9" height="9" fill="currentColor" />
-                <rect x="70" y="5" width="25" height="25" fill="currentColor" />
-                <rect x="75" y="10" width="15" height="15" fill="white" />
-                <rect x="78" y="13" width="9" height="9" fill="currentColor" />
-                <rect x="5" y="70" width="25" height="25" fill="currentColor" />
-                <rect x="10" y="75" width="15" height="15" fill="white" />
-                <rect x="13" y="78" width="9" height="9" fill="currentColor" />
-                <rect x="35" y="12" width="5" height="5" fill="currentColor" />
-                <rect x="45" y="8" width="8" fill="currentColor" />
-                <rect x="58" y="12" width="4" height="4" fill="currentColor" />
-                <rect x="38" y="24" width="12" height="4" fill="currentColor" />
-                <rect x="38" y="32" width="6" height="6" fill="currentColor" />
-                <rect x="50" y="45" width="10" height="10" fill="currentColor" />
-                <rect x="18" y="45" width="4" height="8" fill="currentColor" />
-                <rect x="35" y="58" width="15" height="3" fill="currentColor" />
-                <rect x="5" y="40" width="12" height="2" fill="currentColor" />
-                <rect x="85" y="45" width="8" height="8" fill="currentColor" />
-                <rect x="72" y="58" width="14" height="4" fill="currentColor" />
-                <rect x="42" y="70" width="8" height="12" fill="currentColor" />
-                <rect x="62" y="75" width="28" height="5" fill="currentColor" />
-                <rect x="75" y="85" width="4" height="10" fill="currentColor" />
-                <rect x="42" y="88" width="15" height="4" fill="currentColor" />
-              </svg>
-            </div>
-            
-            <div class="flex-1 space-y-1 min-w-0">
-              <span class="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block">Folio Fiscal Digital (UUID)</span>
-              <p class="font-mono text-[11px] text-indigo-700 font-bold select-all break-all">${folioFiscal}</p>
-              <div class="grid grid-cols-2 gap-2 pt-2">
-                <div>
-                  <span class="text-[8px] uppercase tracking-wider text-zinc-400 font-bold block">No. Certificado SAT</span>
-                  <p class="font-mono text-[10px] text-zinc-700 font-medium font-bold">00001000000502000436</p>
-                </div>
-                <div>
-                  <span class="text-[8px] uppercase tracking-wider text-zinc-400 font-bold block">Proveedor Certif.</span>
-                  <p class="font-mono text-[10px] text-zinc-700 font-medium font-bold">SAT970701NN3</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="space-y-1 border-t border-zinc-200 pt-3">
-            <span class="text-[8px] uppercase tracking-wider text-zinc-400 font-bold block">Sello Digital del Emisor</span>
-            <p class="font-mono text-[8px] text-zinc-500 break-all leading-normal select-all bg-white p-1.5 rounded border border-zinc-100">SIM_S8e7XU9rR/g8eY7wI2w9f8W9uR9xX8y3t1W7+R3v7f1m6eY=</p>
-          </div>
-          
-          <div class="space-y-1 border-t border-zinc-200/60 pt-3">
-            <span class="text-[8px] uppercase tracking-wider text-zinc-400 font-bold block">Sello Digital del SAT</span>
-            <p class="font-mono text-[8px] text-zinc-500 break-all leading-normal select-all bg-white p-1.5 rounded border border-zinc-100">SIM_SAT_f1e2a82_b500_4db2_9cf3_751b301c35ee_OK_S6g=</p>
-          </div>
+        <div>
+          <p class="font-black text-zinc-500 uppercase tracking-wider text-[7.5px] mb-0.5">Sello Digital Emisor</p>
+          <p class="bg-zinc-50 p-2 rounded-lg border border-zinc-150 select-all">SIM_COMPLEMENTO_CFD_CADENA_ORIGINAL_SELLADO_DIGITAL_EMISOR_ZENTICKET_OFFLINE</p>
         </div>
-
-        <!-- Financial Totals -->
-        <div class="md:col-span-5 col-span-1 space-y-2 text-right">
-          <div class="flex justify-between items-center text-zinc-500 text-xs px-2">
-            <span>Subtotal Gravado</span>
-            <span class="font-mono font-medium text-zinc-700">$${subtotal.toFixed(2)}</span>
-          </div>
-          <div class="flex justify-between items-center text-zinc-500 text-xs px-2">
-            <span>IVA Trasladado (16.00%)</span>
-            <span class="font-mono font-medium text-zinc-700">$${iva.toFixed(2)}</span>
-          </div>
-          <div class="flex justify-between items-center text-zinc-900 font-bold text-base bg-indigo-50 p-3 rounded-xl border border-indigo-100/40">
-            <span class="text-indigo-900 font-black tracking-tight text-xs uppercase">Total de Factura</span>
-            <span class="font-mono text-indigo-700 text-lg">$${total.toFixed(2)}</span>
-          </div>
-          
-          <p class="text-[9.5px] text-zinc-400 italic pt-2 leading-relaxed">Esta es una factura de prueba generada el ${dateStr}. Cumple t\xE9cnicamente con las especificaciones v4.0 en entornos simulados.</p>
+        <div>
+          <p class="font-black text-zinc-500 uppercase tracking-wider text-[7.5px] mb-0.5">Sello Digital SAT</p>
+          <p class="bg-zinc-50 p-2 rounded-lg border border-zinc-150 select-all">SIM_COMPLEMENTO_SAT_CADENA_ORIGINAL_SELLADO_DIGITAL_SAT_ZENTICKET_OFFLINE</p>
         </div>
       </div>
     </div>
@@ -1353,55 +1653,19 @@ app.post("/api/email/send", async (req, res) => {
     res.status(500).json({ error: `Fallo al despachar email de factura por SMTP: ${err.message}` });
   }
 });
-async function getPayPalAccessToken() {
-  const clientId = process.env.PAYPAL_CLIENT_ID;
-  const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new Error("Faltan credenciales PAYPAL_CLIENT_ID o PAYPAL_CLIENT_SECRET.");
-  }
-  const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-  try {
-    const response = await import_axios.default.post(
-      "https://api-m.paypal.com/v1/oauth2/token",
-      "grant_type=client_credentials",
-      {
-        headers: {
-          Authorization: `Basic ${auth}`,
-          "Content-Type": "application/x-www-form-urlencoded"
-        }
-      }
-    );
-    return {
-      accessToken: response.data.access_token,
-      host: "https://api-m.paypal.com"
-    };
-  } catch (error) {
-    const errData = error.response?.data;
-    if (errData && errData.error === "invalid_client") {
-      try {
-        const response = await import_axios.default.post(
-          "https://api-m.sandbox.paypal.com/v1/oauth2/token",
-          "grant_type=client_credentials",
-          {
-            headers: {
-              Authorization: `Basic ${auth}`,
-              "Content-Type": "application/x-www-form-urlencoded"
-            }
-          }
-        );
-        console.log("PayPal auto-detected Sandbox credentials; running in Sandbox mode.");
-        return {
-          accessToken: response.data.access_token,
-          host: "https://api-m.sandbox.paypal.com"
-        };
-      } catch (sandboxErr) {
-        throw new Error("Las credenciales de PayPal son inv\xE1lidas tanto para producci\xF3n como para sandbox.");
-      }
-    }
-    throw new Error("Error de comunicaci\xF3n o autenticaci\xF3n con PayPal: " + (errData?.error_description || error.message));
-  }
-}
 var getSafeBaseUrl = (req) => {
+  const referer = req.headers.referer;
+  if (referer) {
+    try {
+      const parsed = new URL(referer);
+      return parsed.origin;
+    } catch (e) {
+    }
+  }
+  const origin = req.headers.origin;
+  if (origin) {
+    return origin;
+  }
   let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
   if (Array.isArray(proto)) {
     proto = proto[0];
@@ -1412,267 +1676,25 @@ var getSafeBaseUrl = (req) => {
   const host = req.get("host") || "localhost:3000";
   return `${proto}://${host}`;
 };
-app.post("/api/billing/checkout/mercadopago", async (req, res) => {
-  const { userId, planId, payerEmail } = req.body;
-  if (!userId || !planId) {
-    res.status(400).json({ error: "Faltan par\xE1metros userId o planId" });
-    return;
-  }
-  let price = 0;
-  let title = "";
-  if (planId === "brisa") {
-    price = 2;
-    title = "Plan Brisa - ZenTicket";
-  } else if (planId === "serenidad") {
-    price = 250;
-    title = "Plan Serenidad - ZenTicket";
-  } else if (planId === "nirvana") {
-    price = 500;
-    title = "Plan Nirvana - ZenTicket";
-  } else if (planId === "personal") {
-    price = 150;
-    title = "Plan Personal - ZenTicket";
-  } else if (planId === "empresa") {
-    price = 300;
-    title = "Plan Empresa - ZenTicket";
-  } else {
-    res.status(400).json({ error: "Plan inv\xE1lido para pago" });
-    return;
-  }
-  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-  if (!accessToken) {
-    res.status(400).json({ error: "Configuraci\xF3n de pasarela Mercado Pago incompleta en el servidor. Falta el token de acceso (MERCADOPAGO_ACCESS_TOKEN) de producci\xF3n." });
-    return;
-  }
-  try {
-    const baseUrl = getSafeBaseUrl(req);
-    const response = await import_axios.default.post(
-      "https://api.mercadopago.com/checkout/preferences",
-      {
-        items: [
-          {
-            title,
-            quantity: 1,
-            unit_price: price,
-            currency_id: "MXN"
-          }
-        ],
-        payer: payerEmail ? { email: payerEmail } : void 0,
-        back_urls: {
-          success: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
-          failure: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
-          pending: process.env.BILLING_PENDING_URL || `${baseUrl}/workspace?tab=cuenta&status=pending`
-        },
-        auto_return: "approved",
-        notification_url: `${baseUrl}/api/billing/webhooks/mercadopago`,
-        external_reference: `${userId}:${planId}`
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-    const preference = response.data;
-    const paymentDocId = `mp_pref_${preference.id}`;
-    await adminDb.collection("payments").doc(paymentDocId).set({
-      userId,
-      planId,
-      provider: "mercadopago",
-      providerPaymentId: preference.id,
-      amount: price,
-      currency: "MXN",
-      status: "pending_payment",
-      checkoutUrl: preference.init_point,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    res.json({ checkoutUrl: preference.init_point });
-  } catch (error) {
-    console.error("Error al crear preferencia en Mercado Pago:", error.response?.data || error.message);
-    res.status(500).json({ error: "Error al comunicarse con Mercado Pago" });
-  }
-});
-app.post("/api/billing/subscription/mercadopago", async (req, res) => {
-  const { userId, planId, payerEmail } = req.body;
-  if (!userId || !planId) {
-    res.status(400).json({ error: "Faltan par\xE1metros userId o planId" });
-    return;
-  }
-  let price = 0;
-  let title = "";
-  if (planId === "brisa") {
-    price = 10;
-    title = "Plan Brisa (M\xEDnimo Suscripci\xF3n $10) - ZenTicket";
-  } else if (planId === "serenidad") {
-    price = 250;
-    title = "Plan Serenidad - ZenTicket";
-  } else if (planId === "nirvana") {
-    price = 500;
-    title = "Plan Nirvana - ZenTicket";
-  } else if (planId === "personal") {
-    price = 150;
-    title = "Plan Personal - ZenTicket";
-  } else if (planId === "empresa") {
-    price = 300;
-    title = "Plan Empresa - ZenTicket";
-  } else {
-    res.status(400).json({ error: "Plan inv\xE1lido para suscripci\xF3n" });
-    return;
-  }
-  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-  if (!accessToken) {
-    res.status(400).json({ error: "Configuraci\xF3n de pasarela Mercado Pago incompleta en el servidor. Falta el token de acceso (MERCADOPAGO_ACCESS_TOKEN) de producci\xF3n." });
-    return;
-  }
-  try {
-    const baseUrl = getSafeBaseUrl(req);
-    const preapprovalBody = {
-      back_url: process.env.BILLING_SUCCESS_URL || `${baseUrl}/workspace?tab=cuenta&status=success`,
-      reason: title,
-      auto_recurring: {
-        frequency: 1,
-        frequency_type: "months",
-        transaction_amount: price,
-        currency_id: "MXN"
-      },
-      external_reference: `${userId}:${planId}`
-    };
-    if (payerEmail && payerEmail.trim()) {
-      preapprovalBody.payer_email = payerEmail.trim();
-    }
-    const response = await import_axios.default.post(
-      "https://api.mercadopago.com/preapproval",
-      preapprovalBody,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-    const preapproval = response.data;
-    const paymentDocId = `mp_sub_${preapproval.id}`;
-    await adminDb.collection("payments").doc(paymentDocId).set({
-      userId,
-      planId,
-      provider: "mercadopago",
-      providerPaymentId: preapproval.id,
-      amount: price,
-      currency: "MXN",
-      status: "pending_payment",
-      checkoutUrl: preapproval.init_point,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    res.json({ checkoutUrl: preapproval.init_point });
-  } catch (error) {
-    console.error("Error al crear suscripci\xF3n en Mercado Pago:", error.response?.data || error.message);
-    res.status(500).json({ error: "Error al crear suscripci\xF3n en Mercado Pago" });
-  }
-});
-app.post("/api/billing/checkout/paypal", async (req, res) => {
-  const { userId, planId, payerEmail } = req.body;
-  if (!userId || !planId) {
-    res.status(400).json({ error: "Faltan par\xE1metros userId o planId" });
-    return;
-  }
-  let price = 0;
-  let title = "";
-  if (planId === "brisa") {
-    price = 2;
-    title = "Plan Brisa - ZenTicket";
-  } else if (planId === "serenidad") {
-    price = 250;
-    title = "Plan Serenidad - ZenTicket";
-  } else if (planId === "nirvana") {
-    price = 500;
-    title = "Plan Nirvana - ZenTicket";
-  } else if (planId === "personal") {
-    price = 150;
-    title = "Plan Personal - ZenTicket";
-  } else if (planId === "empresa") {
-    price = 300;
-    title = "Plan Empresa - ZenTicket";
-  } else {
-    res.status(400).json({ error: "Plan inv\xE1lido para pago" });
-    return;
-  }
-  try {
-    const baseUrl = getSafeBaseUrl(req);
-    const { accessToken, host } = await getPayPalAccessToken();
-    const orderData = {
-      intent: "CAPTURE",
-      purchase_units: [
-        {
-          reference_id: `${userId}:${planId}`,
-          amount: {
-            currency_code: "MXN",
-            value: price.toFixed(2)
-          },
-          description: title
-        }
-      ],
-      application_context: {
-        return_url: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
-        cancel_url: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`
-      }
-    };
-    if (payerEmail) {
-      orderData.payer = {
-        email_address: payerEmail
-      };
-    }
-    const response = await import_axios.default.post(
-      `${host}/v2/checkout/orders`,
-      orderData,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-    const order = response.data;
-    const approvalUrl = order.links.find((l) => l.rel === "approve")?.href;
-    const paymentDocId = `pp_pref_${order.id}`;
-    await adminDb.collection("payments").doc(paymentDocId).set({
-      userId,
-      planId,
-      provider: "paypal",
-      providerPaymentId: order.id,
-      amount: price,
-      currency: "MXN",
-      status: "pending_payment",
-      checkoutUrl: approvalUrl,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    res.json({ checkoutUrl: approvalUrl, orderId: order.id });
-  } catch (error) {
-    console.error("Error al crear orden en PayPal:", error.response?.data || error.message);
-    res.status(500).json({ error: error.message || "Error al comunicarse con PayPal" });
-  }
-});
-app.post("/api/billing/setup/stripe", async (req, res) => {
-  const { userId, payerEmail, holderName, bankName } = req.body;
-  if (!userId || !payerEmail) {
-    res.status(400).json({ error: "Faltan userId o payerEmail" });
-    return;
-  }
+app.post("/api/billing/setup/stripe", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { holderName, bankName } = req.body;
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeSecretKey) {
     res.status(500).json({ error: "Configuraci\xF3n de Stripe incompleta" });
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    let stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    let stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
     if (!stripeCustomerId) {
+      if (!email) {
+        res.status(400).json({ error: "El usuario no tiene un correo electr\xF3nico verificado." });
+        return;
+      }
       const customerParams = new URLSearchParams({
-        email: payerEmail,
+        email,
         "metadata[userId]": userId
       });
       const customerResponse = await import_axios.default.post(
@@ -1686,11 +1708,12 @@ app.post("/api/billing/setup/stripe", async (req, res) => {
         }
       );
       stripeCustomerId = customerResponse.data.id;
-      await profileRef.set({ stripeCustomerId, correoPago: payerEmail }, { merge: true });
+      const billingRef = adminDb.collection("billingProfiles").doc(userId);
+      await billingRef.set({ stripeCustomerId }, { merge: true });
     }
     const baseUrl = getSafeBaseUrl(req);
-    const setupSuccessUrl = process.env.BILLING_SUCCESS_URL ? process.env.BILLING_SUCCESS_URL.replace("status=success", "status=card_setup_success") : `${baseUrl}/workspace?tab=cuenta&status=card_setup_success`;
-    const setupCancelUrl = process.env.BILLING_FAILURE_URL ? process.env.BILLING_FAILURE_URL.replace("status=failure", "status=card_setup_cancelled") : `${baseUrl}/workspace?tab=cuenta&status=card_setup_cancelled`;
+    const setupSuccessUrl = process.env.BILLING_SUCCESS_URL ? process.env.BILLING_SUCCESS_URL.replace("status=success", "status=card_setup_success") : `${baseUrl}/billing-setup-success.html?status=card_setup_success`;
+    const setupCancelUrl = process.env.BILLING_FAILURE_URL ? process.env.BILLING_FAILURE_URL.replace("status=failure", "status=card_setup_cancelled") : `${baseUrl}/billing-failure.html?status=card_setup_cancelled`;
     const setupParams = new URLSearchParams({
       mode: "setup",
       customer: stripeCustomerId,
@@ -1699,7 +1722,9 @@ app.post("/api/billing/setup/stripe", async (req, res) => {
       success_url: setupSuccessUrl,
       cancel_url: setupCancelUrl,
       "metadata[holderName]": holderName || "",
-      "metadata[bankName]": bankName || ""
+      "metadata[bankName]": bankName || "",
+      "payment_method_types[0]": "card",
+      "wallet_options[link][display]": "never"
     });
     const setupResponse = await import_axios.default.post(
       "https://api.stripe.com/v1/checkout/sessions",
@@ -1720,10 +1745,11 @@ app.post("/api/billing/setup/stripe", async (req, res) => {
     });
   }
 });
-app.post("/api/billing/checkout/stripe/confirm", async (req, res) => {
-  const { sessionId, userId } = req.body;
-  if (!sessionId || !userId) {
-    res.status(400).json({ error: "Faltan sessionId o userId" });
+app.post("/api/billing/checkout/stripe/confirm", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  const { sessionId } = req.body;
+  if (!sessionId) {
+    res.status(400).json({ error: "Falta sessionId" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -1779,6 +1805,14 @@ app.post("/api/billing/checkout/stripe/confirm", async (req, res) => {
       invoicesUsed: 0,
       updatedAt: nowIso
     }, { merge: true });
+    const billingRef = adminDb.collection("billingProfiles").doc(userId);
+    await billingRef.set({
+      stripeCustomerId: session.customer || null,
+      subscriptionId: stripeSubscriptionId || null,
+      planId,
+      subscriptionStatus: isSubscription ? "subscription_active" : "paid",
+      defaultPaymentMethodId: paymentMethod?.id || null
+    }, { merge: true });
     await adminDb.collection("fiscalProfiles").doc(userId).set({
       plan: planId,
       planStartDate: nowIso,
@@ -1788,9 +1822,8 @@ app.post("/api/billing/checkout/stripe/confirm", async (req, res) => {
       invoicesLimit
     }, { merge: true });
     if (paymentMethod?.id && paymentMethod.card) {
-      const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-      const profileSnapshot = await profileRef.get();
-      const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards) ? profileSnapshot.data().paymentCards : [];
+      const billingSnapshot = await billingRef.get();
+      const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards) ? billingSnapshot.data().paymentCards : [];
       const formattedBrand = String(paymentMethod.card.brand || "VISA").toUpperCase();
       const stripeCard = {
         id: paymentMethod.id,
@@ -1806,7 +1839,7 @@ app.post("/api/billing/checkout/stripe/confirm", async (req, res) => {
         stripeCard,
         ...existingCards.filter((card) => card.id !== paymentMethod.id).map((card) => ({ ...card, isDefault: false }))
       ];
-      await profileRef.set({ paymentCards }, { merge: true });
+      await billingRef.set({ paymentCards }, { merge: true });
     }
     res.json({ success: true, planId, planName, invoicesLimit });
   } catch (error) {
@@ -1814,10 +1847,13 @@ app.post("/api/billing/checkout/stripe/confirm", async (req, res) => {
     res.status(500).json({ error: error.response?.data?.error?.message || "No se pudo confirmar el pago con Stripe." });
   }
 });
-app.post("/api/billing/checkout/stripe", async (req, res) => {
-  const { userId, planId, payerEmail } = req.body;
-  if (!userId || !planId) {
-    res.status(400).json({ error: "Faltan par\xE1metros userId o planId" });
+app.post("/api/billing/checkout/stripe", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { planId } = req.body;
+  if (!planId) {
+    res.status(400).json({ error: "Falta el par\xE1metro planId" });
     return;
   }
   let price = 0;
@@ -1849,26 +1885,25 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
   try {
     const baseUrl = getSafeBaseUrl(req);
     console.log("DEBUG STRIPE BASEURL:", baseUrl);
-    const successUrl = process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}&session_id={CHECKOUT_SESSION_ID}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}&session_id={CHECKOUT_SESSION_ID}`;
+    const successUrl = process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}&session_id={CHECKOUT_SESSION_ID}` : `${baseUrl}/billing-success.html?status=success&plan=${planId}&session_id={CHECKOUT_SESSION_ID}`;
     console.log("DEBUG STRIPE SUCCESSURL:", successUrl);
-    const profileSnapshot = await adminDb.collection("fiscalProfiles").doc(userId).get();
-    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
     const stripeParams = new URLSearchParams({
-      "automatic_payment_methods[enabled]": "true",
+      "payment_method_types[0]": "card",
       "line_items[0][price_data][currency]": "mxn",
       "line_items[0][price_data][product_data][name]": title,
       "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
       "line_items[0][quantity]": "1",
       "mode": "payment",
       "success_url": successUrl,
-      "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
+      "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/billing-failure.html?status=failure`,
       "client_reference_id": `${userId}:${planId}`,
       "payment_intent_data[setup_future_usage]": "off_session"
     });
     if (stripeCustomerId) {
       stripeParams.append("customer", stripeCustomerId);
-    } else if (payerEmail) {
-      stripeParams.append("customer_email", payerEmail);
+    } else if (email) {
+      stripeParams.append("customer_email", email);
     }
     const response = await import_axios.default.post(
       "https://api.stripe.com/v1/checkout/sessions",
@@ -1900,356 +1935,8 @@ app.post("/api/billing/checkout/stripe", async (req, res) => {
     res.status(500).json({ error: "Error al comunicarse con Stripe" });
   }
 });
-app.post("/api/billing/webhooks/mercadopago", async (req, res) => {
-  const paymentId = req.query.id || req.body?.data?.id || req.body?.id;
-  const topic = req.query.topic || req.body?.type || req.body?.action;
-  console.log(`[Mercado Pago Webhook] Recibido event: ${topic} con ID: ${paymentId}`);
-  if (paymentId) {
-    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-    if (!accessToken) {
-      res.status(500).send("Webhook config error: missing token");
-      return;
-    }
-    try {
-      await adminDb.collection("billingEvents").add({
-        provider: "mercadopago",
-        eventType: topic || "unknown",
-        providerEventId: paymentId.toString(),
-        processed: true,
-        receivedAt: (/* @__PURE__ */ new Date()).toISOString()
-      });
-      if (topic === "payment" || topic === "payment.created" || topic === "payment.updated") {
-        const response = await import_axios.default.get(
-          `https://api.mercadopago.com/v1/payments/${paymentId}`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` }
-          }
-        );
-        const paymentData = response.data;
-        const status = paymentData.status;
-        const externalReference = paymentData.external_reference;
-        console.log(`[Mercado Pago] Estatus de pago para ${paymentId}: ${status}`);
-        if (externalReference) {
-          const [userId, planId] = externalReference.split(":");
-          let localStatus = "pending_payment";
-          if (status === "approved") localStatus = "paid";
-          else if (status === "in_process" || status === "pending") localStatus = "payment_processing";
-          else if (status === "rejected") localStatus = "payment_rejected";
-          else if (status === "cancelled" || status === "refunded") localStatus = "payment_failed";
-          const paymentDocId = `mp_payment_${paymentId}`;
-          await adminDb.collection("payments").doc(paymentDocId).set({
-            userId,
-            planId,
-            provider: "mercadopago",
-            providerPaymentId: paymentId.toString(),
-            amount: paymentData.transaction_amount,
-            currency: paymentData.currency_id || "MXN",
-            status: localStatus,
-            paidAt: status === "approved" ? (/* @__PURE__ */ new Date()).toISOString() : null,
-            createdAt: new Date(paymentData.date_created).toISOString(),
-            updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-          }, { merge: true });
-          if (status === "approved") {
-            let limit = 5;
-            if (planId === "brisa") limit = 10;
-            else if (planId === "serenidad") limit = 30;
-            else if (planId === "nirvana") limit = 100;
-            else if (planId === "personal") limit = 20;
-            else if (planId === "empresa") limit = 60;
-            await adminDb.collection("subscriptions").doc(userId).set({
-              userId,
-              planId,
-              planName: `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
-              status: "subscription_active",
-              provider: "mercadopago",
-              providerSubscriptionId: paymentId.toString(),
-              currentPeriodStart: (/* @__PURE__ */ new Date()).toISOString(),
-              currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString(),
-              invoicesLimit: limit,
-              invoicesUsed: 0,
-              createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-              updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-            });
-            await adminDb.collection("fiscalProfiles").doc(userId).set({
-              plan: planId,
-              planStartDate: (/* @__PURE__ */ new Date()).toISOString(),
-              paymentStatus: "paid",
-              autoRenew: true
-            }, { merge: true });
-          }
-        }
-      } else if (topic === "preapproval" || topic === "subscription") {
-        const response = await import_axios.default.get(
-          `https://api.mercadopago.com/preapproval/${paymentId}`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` }
-          }
-        );
-        const subData = response.data;
-        const status = subData.status;
-        const externalReference = subData.external_reference;
-        if (externalReference) {
-          const [userId, planId] = externalReference.split(":");
-          if (status === "authorized") {
-            let limit = 5;
-            if (planId === "brisa") limit = 10;
-            else if (planId === "serenidad") limit = 30;
-            else if (planId === "nirvana") limit = 100;
-            else if (planId === "personal") limit = 20;
-            else if (planId === "empresa") limit = 60;
-            await adminDb.collection("subscriptions").doc(userId).set({
-              userId,
-              planId,
-              planName: `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
-              status: "subscription_active",
-              provider: "mercadopago",
-              providerSubscriptionId: subData.id.toString(),
-              currentPeriodStart: (/* @__PURE__ */ new Date()).toISOString(),
-              currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString(),
-              invoicesLimit: limit,
-              invoicesUsed: 0,
-              createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-              updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-            });
-            await adminDb.collection("fiscalProfiles").doc(userId).set({
-              plan: planId,
-              planStartDate: (/* @__PURE__ */ new Date()).toISOString(),
-              paymentStatus: "subscription_active",
-              autoRenew: true
-            }, { merge: true });
-          } else if (status === "cancelled") {
-            await adminDb.collection("subscriptions").doc(userId).set({
-              status: "subscription_cancelled",
-              updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-            }, { merge: true });
-            await adminDb.collection("fiscalProfiles").doc(userId).set({
-              plan: "gratuito",
-              paymentStatus: "subscription_cancelled",
-              autoRenew: false
-            }, { merge: true });
-          }
-        }
-      }
-      res.status(200).send("OK");
-      return;
-    } catch (error) {
-      console.error("Error al procesar webhook de Mercado Pago:", error.response?.data || error.message);
-      res.status(500).send("Webhook processing error");
-      return;
-    }
-  }
-  res.status(200).send("Ignored");
-});
-app.post("/api/billing/webhooks/paypal", async (req, res) => {
-  const event = req.body;
-  console.log(`[PayPal Webhook] Recibido event: ${event?.event_type}`);
-  try {
-    await adminDb.collection("billingEvents").add({
-      provider: "paypal",
-      eventType: event.event_type || "unknown",
-      providerEventId: event.id || "unknown",
-      processed: true,
-      receivedAt: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    if (event.event_type === "PAYMENT.CAPTURE.COMPLETED" || event.event_type === "CHECKOUT.ORDER.APPROVED") {
-      const capture = event.resource;
-      const orderId = capture.custom_id || event.resource.supplementary_data?.related_ids?.order_id || capture.id;
-      const { accessToken, host } = await getPayPalAccessToken();
-      const orderResponse = await import_axios.default.get(
-        `${host}/v2/checkout/orders/${orderId}`,
-        {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        }
-      );
-      const orderData = orderResponse.data;
-      const purchaseUnit = orderData.purchase_units?.[0];
-      const externalReference = purchaseUnit?.reference_id;
-      if (externalReference) {
-        const [userId, planId] = externalReference.split(":");
-        const amount = parseFloat(purchaseUnit.amount.value);
-        const paymentDocId = `pp_payment_${capture.id}`;
-        await adminDb.collection("payments").doc(paymentDocId).set({
-          userId,
-          planId,
-          provider: "paypal",
-          providerPaymentId: capture.id,
-          amount,
-          currency: purchaseUnit.amount.currency_code || "MXN",
-          status: "paid",
-          paidAt: (/* @__PURE__ */ new Date()).toISOString(),
-          createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-          updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-        }, { merge: true });
-        let limit = 5;
-        if (planId === "brisa") limit = 10;
-        else if (planId === "serenidad") limit = 30;
-        else if (planId === "nirvana") limit = 100;
-        else if (planId === "personal") limit = 20;
-        else if (planId === "empresa") limit = 60;
-        await adminDb.collection("subscriptions").doc(userId).set({
-          userId,
-          planId,
-          planName: `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
-          status: "subscription_active",
-          provider: "paypal",
-          providerSubscriptionId: orderId,
-          currentPeriodStart: (/* @__PURE__ */ new Date()).toISOString(),
-          currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString(),
-          invoicesLimit: limit,
-          invoicesUsed: 0,
-          createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-          updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-        });
-        await adminDb.collection("fiscalProfiles").doc(userId).set({
-          plan: planId,
-          planStartDate: (/* @__PURE__ */ new Date()).toISOString(),
-          paymentStatus: "paid",
-          autoRenew: true
-        }, { merge: true });
-      }
-    }
-    res.status(200).send("OK");
-  } catch (error) {
-    console.error("Error al procesar webhook de PayPal:", error.message);
-    res.status(500).send("Error de procesamiento");
-  }
-});
-app.post("/api/billing/webhooks/stripe", async (req, res) => {
-  const event = req.body;
-  console.log(`[Stripe Webhook] Recibido event: ${event?.type}`);
-  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-  if (!stripeSecretKey) {
-    res.status(500).send("Webhook config error: missing token");
-    return;
-  }
-  try {
-    if (event.type === "setup_intent.succeeded" || event.type === "payment_method.attached" || event.type === "payment_method.detached") {
-      const stripeCustomerId = event.data?.object?.customer;
-      if (stripeCustomerId) {
-        await syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, adminDb);
-      }
-    }
-    if (event.type === "payment_intent.succeeded") {
-      const paymentIntentObj = event.data?.object;
-      const paymentIntentId = paymentIntentObj?.id;
-      if (paymentIntentId) {
-        const paymentQuery = await adminDb.collection("payments").where("providerPaymentId", "==", paymentIntentId).limit(1).get();
-        if (!paymentQuery.empty) {
-          await paymentQuery.docs[0].ref.set({
-            status: "paid",
-            paidAt: (/* @__PURE__ */ new Date()).toISOString(),
-            updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-          }, { merge: true });
-        }
-      }
-    }
-    await adminDb.collection("billingEvents").add({
-      provider: "stripe",
-      eventType: event.type || "unknown",
-      providerEventId: event.id || "unknown",
-      processed: true,
-      receivedAt: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    if (event.type === "checkout.session.completed") {
-      const sessionObj = event.data?.object;
-      if (sessionObj && sessionObj.id) {
-        const sessionId = sessionObj.id;
-        const response = await import_axios.default.get(
-          `https://api.stripe.com/v1/checkout/sessions/${sessionId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${stripeSecretKey}`
-            }
-          }
-        );
-        const session = response.data;
-        const paymentStatus = session.payment_status;
-        const externalReference = session.client_reference_id;
-        console.log(`[Stripe] Checkout Session retrieve: status=${session.status}, payment_status=${paymentStatus}, ref=${externalReference}`);
-        if (session.mode === "setup" && session.setup_intent && externalReference) {
-          const setupResponse = await import_axios.default.get(
-            `https://api.stripe.com/v1/setup_intents/${session.setup_intent}?expand[]=payment_method`,
-            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
-          );
-          const paymentMethod = setupResponse.data.payment_method;
-          const card = paymentMethod?.card;
-          if (card) {
-            const profileRef = adminDb.collection("fiscalProfiles").doc(externalReference);
-            const profileSnapshot = await profileRef.get();
-            const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards) ? profileSnapshot.data().paymentCards : [];
-            const formattedBrand = String(card.brand || "VISA").toUpperCase();
-            const nextCard = {
-              id: paymentMethod.id,
-              brand: formattedBrand,
-              last4: card.last4,
-              expiry: `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`,
-              holderName: session.metadata?.holderName || paymentMethod.billing_details?.name || "Titular",
-              bankName: session.metadata?.bankName || (formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand),
-              isDefault: true,
-              stripePaymentMethodId: paymentMethod.id
-            };
-            const paymentCards = [
-              nextCard,
-              ...existingCards.filter((item) => item.id !== paymentMethod.id).map((item) => ({ ...item, isDefault: false }))
-            ];
-            await profileRef.set({ paymentCards, stripeCustomerId: session.customer }, { merge: true });
-          }
-          res.status(200).send("OK");
-          return;
-        }
-        if (paymentStatus === "paid" && externalReference) {
-          const [userId, planId] = externalReference.split(":");
-          const amount = session.amount_total ? session.amount_total / 100 : 0;
-          const paymentDocId = `stripe_payment_${session.id}`;
-          await adminDb.collection("payments").doc(paymentDocId).set({
-            userId,
-            planId,
-            provider: "stripe",
-            providerPaymentId: session.id,
-            amount,
-            currency: session.currency?.toUpperCase() || "MXN",
-            status: "paid",
-            paidAt: (/* @__PURE__ */ new Date()).toISOString(),
-            createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-            updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-          }, { merge: true });
-          let limit = 5;
-          if (planId === "brisa") limit = 10;
-          else if (planId === "serenidad") limit = 30;
-          else if (planId === "nirvana") limit = 100;
-          else if (planId === "personal") limit = 20;
-          else if (planId === "empresa") limit = 60;
-          await adminDb.collection("subscriptions").doc(userId).set({
-            userId,
-            planId,
-            planName: planId === "personal" ? "Plan Personal" : planId === "empresa" ? "Plan Empresa" : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
-            status: "subscription_active",
-            provider: "stripe",
-            providerSubscriptionId: session.id,
-            currentPeriodStart: (/* @__PURE__ */ new Date()).toISOString(),
-            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString(),
-            invoicesLimit: limit,
-            invoicesUsed: 0,
-            createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-            updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-          });
-          await adminDb.collection("fiscalProfiles").doc(userId).set({
-            plan: planId,
-            planStartDate: (/* @__PURE__ */ new Date()).toISOString(),
-            paymentStatus: "paid",
-            autoRenew: true
-          }, { merge: true });
-        }
-      }
-    }
-    res.status(200).send("OK");
-  } catch (error) {
-    console.error("Error al procesar webhook de Stripe:", error.response?.data || error.message);
-    res.status(500).send("Error de procesamiento");
-  }
-});
-app.get("/api/billing/status/:userId", async (req, res) => {
-  const { userId } = req.params;
+app.get("/api/billing/status", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
   try {
     const docSnap = await adminDb.collection("subscriptions").doc(userId).get();
     if (!docSnap.exists) {
@@ -2274,12 +1961,20 @@ app.get("/api/billing/status/:userId", async (req, res) => {
 async function syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, dbRef) {
   if (!stripeCustomerId) return;
   try {
-    const snapshot = await dbRef.collection("fiscalProfiles").where("stripeCustomerId", "==", stripeCustomerId).limit(1).get();
-    if (snapshot.empty) {
-      console.log(`[Stripe Webhook] No user found with customer ID: ${stripeCustomerId}`);
+    let docRef = null;
+    const billingSnapshot = await dbRef.collection("billingProfiles").where("stripeCustomerId", "==", stripeCustomerId).limit(1).get();
+    if (!billingSnapshot.empty) {
+      docRef = billingSnapshot.docs[0].ref;
+    } else {
+      const fiscalSnapshot = await dbRef.collection("fiscalProfiles").where("stripeCustomerId", "==", stripeCustomerId).limit(1).get();
+      if (!fiscalSnapshot.empty) {
+        docRef = fiscalSnapshot.docs[0].ref;
+      }
+    }
+    if (!docRef) {
+      console.log(`[Stripe Webhook] No user profile found with customer ID: ${stripeCustomerId}`);
       return;
     }
-    const docRef = snapshot.docs[0].ref;
     const customerRes = await import_axios.default.get(
       `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
       { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
@@ -2328,10 +2023,124 @@ async function syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, dbR
     console.error(`[Stripe Webhook] Error al sincronizar m\xE9todos de pago para ${stripeCustomerId}:`, error.message);
   }
 }
-app.post("/api/billing/sync-customer", async (req, res) => {
-  const { userId, email, name } = req.body;
-  if (!userId || !email) {
-    res.status(400).json({ error: "Faltan par\xE1metros userId o email" });
+app.post("/api/billing/sync-subscription", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).json({ error: "Configuraci\xF3n de Stripe incompleta" });
+    return;
+  }
+  try {
+    const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
+    if (!stripeCustomerId) {
+      res.status(400).json({ error: "El usuario no tiene un cliente de Stripe creado." });
+      return;
+    }
+    const subsResponse = await import_axios.default.get(
+      `https://api.stripe.com/v1/subscriptions?customer=${stripeCustomerId}&status=active&limit=1`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+    const subscriptions = subsResponse.data.data;
+    if (subscriptions.length > 0) {
+      const sub = subscriptions[0];
+      const planId = sub.metadata?.planId || "gratuito";
+      const limits = { brisa: 10, personal: 20, serenidad: 30, empresa: 60, nirvana: 100 };
+      const invoicesLimit = limits[planId] || 5;
+      const planName = planId === "personal" ? "Plan Personal" : planId === "empresa" ? "Plan Empresa" : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`;
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      const periodEnd = new Date(sub.current_period_end * 1e3).toISOString();
+      await adminDb.collection("subscriptions").doc(userId).set({
+        userId,
+        planId,
+        planName,
+        status: "subscription_active",
+        provider: "stripe",
+        providerSubscriptionId: sub.id,
+        stripeCustomerId,
+        currentPeriodStart: new Date(sub.current_period_start * 1e3).toISOString(),
+        currentPeriodEnd: periodEnd,
+        invoicesLimit,
+        invoicesUsed: 0,
+        updatedAt: nowIso
+      }, { merge: true });
+      await adminDb.collection("billingProfiles").doc(userId).set({
+        stripeCustomerId,
+        subscriptionId: sub.id,
+        planId,
+        subscriptionStatus: "subscription_active",
+        updatedAt: nowIso
+      }, { merge: true });
+      await adminDb.collection("fiscalProfiles").doc(userId).set({
+        plan: planId,
+        planStartDate: new Date(sub.current_period_start * 1e3).toISOString(),
+        paymentStatus: "subscription_active",
+        autoRenew: true,
+        stripeCustomerId,
+        invoicesLimit
+      }, { merge: true });
+      res.json({ success: true, planId, status: "subscription_active", source: "stripe_subscription" });
+      return;
+    }
+    const sessionsResponse = await import_axios.default.get(
+      `https://api.stripe.com/v1/checkout/sessions?customer=${stripeCustomerId}&limit=5`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+    const sessions = sessionsResponse.data.data;
+    const paidSession = sessions.find((s) => s.payment_status === "paid");
+    if (paidSession) {
+      const planId = paidSession.metadata?.planId || "gratuito";
+      const limits = { brisa: 10, personal: 20, serenidad: 30, empresa: 60, nirvana: 100 };
+      const invoicesLimit = limits[planId] || 5;
+      const planName = planId === "personal" ? "Plan Personal" : planId === "empresa" ? "Plan Empresa" : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`;
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString();
+      await adminDb.collection("subscriptions").doc(userId).set({
+        userId,
+        planId,
+        planName,
+        status: "paid",
+        provider: "stripe",
+        providerSubscriptionId: paidSession.id,
+        stripeCustomerId,
+        currentPeriodStart: nowIso,
+        currentPeriodEnd: periodEnd,
+        invoicesLimit,
+        invoicesUsed: 0,
+        updatedAt: nowIso
+      }, { merge: true });
+      await adminDb.collection("billingProfiles").doc(userId).set({
+        stripeCustomerId,
+        subscriptionId: null,
+        planId,
+        subscriptionStatus: "paid",
+        updatedAt: nowIso
+      }, { merge: true });
+      await adminDb.collection("fiscalProfiles").doc(userId).set({
+        plan: planId,
+        planStartDate: nowIso,
+        paymentStatus: "paid",
+        autoRenew: false,
+        stripeCustomerId,
+        invoicesLimit
+      }, { merge: true });
+      res.json({ success: true, planId, status: "paid", source: "stripe_payment" });
+      return;
+    }
+    res.json({ success: true, planId: "gratuito", status: "inactive", source: "none" });
+  } catch (error) {
+    console.error("Error al sincronizar suscripci\xF3n de Stripe:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+app.post("/api/billing/sync-customer", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { name } = req.body;
+  if (!email) {
+    res.status(400).json({ error: "Falta el email del usuario autenticado" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -2340,35 +2149,26 @@ app.post("/api/billing/sync-customer", async (req, res) => {
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    let stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    let stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
     if (!stripeCustomerId) {
-      const searchRes = await import_axios.default.get(
-        `https://api.stripe.com/v1/customers?email=${encodeURIComponent(email)}`,
-        { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
-      );
-      if (searchRes.data?.data && searchRes.data.data.length > 0) {
-        stripeCustomerId = searchRes.data.data[0].id;
-      } else {
-        const customerParams = new URLSearchParams({
-          email,
-          name: name || "",
-          "metadata[userId]": userId
-        });
-        const customerResponse = await import_axios.default.post(
-          "https://api.stripe.com/v1/customers",
-          customerParams.toString(),
-          {
-            headers: {
-              Authorization: `Bearer ${stripeSecretKey}`,
-              "Content-Type": "application/x-www-form-urlencoded"
-            }
+      const customerParams = new URLSearchParams({
+        email,
+        name: name || "",
+        "metadata[userId]": userId
+      });
+      const customerResponse = await import_axios.default.post(
+        "https://api.stripe.com/v1/customers",
+        customerParams.toString(),
+        {
+          headers: {
+            Authorization: `Bearer ${stripeSecretKey}`,
+            "Content-Type": "application/x-www-form-urlencoded"
           }
-        );
-        stripeCustomerId = customerResponse.data.id;
-      }
-      await profileRef.set({ stripeCustomerId, correoPago: email }, { merge: true });
+        }
+      );
+      stripeCustomerId = customerResponse.data.id;
+      const billingRef = adminDb.collection("billingProfiles").doc(userId);
+      await billingRef.set({ stripeCustomerId }, { merge: true });
     }
     res.json({ stripeCustomerId });
   } catch (error) {
@@ -2376,17 +2176,17 @@ app.post("/api/billing/sync-customer", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-app.get("/api/billing/payment-methods/:userId", async (req, res) => {
-  const { userId } = req.params;
+app.get("/api/billing/payment-methods", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  const userEmail = req.user.email;
+  const emailVerified = req.user.email_verified;
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeSecretKey) {
     res.status(500).json({ error: "Configuraci\xF3n de Stripe incompleta" });
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    const stripeCustomerId = await resolveStripeCustomerId(userId, userEmail, emailVerified);
     if (!stripeCustomerId) {
       res.json([]);
       return;
@@ -2408,7 +2208,7 @@ app.get("/api/billing/payment-methods/:userId", async (req, res) => {
         id: pm.id,
         brand: formattedBrand,
         last4: card.last4,
-        expiry: `${String(card.exp_month).padStart(2, "0")}/&nbsp;${String(card.exp_year).slice(-2)}`.replace("&nbsp;", ""),
+        expiry: `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`,
         holderName: pm.billing_details?.name || "Titular",
         bankName: formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand,
         isDefault: pm.id === defaultPaymentMethodId,
@@ -2433,17 +2233,21 @@ app.get("/api/billing/payment-methods/:userId", async (req, res) => {
         console.warn("Could not set fallback default payment method in Stripe:", err.message);
       }
     }
-    await profileRef.set({ paymentCards: pms }, { merge: true });
+    const billingRef = adminDb.collection("billingProfiles").doc(userId);
+    await billingRef.set({ paymentCards: pms, stripeCustomerId }, { merge: true });
     res.json(pms);
   } catch (error) {
     console.error("Error al obtener m\xE9todos de pago de Stripe:", error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });
-app.post("/api/billing/payment-methods/set-default", async (req, res) => {
-  const { userId, paymentMethodId } = req.body;
-  if (!userId || !paymentMethodId) {
-    res.status(400).json({ error: "Faltan par\xE1metros userId o paymentMethodId" });
+app.post("/api/billing/payment-methods/set-default", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { paymentMethodId } = req.body;
+  if (!paymentMethodId) {
+    res.status(400).json({ error: "Falta el par\xE1metro paymentMethodId" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -2452,9 +2256,7 @@ app.post("/api/billing/payment-methods/set-default", async (req, res) => {
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
     if (!stripeCustomerId) {
       res.status(400).json({ error: "El usuario no tiene un cliente de Stripe creado." });
       return;
@@ -2469,22 +2271,27 @@ app.post("/api/billing/payment-methods/set-default", async (req, res) => {
         }
       }
     );
-    const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards) ? profileSnapshot.data().paymentCards : [];
+    const billingRef = adminDb.collection("billingProfiles").doc(userId);
+    const billingSnapshot = await billingRef.get();
+    const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards) ? billingSnapshot.data().paymentCards : [];
     const updatedCards = existingCards.map((c) => ({
       ...c,
       isDefault: c.id === paymentMethodId
     }));
-    await profileRef.set({ paymentCards: updatedCards }, { merge: true });
+    await billingRef.set({ paymentCards: updatedCards }, { merge: true });
     res.json({ success: true, paymentCards: updatedCards });
   } catch (error) {
     console.error("Error al establecer tarjeta predeterminada en Stripe:", error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });
-app.post("/api/billing/payment-methods/delete", async (req, res) => {
-  const { userId, paymentMethodId } = req.body;
-  if (!userId || !paymentMethodId) {
-    res.status(400).json({ error: "Faltan par\xE1metros userId o paymentMethodId" });
+app.post("/api/billing/payment-methods/delete", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { paymentMethodId } = req.body;
+  if (!paymentMethodId) {
+    res.status(400).json({ error: "Falta el par\xE1metro paymentMethodId" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -2493,24 +2300,28 @@ app.post("/api/billing/payment-methods/delete", async (req, res) => {
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
+    if (!stripeCustomerId) {
+      res.status(400).json({ error: "El usuario no tiene un cliente de Stripe creado." });
+      return;
+    }
     await import_axios.default.post(
       `https://api.stripe.com/v1/payment_methods/${paymentMethodId}/detach`,
       "",
       { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
     );
-    const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards) ? profileSnapshot.data().paymentCards : [];
+    const billingRef = adminDb.collection("billingProfiles").doc(userId);
+    const billingSnapshot = await billingRef.get();
+    const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards) ? billingSnapshot.data().paymentCards : [];
     const deletedCard = existingCards.find((c) => c.id === paymentMethodId);
     let updatedCards = existingCards.filter((c) => c.id !== paymentMethodId);
-    if (deletedCard?.isDefault && updatedCards.length > 0 && stripeCustomerId) {
+    if (deletedCard?.isDefault && updatedCards.length > 0) {
       const newDefaultId = updatedCards[0].id;
       updatedCards[0].isDefault = true;
       try {
         await import_axios.default.post(
           `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
-          `invoice_settings[default_payment_method]=&nbsp;${newDefaultId}`.replace("&nbsp;", ""),
+          `invoice_settings[default_payment_method]=${newDefaultId}`,
           {
             headers: {
               Authorization: `Bearer ${stripeSecretKey}`,
@@ -2522,34 +2333,56 @@ app.post("/api/billing/payment-methods/delete", async (req, res) => {
         console.warn("Could not set new default payment method in Stripe during delete:", err.message);
       }
     }
-    await profileRef.set({ paymentCards: updatedCards }, { merge: true });
+    await billingRef.set({ paymentCards: updatedCards }, { merge: true });
     res.json({ success: true, paymentCards: updatedCards });
   } catch (error) {
     console.error("Error al eliminar tarjeta en Stripe:", error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });
-app.post("/api/billing/payment-methods/attach", async (req, res) => {
-  const { userId, paymentMethodId, isDefault } = req.body;
-  if (!userId || !paymentMethodId) {
-    res.status(400).json({ error: "Faltan par\xE1metros userId o paymentMethodId" });
+app.post("/api/billing/payment-methods/attach", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { paymentMethodId, isDefault } = req.body;
+  console.log(`[Attach PM] Inicio. userId: ${userId}, email: ${email}, verified: ${emailVerified}, pmId: ${paymentMethodId}, isDefault: ${isDefault}`);
+  if (!paymentMethodId) {
+    console.warn("[Attach PM] Error: Falta el par\xE1metro paymentMethodId");
+    res.status(400).json({ error: "Faltan par\xE1metros paymentMethodId" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeSecretKey) {
+    console.error("[Attach PM] Error: STRIPE_SECRET_KEY no est\xE1 configurado");
     res.status(500).json({ error: "Configuraci\xF3n de Stripe incompleta" });
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    let stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    console.log("[Attach PM] Resolviendo stripeCustomerId...");
+    const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
+    console.log(`[Attach PM] stripeCustomerId resuelto: ${stripeCustomerId}`);
     if (!stripeCustomerId) {
-      const email = profileSnapshot.data()?.correoRecepcion || profileSnapshot.data()?.correoElectronico || "";
-      const name = profileSnapshot.data()?.razonSocial || "";
-      const customerResponse = await import_axios.default.post(
-        "https://api.stripe.com/v1/customers",
-        `email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`,
+      console.warn("[Attach PM] Error: No se pudo resolver stripeCustomerId");
+      res.status(400).json({ error: "El usuario no tiene un cliente de Stripe creado." });
+      return;
+    }
+    console.log(`[Attach PM] Obteniendo detalles de PaymentMethod ${paymentMethodId} desde Stripe...`);
+    const pmDetailsRes = await import_axios.default.get(
+      `https://api.stripe.com/v1/payment_methods/${paymentMethodId}`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+    const pmDetails = pmDetailsRes.data;
+    console.log(`[Attach PM] Detalles obtenidos. Cliente actual del PM en Stripe: ${pmDetails.customer}`);
+    if (pmDetails.customer && pmDetails.customer !== stripeCustomerId) {
+      console.warn(`[Attach PM] Error de permisos: PM pertenece a otro cliente (${pmDetails.customer})`);
+      res.status(403).json({ error: "No tienes permisos para asociar este m\xE9todo de pago." });
+      return;
+    }
+    if (pmDetails.customer !== stripeCustomerId) {
+      console.log(`[Attach PM] Vinculando PM ${paymentMethodId} al cliente ${stripeCustomerId}...`);
+      const attachRes = await import_axios.default.post(
+        `https://api.stripe.com/v1/payment_methods/${paymentMethodId}/attach`,
+        `customer=${stripeCustomerId}`,
         {
           headers: {
             Authorization: `Bearer ${stripeSecretKey}`,
@@ -2557,22 +2390,21 @@ app.post("/api/billing/payment-methods/attach", async (req, res) => {
           }
         }
       );
-      stripeCustomerId = customerResponse.data.id;
-      await profileRef.set({ stripeCustomerId }, { merge: true });
-    }
-    await import_axios.default.post(
-      `https://api.stripe.com/v1/payment_methods/${paymentMethodId}/attach`,
-      `customer=${stripeCustomerId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${stripeSecretKey}`,
-          "Content-Type": "application/x-www-form-urlencoded"
-        }
+      console.log(`[Attach PM] Vinculado con \xE9xito. Cliente reportado por attach: ${attachRes.data.customer}`);
+      if (attachRes.data.customer !== stripeCustomerId) {
+        console.error("[Attach PM] Error: Operaci\xF3n de vinculaci\xF3n inv\xE1lida");
+        res.status(403).json({ error: "Operaci\xF3n de vinculaci\xF3n inv\xE1lida." });
+        return;
       }
-    );
-    const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards) ? profileSnapshot.data().paymentCards : [];
+    }
+    console.log("[Attach PM] Obteniendo perfil de facturaci\xF3n actual de Firestore...");
+    const billingRef = adminDb.collection("billingProfiles").doc(userId);
+    const billingSnapshot = await billingRef.get();
+    const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards) ? billingSnapshot.data().paymentCards : [];
+    console.log(`[Attach PM] Tarjetas existentes en Firestore: ${existingCards.length}`);
     const setAsDefault = isDefault || existingCards.length === 0;
     if (setAsDefault) {
+      console.log(`[Attach PM] Configurando PM ${paymentMethodId} como predeterminado en Stripe...`);
       await import_axios.default.post(
         `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
         `invoice_settings[default_payment_method]=${paymentMethodId}`,
@@ -2583,26 +2415,30 @@ app.post("/api/billing/payment-methods/attach", async (req, res) => {
           }
         }
       );
+      console.log("[Attach PM] Predeterminado configurado con \xE9xito en Stripe.");
     }
+    console.log("[Attach PM] Sincronizando m\xE9todos de pago de Stripe a Firestore...");
     await syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, adminDb);
-    const updatedSnapshot = await profileRef.get();
+    console.log("[Attach PM] Sincronizaci\xF3n completada.");
+    const updatedSnapshot = await billingRef.get();
     const updatedCards = updatedSnapshot.data()?.paymentCards || [];
+    console.log(`[Attach PM] Retornando ${updatedCards.length} tarjetas actualizadas.`);
     res.json({ success: true, paymentCards: updatedCards });
   } catch (error) {
-    console.error("Error al vincular tarjeta en Stripe:", error.response?.data || error.message);
+    console.error("[Attach PM] EXCEPCI\xD3N DETECTADA:", error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });
-app.post("/api/billing/cancel-subscription", async (req, res) => {
-  const { userId } = req.body;
-  if (!userId) {
-    res.status(400).json({ error: "Falta userId" });
-    return;
-  }
+app.post("/api/billing/cancel-subscription", authenticateFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
   try {
     await adminDb.collection("subscriptions").doc(userId).set({
       status: "subscription_cancelled",
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    }, { merge: true });
+    await adminDb.collection("billingProfiles").doc(userId).set({
+      subscriptionStatus: "subscription_cancelled",
+      planId: "gratuito"
     }, { merge: true });
     await adminDb.collection("fiscalProfiles").doc(userId).set({
       plan: "gratuito",

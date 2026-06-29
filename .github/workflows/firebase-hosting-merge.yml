@@ -28,6 +28,10 @@ jobs:
           
           if (result.status !== 0) {
             const logs = (result.stdout || '') + '\n' + (result.stderr || '');
+            if (logs.includes('is the current active version')) {
+              console.log('Despliegue completado exitosamente (esta versión exacta ya está activa en producción).');
+              process.exit(0);
+            }
             const lines = logs.split('\n');
             const errorLines = lines.filter(l => l.toLowerCase().includes('error') || l.toLowerCase().includes('failed') || l.toLowerCase().includes('forbidden'));
             const lastLines = lines.slice(-15);
