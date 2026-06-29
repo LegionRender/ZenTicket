@@ -1523,6 +1523,77 @@ export default function ProfileForm({
     );
   };
 
+  const renderPayButtonInline = () => {
+    const isProcessing = isProcessingPayment || isProcessingWallet;
+    
+    return (
+      <button
+        type="button"
+        disabled={isProcessing || shouldDisablePayButton}
+        onClick={async (e) => {
+          e.stopPropagation();
+          
+          if (shouldDisablePayButton) return;
+
+          // If plan is free plan
+          if (checkoutPlanType === "gratuito") {
+            setIsProcessingPayment(true);
+            try {
+              await onSave({
+                userId: initialProfile?.userId || "guest",
+                rfc: rfc || "CABE850101ABC",
+                razonSocial: razonSocial.trim().toUpperCase(),
+                regimenFiscal,
+                codigoPostal,
+                usoCFDI,
+                createdAt: initialProfile?.createdAt || new Date().toISOString(),
+                personalGeminiKey: personalGeminiKey || "",
+                plan: "gratuito",
+                planStartDate: new Date().toISOString(),
+                autoRenew: false,
+                paymentCards: cards
+              });
+              setIsProcessingPayment(false);
+              setCheckoutPlanType(null);
+              localStorage.removeItem("zenticket_checkout_plan");
+              localStorage.removeItem("selectedPlanOnSignup");
+              toast.success("Tu plan ha sido cambiado al Plan Gratuito exitosamente.", "Suscripción actualizada");
+            } catch (err) {
+              setIsProcessingPayment(false);
+              toast.error("Error al actualizar suscripción.", "Error");
+            }
+            return;
+          }
+
+          if (!selectedCardForPlan) {
+            toast.error("Por favor selecciona un método de pago.");
+            return;
+          }
+
+          if (selectedCardForPlan === "paypal_wallet") {
+            await handleDigitalWalletPayment("PayPal");
+          } else if (selectedCardForPlan === "mercadopago_wallet") {
+            await handleDigitalWalletPayment("Mercado Pago");
+          } else if (selectedCardForPlan === "googlepay_wallet") {
+            await handleDigitalWalletPayment("Google Pay");
+          } else {
+            await handleDigitalWalletPayment("Stripe");
+          }
+        }}
+        className="px-6 py-2 bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-40 text-white text-xs font-black rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-sm shadow-[#0B53F4]/10 active:scale-95 shrink-0"
+      >
+        {isProcessing ? (
+          <>
+            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            <span>Procesando...</span>
+          </>
+        ) : (
+          <span>{shouldDisablePayButton ? "Activo" : checkoutPlanType === "gratuito" ? "Activar Plan" : "Pagar"}</span>
+        )}
+      </button>
+    );
+  };
+
   const renderCheckoutSection = () => {
     const isCheckoutMode = checkoutPlanType !== null;
 
@@ -1574,6 +1645,17 @@ export default function ProfileForm({
                       </span>
                     </div>
                   </div>
+                  {isCheckoutMode && (
+                    <div className="flex justify-between items-center pt-2.5 border-t border-slate-250/60 dark:border-slate-850 mt-0.5 text-left select-none">
+                      <div>
+                        <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Método de Pago</span>
+                        <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block truncate">{wallet.displayName}</span>
+                      </div>
+                      <div>
+                        {renderPayButtonInline()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             }
@@ -1604,16 +1686,29 @@ export default function ProfileForm({
                       </span>
                     </div>
                   </div>
-                  <div className="flex justify-between items-center pt-2.5 border-t border-slate-250/60 dark:border-slate-850 mt-0.5 text-left">
+                  <div className="flex justify-between items-center pt-2.5 border-t border-slate-250/60 dark:border-slate-850 mt-0.5 text-left select-none">
                     <div>
                       <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Titular</span>
                       <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block truncate max-w-[200px]">{card.holderName}</span>
                     </div>
-                    {card.expiryMonth && card.expiryYear && (
-                      <div className="text-right">
-                        <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Expira</span>
-                        <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block font-mono">{card.expiryMonth}/{card.expiryYear}</span>
+                    
+                    {isCheckoutMode ? (
+                      <div className="flex items-center gap-3 shrink-0">
+                        {card.expiryMonth && card.expiryYear && (
+                          <div className="text-right mr-1.5 hidden sm:block">
+                            <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Expira</span>
+                            <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block font-mono leading-none mt-0.5">{card.expiryMonth}/{card.expiryYear}</span>
+                          </div>
+                        )}
+                        {renderPayButtonInline()}
                       </div>
+                    ) : (
+                      card.expiryMonth && card.expiryYear && (
+                        <div className="text-right">
+                          <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Expira</span>
+                          <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block font-mono">{card.expiryMonth}/{card.expiryYear}</span>
+                        </div>
+                      )
                     )}
                   </div>
                 </div>
@@ -1627,123 +1722,52 @@ export default function ProfileForm({
           })()}
         </div>
 
-        {/* Botón único de pago (Directamente debajo de la tarjeta predeterminada) */}
+        {/* Correo para Cuentas de Pago */}
         {isCheckoutMode && (
-          <>
-            {/* Correo para Cuentas de Pago */}
-            <div className="space-y-1 bg-white border border-slate-200/60 rounded-2xl p-4 text-left animate-fade-in">
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                Correo para Cuentas de Pago (Stripe/PayPal/Mercado Pago)
-              </label>
-              <div className="flex gap-2 mt-1.5">
-                <input
-                  type="email"
-                  value={correoPago}
-                  onChange={(e) => setCorreoPago(e.target.value)}
-                  placeholder="Ej. mi-cuenta-de-pago@email.com"
-                  className="flex-grow text-xs font-semibold bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-xl px-3.5 py-2.5 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
-                />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!correoPago.trim()) {
-                      toast.error("El correo no puede estar vacío.");
-                      return;
-                    }
-                    try {
-                      const trimmedEmail = correoPago.trim();
-                      await onSave({
-                        ...initialProfile,
-                        correoPago: trimmedEmail
-                      });
-                      
-                      setCorreoPago(trimmedEmail);
-                      if (!selectedCardForPlan && cards.length > 0) {
-                        setSelectedCardForPlan(cards.find(card => card.isDefault)?.id || cards[0].id);
-                      }
-                      toast.success("Correo guardado para Stripe Checkout y Stripe Link.", "Correo actualizado");
-                    } catch (e) {
-                      toast.error("No se pudo vincular el correo de pagos.");
-                    }
-                  }}
-                  className="bg-[#0B53F4] hover:bg-[#0747D1] text-white text-[11px] font-black px-4 py-2.5 rounded-xl transition cursor-pointer shrink-0 active:scale-95 animate-fade-in"
-                >
-                  Guardar
-                </button>
-              </div>
-              <p className="text-[10px] text-slate-400 mt-1 ml-1 leading-normal">
-                Vincula automáticamente las tarjetas predeterminadas y pre-llena tus datos en las pasarelas al pagar.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              disabled={isProcessingPayment || isProcessingWallet || shouldDisablePayButton}
-              onClick={async () => {
-                if (shouldDisablePayButton) {
-                  toast.info("Tu plan actual ya está activo. Podrás pagar de nuevo al cambiar de plan o al agotar tus facturas del ciclo.");
-                  return;
-                }
-                if (checkoutPlanType === "gratuito") {
-                  setIsProcessingPayment(true);
-                  try {
-                    await onSave({
-                      userId: initialProfile?.userId || "guest",
-                      rfc: rfc || "CABE850101ABC",
-                      razonSocial: razonSocial.trim().toUpperCase(),
-                      regimenFiscal,
-                      codigoPostal,
-                      usoCFDI,
-                      createdAt: initialProfile?.createdAt || new Date().toISOString(),
-                      personalGeminiKey: personalGeminiKey || "",
-                      plan: "gratuito",
-                      planStartDate: new Date().toISOString(),
-                      autoRenew: false,
-                      paymentCards: cards
-                    });
-                    setIsProcessingPayment(false);
-                    setCheckoutPlanType("brisa");
-                    setActiveModal(null);
-                    toast.success("Tu plan ha sido cambiado al Plan Gratuito exitosamente.", "Suscripción actualizada");
-                  } catch (err: any) {
-                    setIsProcessingPayment(false);
-                    toast.error("Error al actualizar suscripción.", "Error");
+          <div className="space-y-1 bg-white border border-slate-200/60 rounded-2xl p-4 text-left animate-fade-in">
+            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+              Correo para Cuentas de Pago (Stripe/PayPal/Mercado Pago)
+            </label>
+            <div className="flex gap-2 mt-1.5">
+              <input
+                type="email"
+                value={correoPago}
+                onChange={(e) => setCorreoPago(e.target.value)}
+                placeholder="Ej. mi-cuenta-de-pago@email.com"
+                className="flex-grow text-xs font-semibold bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-xl px-3.5 py-2.5 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!correoPago.trim()) {
+                    toast.error("El correo no puede estar vacío.");
+                    return;
                   }
-                  return;
-                }
-
-                if (!selectedCardForPlan) {
-                  toast.error("Por favor selecciona un método de pago.");
-                  return;
-                }
-
-                if (selectedCardForPlan === "paypal_wallet") {
-                  await handleDigitalWalletPayment("PayPal");
-                } else if (selectedCardForPlan === "mercadopago_wallet") {
-                  await handleDigitalWalletPayment("Mercado Pago");
-                } else if (selectedCardForPlan === "googlepay_wallet") {
-                  await handleDigitalWalletPayment("Google Pay");
-                } else {
-                  await handleDigitalWalletPayment("Stripe");
-                }
-              }}
-              className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-40 text-white text-sm font-black py-3.5 rounded-2xl transition cursor-pointer text-center flex items-center justify-center gap-2 shadow-md shadow-[#0B53F4]/10 active:scale-98"
-            >
-              {isProcessingPayment || isProcessingWallet ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Procesando...</span>
-                </>
-              ) : (
-                <span>{shouldDisablePayButton ? "Plan activo" : checkoutPlanType === "gratuito" ? "Activar Plan Gratuito" : "Pagar"}</span>
-              )}
-            </button>
-            {shouldDisablePayButton && (
-              <p className="text-[10.5px] text-slate-400 font-semibold text-center mt-2">
-                Ya tienes este plan activo. Cambia de plan o agota tus facturas mensuales para volver a pagar.
-              </p>
-            )}
-          </>
+                  try {
+                    const trimmedEmail = correoPago.trim();
+                    await onSave({
+                      ...initialProfile,
+                      correoPago: trimmedEmail
+                    });
+                    
+                    setCorreoPago(trimmedEmail);
+                    if (!selectedCardForPlan && cards.length > 0) {
+                      setSelectedCardForPlan(cards.find(card => card.isDefault)?.id || cards[0].id);
+                    }
+                    toast.success("Correo guardado para Stripe Checkout y Stripe Link.", "Correo actualizado");
+                  } catch (e) {
+                    toast.error("No se pudo vincular el correo de pagos.");
+                  }
+                }}
+                className="bg-[#0B53F4] hover:bg-[#0747D1] text-white text-[11px] font-black px-4 py-2.5 rounded-xl transition cursor-pointer shrink-0 active:scale-95 animate-fade-in"
+              >
+                Guardar
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1 ml-1 leading-normal">
+              Vincula automáticamente las tarjetas predeterminadas y pre-llena tus datos en las pasarelas al pagar.
+            </p>
+          </div>
         )}
 
         {/* 3.3 Menú Desplegable (Acordeón Colapsable) */}
