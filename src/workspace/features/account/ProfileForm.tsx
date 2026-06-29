@@ -500,8 +500,7 @@ export default function ProfileForm({
       const filtered = initialProfile.paymentCards.filter(
         (card) =>
           card.last4 !== "Cuenta Vinculada" &&
-          (card.brand === "VISA" || card.brand === "MASTERCARD") &&
-          (card.stripePaymentMethodId?.startsWith("pm_") || card.id?.startsWith("pm_"))
+          (card.stripePaymentMethodId || card.id)
       );
       const unique: PaymentCard[] = [];
       const seen = new Set<string>();
@@ -523,8 +522,7 @@ export default function ProfileForm({
       const filtered = initialProfile.paymentCards.filter(
         (card) =>
           card.last4 !== "Cuenta Vinculada" &&
-          (card.brand === "VISA" || card.brand === "MASTERCARD") &&
-          (card.stripePaymentMethodId?.startsWith("pm_") || card.id?.startsWith("pm_"))
+          (card.stripePaymentMethodId || card.id)
       );
       const unique: PaymentCard[] = [];
       const seen = new Set<string>();
@@ -1101,6 +1099,9 @@ export default function ProfileForm({
             `Pago confirmado. ${confirmation.planName} ya está activo con ${confirmation.invoicesLimit} facturas disponibles.`,
             "Pago exitoso"
           );
+          setCheckoutPlanType(null);
+          localStorage.removeItem("zenticket_checkout_plan");
+          localStorage.removeItem("selectedPlanOnSignup");
           window.setTimeout(() => window.location.reload(), 1400);
         } catch (err) {
           toast.error(err instanceof Error ? err.message : "No se pudo confirmar el pago.");
@@ -1599,7 +1600,7 @@ export default function ProfileForm({
                         <Check className="w-2.5 h-2.5 stroke-[3]" /> Vinculada con éxito
                       </span>
                       <span className="bg-[#EBF1FF] text-[#0B53F4] border border-[#0B53F4]/10 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider">
-                        Pago predeterminado
+                        Método predeterminado
                       </span>
                     </div>
                   </div>
@@ -3149,7 +3150,7 @@ export default function ProfileForm({
                 </div>
 
                 {/* Botón flotante inferior para confirmar cambio de plan */}
-                <div className="pt-6 border-t border-slate-100 flex justify-end gap-3 select-none">
+                <div className="pt-6 border-t border-slate-100 flex justify-center gap-3 select-none">
                   <button
                     type="button"
                     onClick={() => {

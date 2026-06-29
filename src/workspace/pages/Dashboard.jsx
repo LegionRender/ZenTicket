@@ -842,8 +842,18 @@ export const Dashboard = () => {
       
       try {
         await setDoc(docRef, updatedProfile, { merge: true });
+        if (profileData.plan) {
+          const subRef = doc(db, "subscriptions", user.uid);
+          const planName = profileData.plan === "gratuito" ? "Plan Gratuito" : profileData.plan === "personal" ? "Plan Personal" : profileData.plan === "empresa" ? "Plan Empresa" : `Plan ${profileData.plan.charAt(0).toUpperCase() + profileData.plan.slice(1)}`;
+          await setDoc(subRef, {
+            planId: profileData.plan,
+            planName: planName,
+            status: profileData.plan === "gratuito" ? "inactive" : "subscription_active",
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
       } catch (dbErr) {
-        console.warn("Database save failed due to quota, saving locally:", dbErr);
+        console.warn("Database save failed, saving locally:", dbErr);
         if (dbErr?.message?.includes("Quota") || dbErr?.message?.includes("quota") || dbErr?.code?.includes("resource-exhausted")) {
           setIsQuotaExceeded(true);
         }
