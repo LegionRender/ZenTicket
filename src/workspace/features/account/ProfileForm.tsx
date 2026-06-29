@@ -772,6 +772,34 @@ export default function ProfileForm({
     }
   };
 
+  const handleOpenStripeSetup = async () => {
+    const toastId = toast.loading("Iniciando conexión segura con Stripe...");
+    console.log("[Stripe Setup] Generando sesión de registro...");
+    try {
+      const payerEmail = correoPago || correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail;
+      console.log(`[Stripe Setup] Email a registrar: ${payerEmail}`);
+      const response = await fetchWithAuth("/api/billing/setup/stripe", {
+        method: "POST",
+        body: JSON.stringify({
+          payerEmail,
+          holderName: "Cliente ZenTicket",
+          bankName: "Stripe"
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.checkoutUrl) {
+        throw new Error(data.error || "Stripe no devolvió una sesión de registro.");
+      }
+      toast.removeToast(toastId);
+      console.log(`[Stripe Setup] Redirigiendo a: ${data.checkoutUrl}`);
+      openOfficialCheckoutPopup(data.checkoutUrl, "Stripe");
+    } catch (error: any) {
+      toast.removeToast(toastId);
+      console.error("[Stripe Setup] Error al iniciar setup:", error);
+      toast.error(error.message || "No se pudo iniciar la conexión con Stripe.");
+    }
+  };
+
   const renderLocalCardForm = () => {
     return (
       <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 mt-4 mb-4 animate-fade-in text-left space-y-4">
@@ -1698,15 +1726,13 @@ export default function ProfileForm({
                     <span className="text-sm font-black text-slate-800 dark:text-white block">No tienes tarjetas vinculadas</span>
                     <span className="text-xs text-slate-450 dark:text-slate-400 font-semibold block">Agrega una tarjeta para realizar pagos</span>
                   </div>
-                  {!addingCard && (
-                    <button
-                      type="button"
-                      onClick={() => setAddingCard(true)}
-                      className="px-5 py-2 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-black rounded-xl transition cursor-pointer active:scale-95 shadow-sm shadow-[#0B53F4]/10"
-                    >
-                      Agregar tarjeta
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={handleOpenStripeSetup}
+                    className="px-5 py-2 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-black rounded-xl transition cursor-pointer active:scale-95 shadow-sm shadow-[#0B53F4]/10"
+                  >
+                    Agregar tarjeta
+                  </button>
                 </div>
               );
             }
@@ -1792,8 +1818,6 @@ export default function ProfileForm({
             {renderAccordionPaymentMethods()}
           </div>
         )}
-
-        {addingCard && renderLocalCardForm()}
       </div>
     );
   };
@@ -1847,7 +1871,7 @@ export default function ProfileForm({
         
         <button
           type="button"
-          onClick={() => setAddingCard(true)}
+          onClick={handleOpenStripeSetup}
           className="w-full text-xs font-bold py-3.5 rounded-2xl transition cursor-pointer bg-[#0B53F4] hover:bg-[#0747D1] text-white zt-btn-primary"
         >
           Vincular nueva tarjeta
