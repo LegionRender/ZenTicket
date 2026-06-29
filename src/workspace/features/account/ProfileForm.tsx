@@ -3879,15 +3879,25 @@ export default function ProfileForm({
                   {getPlanLabel(selectedPlan)}
                 </span>
                 <span className={`text-[9.5px] uppercase font-black px-2 py-0.5 rounded-md tracking-wider leading-none ${
-                  checkoutPlanType !== null 
-                    ? "bg-amber-100 text-amber-700" 
-                    : (currentPlan === "gratuito" ? "bg-[#ebf1ff] text-[#0B53F4]" : "bg-emerald-100 text-emerald-700")
+                  selectedPlan === "gratuito"
+                    ? "bg-[#ebf1ff] text-[#0B53F4]"
+                    : (isPayingSameActivePlan
+                        ? "bg-emerald-100 text-emerald-700"
+                        : (checkoutPlanType !== null
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-emerald-100 text-emerald-700"))
                 }`}>
-                  {checkoutPlanType !== null ? "Por pagar" : (currentPlan === "gratuito" ? "Gratuito" : "Pagado")}
+                  {selectedPlan === "gratuito"
+                    ? "Gratuito"
+                    : (isPayingSameActivePlan
+                        ? "Pagado"
+                        : (checkoutPlanType !== null
+                            ? "Por pagar"
+                            : "Pagado"))}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
-                {checkoutPlanType !== null 
+                {checkoutPlanType !== null && !isPayingSameActivePlan
                   ? (isPlanExpired || isMonthlyQuotaExhausted
                       ? "Tu plan ha vencido o se han agotado las facturas del ciclo. Confirma el pago abajo para reactivarlo."
                       : "Elegiste este plan. Por favor, confirma el pago abajo para activarlo.")
