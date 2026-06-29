@@ -135,11 +135,11 @@ export const Dashboard = () => {
         {
           id: "card_real_ricardo",
           brand: "VISA",
-          last4: isAdminEmail ? "9180" : "4242",
+          last4: "3102",
           expiry: "12/28",
           isDefault: true,
-          holderName: isAdminEmail ? "RICARDO CASTRO BECERRIL" : "RICARDO CASTRO",
-          bankName: isAdminEmail ? "BBVA Bancomer" : "VISA"
+          holderName: "RICARDO CASTRO",
+          bankName: "BBVA Bancomer"
         }
       ]
     };
@@ -167,9 +167,9 @@ export const Dashboard = () => {
             paymentCards: Array.isArray(parsed.paymentCards)
               ? parsed.paymentCards.map(c => c.id === "card_real_ricardo" ? {
                   ...c,
-                  last4: isAdminEmailProfile ? "9180" : "4242",
-                  holderName: isAdminEmailProfile ? "RICARDO CASTRO BECERRIL" : "RICARDO CASTRO",
-                  bankName: isAdminEmailProfile ? "BBVA Bancomer" : "VISA"
+                  last4: "3102",
+                  holderName: "RICARDO CASTRO",
+                  bankName: "BBVA Bancomer"
                 } : c)
               : initialDef.paymentCards
           };
@@ -215,9 +215,9 @@ export const Dashboard = () => {
           data.paymentCards = (Array.isArray(data.paymentCards) ? data.paymentCards : initialDef.paymentCards)
             .map(c => c.id === "card_real_ricardo" ? {
                 ...c,
-                last4: isAdminEmailProfile ? "9180" : "4242",
-                holderName: isAdminEmailProfile ? "RICARDO CASTRO BECERRIL" : "RICARDO CASTRO",
-                bankName: isAdminEmailProfile ? "BBVA Bancomer" : "VISA"
+                last4: "3102",
+                holderName: "RICARDO CASTRO",
+                bankName: "BBVA Bancomer"
               } : c);
           
           if (!isNewSignup && data.onboardingCompleted !== true) {
