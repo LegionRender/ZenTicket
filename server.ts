@@ -202,6 +202,36 @@ async function resolveStripeCustomerId(uid: string, email: string, emailVerified
       }
     }
   }
+
+  // 4. Si no se encontró por búsqueda ni migración, creamos un nuevo cliente en Stripe para el usuario
+  if (email) {
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    if (stripeSecretKey) {
+      try {
+        const customerParams = new URLSearchParams({
+          email: email,
+          name: email.split("@")[0],
+          "metadata[userId]": uid
+        });
+        const customerResponse = await axios.post(
+          "https://api.stripe.com/v1/customers",
+          customerParams.toString(),
+          {
+            headers: {
+              Authorization: `Bearer ${stripeSecretKey}`,
+              "Content-Type": "application/x-www-form-urlencoded"
+            }
+          }
+        );
+        const stripeCustomerId = customerResponse.data.id;
+        console.log(`[Stripe Auto-Creation] Creado cliente ${stripeCustomerId} para ${uid}`);
+        await billingRef.set({ stripeCustomerId }, { merge: true });
+        return stripeCustomerId;
+      } catch (err: any) {
+        console.error(`[Stripe Auto-Creation error] Error al crear cliente para ${uid}:`, err.message);
+      }
+    }
+  }
   return null;
 }
 
