@@ -1775,16 +1775,26 @@ export default function ProfileForm({
 
 
         {/* 3.3 Menú Desplegable (Acordeón Colapsable) */}
-        <div className="pt-2 select-none">
-          <button
-            type="button"
-            onClick={() => setIsAccordionExpanded(!isAccordionExpanded)}
-            className="w-full flex items-center justify-between p-4.5 bg-slate-50 border border-slate-200/80 hover:bg-slate-100/70 rounded-2xl transition cursor-pointer text-left font-black text-xs text-slate-600 uppercase tracking-wider"
-          >
-            <span>Cambiar método de pago / Ver opciones</span>
-            <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${isAccordionExpanded ? "rotate-180" : ""}`} />
-          </button>
-        </div>
+        {activeCards.length > 0 && (
+          <div className="pt-2 flex flex-col sm:flex-row gap-3 select-none">
+            <button
+              type="button"
+              onClick={() => setIsAccordionExpanded(!isAccordionExpanded)}
+              className="flex-grow flex items-center justify-between p-4.5 bg-slate-50 border border-slate-200/80 hover:bg-slate-100/70 rounded-2xl transition cursor-pointer text-left font-black text-xs text-slate-600 uppercase tracking-wider"
+            >
+              <span>Cambiar método de pago / Ver opciones</span>
+              <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${isAccordionExpanded ? "rotate-180" : ""}`} />
+            </button>
+            
+            <button
+              type="button"
+              onClick={handleOpenStripeSetup}
+              className="px-5 py-4 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-black rounded-2xl transition cursor-pointer active:scale-95 shadow-sm shadow-[#0B53F4]/10 uppercase tracking-wider whitespace-nowrap"
+            >
+              Agregar otra tarjeta
+            </button>
+          </div>
+        )}
 
         {isAccordionExpanded && (
           <div className="space-y-3 pt-1 animate-fade-in duration-200">
