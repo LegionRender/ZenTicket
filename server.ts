@@ -1974,7 +1974,7 @@ app.post("/api/billing/setup/stripe", authenticateFirebaseToken, async (req: any
       "metadata[holderName]": holderName || "",
       "metadata[bankName]": bankName || "",
       "payment_method_types[0]": "card",
-      "payment_method_options[link][status]": "disabled"
+      "wallet_options[link][display]": "never"
     });
     const setupResponse = await axios.post(
       "https://api.stripe.com/v1/checkout/sessions",
