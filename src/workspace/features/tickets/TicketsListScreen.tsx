@@ -581,16 +581,6 @@ export default function TicketsListScreen({
 
         </div>
 
-        {/* REAL WORKSPACE PICTURE BANNER */}
-        <div className="w-full h-32 rounded-3xl overflow-hidden relative border border-slate-200 bg-slate-200">
-          <img 
-            src="https://images.unsplash.com/photo-1542744094-3a31f103e35f?auto=format&fit=crop&q=80&w=800" 
-            alt="Workspace tablet banner"
-            className="w-full h-full object-cover select-none pointer-events-none"
-            referrerPolicy="no-referrer"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 via-transparent to-transparent" />
-        </div>
 
       </div> {/* Close Left Column (lg:col-span-7) */}
 
