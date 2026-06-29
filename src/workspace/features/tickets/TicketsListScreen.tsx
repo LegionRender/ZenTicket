@@ -531,20 +531,20 @@ export default function TicketsListScreen({
           </div>
 
           {/* BLUE HIGHLIGHTED TOTAL BOX PILL */}
-          <div className="bg-[#F1F3FE]/65 border border-blue-50 p-4.5 rounded-[22px] mt-6 space-y-2 text-left">
+          <div className="bg-[#F1F3FE]/70 dark:bg-[#0d1226] border border-blue-50 dark:border-slate-800/80 p-4.5 rounded-[22px] mt-6 space-y-2 text-left">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-500 font-bold">Subtotal</span>
-              <span className="font-mono text-slate-700 font-black">${subtotalVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="text-slate-500 dark:text-slate-400 font-bold">Subtotal</span>
+              <span className="font-mono text-slate-700 dark:text-slate-300 font-black">${subtotalVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
             
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-500 font-bold">IVA (16%)</span>
-              <span className="font-mono text-slate-700 font-black">${ivaVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="text-slate-500 dark:text-slate-400 font-bold">IVA (16%)</span>
+              <span className="font-mono text-slate-700 dark:text-slate-300 font-black">${ivaVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
 
-            <div className="border-t border-slate-200/50 my-1 pt-1.5 flex justify-between items-center">
-              <span className="text-slate-800 font-black text-xs uppercase tracking-wider">TOTAL MXN</span>
-              <span className="font-mono text-[#0B53F4] text-lg font-black tracking-tight">${totalVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <div className="border-t border-slate-200/50 dark:border-slate-800 my-1 pt-1.5 flex justify-between items-center">
+              <span className="text-slate-800 dark:text-slate-200 font-black text-xs uppercase tracking-wider">TOTAL MXN</span>
+              <span className="font-mono text-[#0B53F4] dark:text-[#5B8CFF] text-lg font-black tracking-tight">${totalVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           </div>
 
@@ -1462,29 +1462,29 @@ export default function TicketsListScreen({
           </div>
 
           {/* DYNAMIC SMTP CONFIGURATION NOTIFICATION */}
-          <div className="pt-1.5 border-t border-slate-100 select-none text-left">
+          <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800/80 select-none text-left">
             {smtpStatus?.smtpConfigured ? (
-              <div className="flex items-start gap-2 bg-emerald-50/70 border border-emerald-200/60 rounded-xl p-3 text-left">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="flex items-start gap-2 bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-500/10 rounded-xl p-3 text-left">
+                <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-450 shrink-0 mt-0.5" />
                 <div className="leading-tight">
-                  <span className="text-[10.5px] text-emerald-800 font-extrabold block">
+                  <span className="text-[10.5px] text-emerald-800 dark:text-emerald-400 font-extrabold block">
                     Servidor de Correo SMTP Activo
                   </span>
-                  <p className="text-[9.5px] text-emerald-650 font-semibold block mt-0.5 leading-normal">
+                  <p className="text-[9.5px] text-emerald-650 dark:text-emerald-300 font-semibold block mt-0.5 leading-normal">
                     Credenciales configuradas para <strong>{smtpStatus.smtpUser}</strong>. La factura XML y PDF se enviará de forma <strong>REAL</strong> a {emailTo}.
                   </p>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col gap-1.5 bg-amber-50/70 border border-amber-200/50 rounded-xl p-3 text-left">
+              <div className="flex flex-col gap-1.5 bg-amber-50/70 dark:bg-amber-950/10 border border-amber-200/50 dark:border-amber-500/10 rounded-xl p-3 text-left">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
-                  <span className="text-[10.5px] text-amber-800 font-black">
+                  <div className="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse shrink-0" />
+                  <span className="text-[10.5px] text-amber-800 dark:text-amber-400 font-black">
                     Modo Sandbox: Correo Simulado
                   </span>
                 </div>
-                <p className="text-[9.5px] text-amber-700 leading-normal font-semibold">
-                  Se ha simulado el envío con éxito. Si quieres que le llegue un <strong>correo real</strong> a tu buzón personal o al de tu contador, configura las claves <code className="bg-amber-100/80 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900">SMTP_HOST</code>, <code className="bg-amber-100/80 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900">SMTP_USER</code> y <code className="bg-amber-100/80 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900">SMTP_PASS</code> en la pestaña <strong>Settings &gt; Secrets</strong> de AI Studio.
+                <p className="text-[9.5px] text-amber-700 dark:text-amber-350 leading-normal font-semibold">
+                  Se ha simulado el envío con éxito. Si quieres que le llegue un <strong>correo real</strong> a tu buzón personal o al de tu contador, configura las claves <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_HOST</code>, <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_USER</code> y <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_PASS</code> en la pestaña <strong>Settings &gt; Secrets</strong> de AI Studio.
                 </p>
               </div>
             )}
