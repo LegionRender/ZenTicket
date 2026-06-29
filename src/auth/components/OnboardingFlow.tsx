@@ -6,6 +6,7 @@ import {
 import { parseConstancia as parseConstanciaApi } from "@/services/api";
 import { motion, AnimatePresence } from "motion/react";
 import { useToast } from "@/shared/feedback/Toast";
+import { ZenLogo } from "@/shared/brand/ZenLogo";
 
 interface OnboardingFlowProps {
   user: any;
@@ -57,7 +58,27 @@ function getInitialsAvatar(fullName: string): string {
 
 export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProfile, onComplete }) => {
   const toast = useToast();
-  const [step, setStep] = useState<number>(1);
+
+  // Load temporary onboarding data from localStorage if exists
+  const getTempData = () => {
+    try {
+      const saved = localStorage.getItem("zenticket_onboarding_temp_data");
+      return saved ? JSON.parse(saved) : {};
+    } catch (_) {
+      return {};
+    }
+  };
+  
+  const tempData = getTempData();
+
+  const [step, setStep] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("zenticket_onboarding_step");
+      return saved ? parseInt(saved, 10) : 1;
+    } catch (_) {
+      return 1;
+    }
+  });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Filter out mocked initial values
@@ -65,13 +86,13 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
   const hasValidRazon = fiscalProfile?.razonSocial && fiscalProfile.razonSocial !== "RICARDO CASTRO BECERRIL" && fiscalProfile.razonSocial !== "CONSTRUCTORA LEGION DEL NORTE SA DE CV";
 
   // Step 1: Profile details
-  const [name, setName] = useState<string>(fiscalProfile?.name || user?.displayName || "");
-  const [phone, setPhone] = useState<string>(fiscalProfile?.telefono || "");
+  const [name, setName] = useState<string>(tempData.name ?? (fiscalProfile?.name || user?.displayName || ""));
+  const [phone, setPhone] = useState<string>(tempData.phone ?? (fiscalProfile?.telefono || ""));
   const [photoOption, setPhotoOption] = useState<"initials" | "custom">(
-    fiscalProfile?.photoURL && !fiscalProfile.photoURL.startsWith("data:image/svg+xml") ? "custom" : "initials"
+    tempData.photoOption ?? (fiscalProfile?.photoURL && !fiscalProfile.photoURL.startsWith("data:image/svg+xml") ? "custom" : "initials")
   );
   const [customAvatarBase64, setCustomAvatarBase64] = useState<string>(
-    fiscalProfile?.photoURL && !fiscalProfile.photoURL.startsWith("data:image/svg+xml") ? fiscalProfile.photoURL : ""
+    tempData.customAvatarBase64 ?? (fiscalProfile?.photoURL && !fiscalProfile.photoURL.startsWith("data:image/svg+xml") ? fiscalProfile.photoURL : "")
   );
 
   // Camera capture states
@@ -82,6 +103,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
 
   // Step 2: Plan
   const [plan, setPlan] = useState<"gratuito" | "brisa" | "serenidad" | "nirvana">(() => {
+    if (tempData.plan) return tempData.plan;
     const saved = localStorage.getItem("selectedPlanOnSignup");
     if (saved === "gratuito" || saved === "brisa" || saved === "serenidad" || saved === "nirvana") {
       return saved;
@@ -90,12 +112,38 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
   });
 
   // Step 3: Fiscal
-  const [rfc, setRfc] = useState<string>(hasValidRfc ? fiscalProfile.rfc : "");
-  const [razonSocial, setRazonSocial] = useState<string>(hasValidRazon ? fiscalProfile.razonSocial : "");
-  const [regimenFiscal, setRegimenFiscal] = useState<string>(fiscalProfile?.regimenFiscal || "621");
-  const [codigoPostal, setCodigoPostal] = useState<string>(fiscalProfile?.codigoPostal || "");
-  const [usoCFDI, setUsoCFDI] = useState<string>(fiscalProfile?.usoCFDI || "G03");
-  const [correoRecepcion, setCorreoRecepcion] = useState<string>(fiscalProfile?.correoRecepcion || user?.email || "");
+  const [rfc, setRfc] = useState<string>(tempData.rfc ?? (hasValidRfc ? fiscalProfile.rfc : ""));
+  const [razonSocial, setRazonSocial] = useState<string>(tempData.razonSocial ?? (hasValidRazon ? fiscalProfile.razonSocial : ""));
+  const [regimenFiscal, setRegimenFiscal] = useState<string>(tempData.regimenFiscal ?? (fiscalProfile?.regimenFiscal || "621"));
+  const [codigoPostal, setCodigoPostal] = useState<string>(tempData.codigoPostal ?? (fiscalProfile?.codigoPostal || ""));
+  const [usoCFDI, setUsoCFDI] = useState<string>(tempData.usoCFDI ?? (fiscalProfile?.usoCFDI || "G03"));
+  const [correoRecepcion, setCorreoRecepcion] = useState<string>(tempData.correoRecepcion ?? (fiscalProfile?.correoRecepcion || user?.email || ""));
+
+  // Persist step and form inputs to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem("zenticket_onboarding_step", step.toString());
+    } catch (_) {}
+  }, [step]);
+
+  useEffect(() => {
+    try {
+      const dataToSave = {
+        name,
+        phone,
+        photoOption,
+        customAvatarBase64,
+        plan,
+        rfc,
+        razonSocial,
+        regimenFiscal,
+        codigoPostal,
+        usoCFDI,
+        correoRecepcion
+      };
+      localStorage.setItem("zenticket_onboarding_temp_data", JSON.stringify(dataToSave));
+    } catch (_) {}
+  }, [name, phone, photoOption, customAvatarBase64, plan, rfc, razonSocial, regimenFiscal, codigoPostal, usoCFDI, correoRecepcion]);
 
   const [isParsingConstancia, setIsParsingConstancia] = useState<boolean>(false);
   const constanciaInputRef = useRef<HTMLInputElement>(null);
@@ -287,6 +335,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
         updatedAt: new Date().toISOString()
       };
       await onComplete(finalData);
+      localStorage.removeItem("zenticket_onboarding_temp_data");
+      localStorage.removeItem("zenticket_onboarding_step");
     } catch (err) {
       console.error(err);
       toast.error("Falló la finalización del perfil fiscal en el almacenamiento local.");
@@ -300,10 +350,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
       {/* Visual Header */}
       <header className="bg-white/90 backdrop-blur-md border-b border-slate-200/40 py-4 px-6 md:px-12 flex justify-between items-center sticky top-0 z-40 shadow-xs">
         <div className="flex items-center gap-2">
-          <div className="bg-[#0B53F4] text-white p-2 rounded-xl shadow-xs">
-            <Sparkles className="w-5 h-5 animate-pulse" />
-          </div>
-          <span className="font-display font-black text-lg tracking-tight text-[#0b1020]">ZenTicket</span>
+          <ZenLogo size={32} theme="light" onClick={(e) => e.preventDefault()} />
         </div>
         
         {/* Step dots */}
