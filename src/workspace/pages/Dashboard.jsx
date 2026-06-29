@@ -931,6 +931,9 @@ export const Dashboard = () => {
       }
 
       setTickets(prev => {
+        if (prev.some(t => t.id === tkt.id)) {
+          return prev;
+        }
         const next = [tkt, ...prev];
         localStorage.setItem("local_tickets_" + user.uid, JSON.stringify(next));
         return next;
@@ -1001,6 +1004,9 @@ export const Dashboard = () => {
       }
 
       setInvoices(prev => {
+        if (prev.some(inv => inv.id === invoicePayload.id || (invoicePayload.folioFiscal && inv.folioFiscal === invoicePayload.folioFiscal))) {
+          return prev;
+        }
         const next = [invoicePayload, ...prev];
         localStorage.setItem("local_invoices_" + user.uid, JSON.stringify(next));
         return next;
