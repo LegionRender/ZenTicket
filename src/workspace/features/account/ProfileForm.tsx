@@ -1770,53 +1770,7 @@ export default function ProfileForm({
           })()}
         </div>
 
-        {/* Correo para Cuentas de Pago */}
-        {isCheckoutMode && (
-          <div className="space-y-1 bg-white border border-slate-200/60 rounded-2xl p-4 text-left animate-fade-in">
-            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-              Correo para Cuentas de Pago (Stripe/PayPal/Mercado Pago)
-            </label>
-            <div className="flex gap-2 mt-1.5">
-              <input
-                type="email"
-                value={correoPago}
-                onChange={(e) => setCorreoPago(e.target.value)}
-                placeholder="Ej. mi-cuenta-de-pago@email.com"
-                className="flex-grow text-xs font-semibold bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-xl px-3.5 py-2.5 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
-              />
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!correoPago.trim()) {
-                    toast.error("El correo no puede estar vacío.");
-                    return;
-                  }
-                  try {
-                    const trimmedEmail = correoPago.trim();
-                    await onSave({
-                      ...initialProfile,
-                      correoPago: trimmedEmail
-                    });
-                    
-                    setCorreoPago(trimmedEmail);
-                    if (!selectedCardForPlan && cards.length > 0) {
-                      setSelectedCardForPlan(cards.find(card => card.isDefault)?.id || cards[0].id);
-                    }
-                    toast.success("Correo guardado para Stripe Checkout y Stripe Link.", "Correo actualizado");
-                  } catch (e) {
-                    toast.error("No se pudo vincular el correo de pagos.");
-                  }
-                }}
-                className="bg-[#0B53F4] hover:bg-[#0747D1] text-white text-[11px] font-black px-4 py-2.5 rounded-xl transition cursor-pointer shrink-0 active:scale-95 animate-fade-in"
-              >
-                Guardar
-              </button>
-            </div>
-            <p className="text-[10px] text-slate-400 mt-1 ml-1 leading-normal">
-              Vincula automáticamente las tarjetas predeterminadas y pre-llena tus datos en las pasarelas al pagar.
-            </p>
-          </div>
-        )}
+
 
         {/* 3.3 Menú Desplegable (Acordeón Colapsable) */}
         <div className="pt-2 select-none">
