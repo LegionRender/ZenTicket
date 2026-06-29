@@ -1621,7 +1621,19 @@ export default function ProfileForm({
             <span>Procesando...</span>
           </>
         ) : (
-          <span>{shouldDisablePayButton ? "Activo" : checkoutPlanType === "gratuito" ? "Activar Plan" : "Pagar"}</span>
+          <span>
+            {shouldDisablePayButton 
+              ? "Activo" 
+              : checkoutPlanType === "gratuito" 
+                ? "Activar Plan" 
+                : selectedCardForPlan === "googlepay_wallet"
+                  ? "Pagar con Google Pay"
+                  : selectedCardForPlan === "paypal_wallet"
+                    ? "Pagar con PayPal"
+                    : selectedCardForPlan === "mercadopago_wallet"
+                      ? "Pagar con Mercado Pago"
+                      : "Pagar"}
+          </span>
         )}
       </button>
     );
