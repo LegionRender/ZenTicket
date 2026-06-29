@@ -1882,7 +1882,7 @@ app.post("/api/billing/checkout/stripe/confirm", async (req: Request, res: Respo
 
   try {
     const response = await axios.get(
-      `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription.default_payment_method&expand[]=payment_intent.payment_method`,
+      `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription&expand[]=subscription.default_payment_method&expand[]=payment_intent&expand[]=payment_intent.payment_method`,
       { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
     );
     const session = response.data;
@@ -2037,7 +2037,8 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
       "mode": "payment",
       "success_url": successUrl,
       "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
-      "client_reference_id": `${userId}:${planId}`
+      "client_reference_id": `${userId}:${planId}`,
+      "payment_intent_data[setup_future_usage]": "off_session"
     });
     
     if (stripeCustomerId) {
