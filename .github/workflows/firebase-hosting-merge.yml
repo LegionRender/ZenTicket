@@ -10,6 +10,8 @@ on:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - run: npm ci && npm run build
@@ -18,5 +20,14 @@ jobs:
         with:
           credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_FACTUBOLT }}'
 
-      - name: Deploy to Firebase Hosting
-        run: npx firebase-tools deploy --only hosting --project factubolt
+      - name: Deploy and Push Log
+        run: |
+          npx firebase-tools deploy --only hosting --project factubolt --debug > firebase-debug.log 2>&1
+          EXIT_CODE=$?
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git checkout -b debug-logs
+          git add firebase-debug.log
+          git commit -m "chore: debug deploy log"
+          git push origin debug-logs --force || true
+          exit $EXIT_CODE
