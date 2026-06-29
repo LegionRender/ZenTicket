@@ -1833,10 +1833,10 @@ app.post("/api/billing/setup/stripe", async (req: Request, res: Response) => {
     const baseUrl = getSafeBaseUrl(req);
     const setupSuccessUrl = process.env.BILLING_SUCCESS_URL
       ? process.env.BILLING_SUCCESS_URL.replace("status=success", "status=card_setup_success")
-      : `${baseUrl}/workspace?tab=cuenta&status=card_setup_success`;
+      : `${baseUrl}/billing-setup-success.html?status=card_setup_success`;
     const setupCancelUrl = process.env.BILLING_FAILURE_URL
       ? process.env.BILLING_FAILURE_URL.replace("status=failure", "status=card_setup_cancelled")
-      : `${baseUrl}/workspace?tab=cuenta&status=card_setup_cancelled`;
+      : `${baseUrl}/billing-failure.html?status=card_setup_cancelled`;
     const setupParams = new URLSearchParams({
       mode: "setup",
       customer: stripeCustomerId,
@@ -2022,7 +2022,7 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
     console.log("DEBUG STRIPE BASEURL:", baseUrl);
     const successUrl = process.env.BILLING_SUCCESS_URL 
       ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}&session_id={CHECKOUT_SESSION_ID}` 
-      : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}&session_id={CHECKOUT_SESSION_ID}`;
+      : `${baseUrl}/billing-success.html?status=success&plan=${planId}&session_id={CHECKOUT_SESSION_ID}`;
     console.log("DEBUG STRIPE SUCCESSURL:", successUrl);
 
     const profileSnapshot = await adminDb.collection("fiscalProfiles").doc(userId).get();
@@ -2036,7 +2036,7 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
       "line_items[0][quantity]": "1",
       "mode": "payment",
       "success_url": successUrl,
-      "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
+      "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/billing-failure.html?status=failure`,
       "client_reference_id": `${userId}:${planId}`,
       "payment_intent_data[setup_future_usage]": "off_session"
     });

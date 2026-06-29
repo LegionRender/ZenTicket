@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>ZenTicket - Cancelado</title>
+  <style>
+    body {
+      background-color: #0f172a;
+      color: #ffffff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h2 style="margin: 0 0 10px 0; font-size: 18px; font-weight: 800;">Operación Cancelada</h2>
+  <p style="margin: 0; font-size: 13px; color: #94a3b8;">Cerrando ventana...</p>
+
+  <script>
+    if (window.opener) {
+      window.opener.postMessage({ type: "stripe_payment_failure" }, "*");
+      window.close();
+    } else {
+      window.location.href = "/workspace?tab=cuenta&status=failure";
+    }
+  </script>
+</body>
+</html>

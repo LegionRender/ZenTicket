@@ -1553,23 +1553,23 @@ export default function ProfileForm({
             const wallet = digitalWallets.find(w => w.id === selectedCardForPlan);
             if (wallet) {
               return (
-                <div className="flex flex-col gap-3 p-5 bg-gradient-to-br from-slate-50 to-slate-100/70 border border-slate-200/90 rounded-2xl w-full shadow-2xs relative overflow-hidden animate-fade-in">
+                <div className="flex flex-col gap-3 p-5 bg-white dark:bg-[#0a0d19] border border-slate-200/80 dark:border-slate-800/80 rounded-3xl w-full shadow-xs relative overflow-hidden animate-fade-in">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3.5">
-                      <div style={{ backgroundColor: '#ffffff' }} className="w-12 h-12 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                      <div style={{ backgroundColor: '#ffffff' }} className="w-12 h-12 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 p-2 shadow-3xs">
                         <img src={wallet.logo} className="w-full h-full object-contain" alt={wallet.name} />
                       </div>
                       <div className="text-left leading-tight min-w-0">
-                        <span className="text-sm font-black text-slate-800 block">{wallet.displayName}</span>
-                        <span className="text-xs text-slate-400 font-semibold block mt-0.5 truncate">{wallet.sub}</span>
+                        <span className="text-sm font-black text-slate-800 dark:text-white block">{wallet.displayName}</span>
+                        <span className="text-xs text-slate-400 dark:text-slate-400 font-semibold block mt-0.5 truncate">{wallet.sub}</span>
                       </div>
                     </div>
                     {/* Badges */}
                     <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      <span className="flex items-center gap-1 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider shadow-3xs">
+                      <span className="flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider shadow-3xs">
                         <Check className="w-2.5 h-2.5 stroke-[3]" /> Vinculada con éxito
                       </span>
-                      <span className="bg-slate-200/75 text-slate-600 border border-slate-350/30 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider">
+                      <span className="bg-slate-200/75 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-slate-350/30 dark:border-slate-700/50 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider">
                         Pago seleccionado
                       </span>
                     </div>
@@ -1581,38 +1581,38 @@ export default function ProfileForm({
             const card = cards.find(c => c.id === selectedCardForPlan) || cards.find(c => c.isDefault) || cards[0];
             if (card) {
               return (
-                <div className="flex flex-col gap-3 p-5 bg-gradient-to-br from-slate-50 to-slate-100/70 border border-slate-200/90 rounded-2xl w-full shadow-2xs relative overflow-hidden animate-fade-in">
+                <div className="flex flex-col gap-3 p-5 bg-white dark:bg-[#0a0d19] border border-slate-200/80 dark:border-slate-800/80 rounded-3xl w-full shadow-xs relative overflow-hidden animate-fade-in">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3.5">
                       {renderVisualBrandBlock(card, "md")}
                       <div className="text-left leading-tight min-w-0">
-                        <span className="text-sm font-black text-slate-800 block">
+                        <span className="text-sm font-black text-slate-800 dark:text-white block">
                           {card.bankName || (card.brand === "VISA" ? "Tarjeta Visa" : "Mastercard")}
                         </span>
-                        <span className="text-xs text-slate-450 font-mono mt-0.5 block">
+                        <span className="text-xs text-slate-450 dark:text-slate-400 font-mono mt-0.5 block">
                           •••• •••• •••• {card.last4}
                         </span>
                       </div>
                     </div>
                     {/* Badges */}
                     <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      <span className="flex items-center gap-1 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider shadow-3xs">
+                      <span className="flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider shadow-3xs">
                         <Check className="w-2.5 h-2.5 stroke-[3]" /> Vinculada con éxito
                       </span>
-                      <span className="bg-[#EBF1FF] text-[#0B53F4] border border-[#0B53F4]/10 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider">
+                      <span className="bg-[#EBF1FF] dark:bg-[#0B53F4]/10 text-[#0B53F4] dark:text-[#7fa5ff] border border-[#0B53F4]/10 dark:border-[#0B53F4]/20 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider">
                         Método predeterminado
                       </span>
                     </div>
                   </div>
-                  <div className="flex justify-between items-center pt-2.5 border-t border-slate-200/60 mt-0.5 text-left">
+                  <div className="flex justify-between items-center pt-2.5 border-t border-slate-250/60 dark:border-slate-850 mt-0.5 text-left">
                     <div>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Titular</span>
-                      <span className="text-[11.5px] font-extrabold text-slate-700 block truncate max-w-[200px]">{card.holderName}</span>
+                      <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Titular</span>
+                      <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block truncate max-w-[200px]">{card.holderName}</span>
                     </div>
                     {card.expiryMonth && card.expiryYear && (
                       <div className="text-right">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Expira</span>
-                        <span className="text-[11.5px] font-extrabold text-slate-700 block font-mono">{card.expiryMonth}/{card.expiryYear}</span>
+                        <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Expira</span>
+                        <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block font-mono">{card.expiryMonth}/{card.expiryYear}</span>
                       </div>
                     )}
                   </div>
@@ -3789,20 +3789,22 @@ export default function ProfileForm({
             <div className="text-left font-body">
               <div className="flex items-center gap-2">
                 <span className="font-display font-extrabold text-sm text-slate-800 capitalize">
-                  {getPlanLabel(currentPlan)}
+                  {getPlanLabel(selectedPlan)}
                 </span>
-                <span className="bg-[#ebf1ff] text-[#0B53F4] text-[9.5px] uppercase font-black px-2 py-0.5 rounded-md tracking-wider leading-none">
-                  Activo
+                <span className={`text-[9.5px] uppercase font-black px-2 py-0.5 rounded-md tracking-wider leading-none ${checkoutPlanType !== null ? "bg-amber-100 text-amber-700" : "bg-[#ebf1ff] text-[#0B53F4]"}`}>
+                  {checkoutPlanType !== null ? "Por pagar" : "Activo"}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
-                {currentPlan === "gratuito" ? "Plan de prueba permanente" : `Facturado mensual - Prox: ${new Date(planStartDate.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`}
+                {checkoutPlanType !== null 
+                  ? "Elegiste este plan. Por favor, confirma el pago abajo para activarlo." 
+                  : (currentPlan === "gratuito" ? "Plan de prueba permanente" : `Facturado mensual - Prox: ${new Date(planStartDate.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`)}
               </p>
             </div>
             {/* Amount details */}
             <div className="text-right flex items-baseline gap-1">
               <span className="text-lg font-mono font-extrabold text-slate-800">
-                {getPlanPrice(currentPlan)}
+                {getPlanPrice(selectedPlan)}
               </span>
               <span className="text-[10px] text-slate-400 font-bold font-display">/mes<br/><span className="text-[8px] tracking-wide block text-right">(MXN)</span></span>
             </div>
@@ -3812,12 +3814,12 @@ export default function ProfileForm({
           <div className="space-y-2 pt-1 border-t border-slate-100">
             <div className="flex items-center justify-between text-xs">
               <span className="text-slate-450 font-extrabold font-display">Uso del Ciclo</span>
-              <span className="text-[#0B53F4] font-mono font-black">{cycleInvoicesCount} de {currentPlanLimit} Facturas</span>
+              <span className="text-[#0B53F4] font-mono font-black">{cycleInvoicesCount} de {checkoutPlanType !== null ? (selectedPlan === "nirvana" ? 100 : selectedPlan === "empresa" ? 60 : selectedPlan === "serenidad" ? 30 : selectedPlan === "personal" ? 20 : selectedPlan === "brisa" ? 10 : 5) : currentPlanLimit} Facturas</span>
             </div>
             <div className="w-full bg-[#EBF1FF] rounded-full h-2 overflow-hidden">
               <div 
                 className="bg-[#0B53F4] h-full rounded-full transition-all duration-300"
-                style={{ width: `${Math.min((cycleInvoicesCount / currentPlanLimit) * 100, 105)}%` }}
+                style={{ width: `${Math.min((cycleInvoicesCount / (checkoutPlanType !== null ? (selectedPlan === "nirvana" ? 100 : selectedPlan === "empresa" ? 60 : selectedPlan === "serenidad" ? 30 : selectedPlan === "personal" ? 20 : selectedPlan === "brisa" ? 10 : 5) : currentPlanLimit)) * 100, 105)}%` }}
               />
             </div>
           </div>
