@@ -908,7 +908,7 @@ export default function ProfileForm({
     const saved = localStorage.getItem("zenticket_checkout_plan") || localStorage.getItem("selectedPlanOnSignup");
     const currentPlan = initialProfile?.plan || "gratuito";
     const paymentStatus = initialProfile?.paymentStatus;
-    const hasActivePaidPlan = currentPlan !== "gratuito" && (paymentStatus === "paid" || paymentStatus === "subscription_active");
+    const hasActivePaidPlan = currentPlan !== "gratuito" && (paymentStatus === "paid" || paymentStatus === "subscription_active" || paymentStatus === "active");
 
     const planStartDateStr = initialProfile?.planStartDate;
     const planStartDate = planStartDateStr ? new Date(planStartDateStr) : null;
@@ -1188,7 +1188,9 @@ export default function ProfileForm({
     return "$0";
   };
   const hasActivePaidPlan = currentPlan !== "gratuito" &&
-    (initialProfile?.paymentStatus === "paid" || initialProfile?.paymentStatus === "subscription_active") &&
+    (initialProfile?.paymentStatus === "paid" || 
+     initialProfile?.paymentStatus === "subscription_active" || 
+     initialProfile?.paymentStatus === "active") &&
     !isPlanExpired &&
     !isMonthlyQuotaExhausted;
   const isPayingSameActivePlan = checkoutPlanType === currentPlan && hasActivePaidPlan;
