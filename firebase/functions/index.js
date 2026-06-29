@@ -679,6 +679,19 @@ async function getPayPalAccessToken() {
 }
 
 const getSafeBaseUrl = (req) => {
+  const referer = req.headers.referer;
+  if (referer) {
+    try {
+      const parsed = new URL(referer);
+      return parsed.origin;
+    } catch (e) {
+      // Ignorar error de parsing
+    }
+  }
+  const origin = req.headers.origin;
+  if (origin) {
+    return origin;
+  }
   let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
   if (Array.isArray(proto)) {
     proto = proto[0];
