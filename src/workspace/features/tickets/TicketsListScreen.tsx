@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Ticket, Invoice } from "@/shared/types/types";
 import { getConfigStatus, sendEmail } from "@/services/api";
+import logoDark from "@/assets/logos/logo-dark.png";
 import { 
   ChevronLeft, ChevronRight, Share2, FileText, Check, Download, ArrowLeft, 
   Coffee, ShoppingBag, Car, Plus, Printer, Mail, Trash2, 
@@ -981,17 +982,16 @@ export default function TicketsListScreen({
                           <!-- Top Header info -->
                           <div class="header-container">
                             <div class="issuer-box">
-                              <img src="https://customer-assets.emergentagent.com/job_zenticket-preview/artifacts/23vqzgm3_Zenticket%20logo%203B.png" style="height: 28px; width: auto;" alt="ZenTicket" />
-                              
-                              <div style="margin-top: 12px;">
+                              <div style="margin-top: 5px;">
                                 <h3 style="font-size: 13px; font-weight: 850; color: #0f172a; margin: 0 0 2px 0;">${emisorCorp}</h3>
                                 <p style="font-size: 11px; color: #475569; margin: 0;"><strong>RFC Emisor:</strong> ${rfcEmisorVal}</p>
                                 <p style="font-size: 11px; color: #475569; margin: 2px 0 0 0;"><strong>Régimen Fiscal Emisor:</strong> ${getRegimenLabel(activeInvoiceData.regimenFiscalEmisor || "601")}</p>
                               </div>
                             </div>
                             
-                            <div class="invoice-title-box">
-                              <h1>Factura</h1>
+                            <div class="invoice-title-box" style="display: flex; flex-direction: column; align-items: flex-end;">
+                              <img src="${logoDark}" style="height: 44px; width: auto; margin-bottom: 10px;" alt="ZenTicket" />
+                              <h1 style="margin: 0 0 8px 0; line-height: 1;">Factura</h1>
                               <div class="invoice-meta-item">Fecha: <strong>${formattedDate}</strong></div>
                               <div class="invoice-meta-item">Folio Fiscal (UUID): <strong>${uuidVal}</strong></div>
                               <div class="invoice-meta-item">Lugar de Expedición: <strong>${lugarExpedicion}</strong></div>
@@ -1035,22 +1035,25 @@ export default function TicketsListScreen({
                                 </tr>
                               </thead>
                               <tbody>
-                                ${itemsList.map((item: any, idx: number) => {
-                                  const stNum = String(idx + 1).padStart(2, '0');
-                                  const unitVal = item.amount || item.importe || 0;
-                                  return `
-                                    <tr>
-                                      <td class="cell-st">\${stNum}</td>
-                                      <td class="cell-desc">
-                                        <span>\${item.description || item.descripcion}</span>
-                                        <span class="subtext">Clave SAT: \${item.code || "90101501"} | Unidad: E48 - Servicio</span>
-                                      </td>
-                                      <td class="cell-rate" style="text-align: right;">$\${unitVal.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</td>
-                                      <td class="cell-qty" style="text-align: center;">1</td>
-                                      <td class="cell-total">$\${unitVal.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</td>
-                                    </tr>
-                                  `;
-                                }).join("")}
+                                ${(() => {
+                                  return itemsList.map((item: any, idx: number) => {
+                                    const stNum = String(idx + 1).padStart(2, '0');
+                                    const unitVal = item.amount || item.importe || 0;
+                                    const desc = item.description || item.descripcion || "Consumo General de Mercancías";
+                                    const code = item.code || "90101501";
+                                    const formattedVal = "$" + unitVal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                    return "<tr>" +
+                                      "<td class='cell-st'>" + stNum + "</td>" +
+                                      "<td class='cell-desc'>" +
+                                        "<span>" + desc + "</span>" +
+                                        "<span class='subtext'>Clave SAT: " + code + " | Unidad: E48 - Servicio</span>" +
+                                      "</td>" +
+                                      "<td class='cell-rate' style='text-align: right;'>" + formattedVal + "</td>" +
+                                      "<td class='cell-qty' style='text-align: center;'>1</td>" +
+                                      "<td class='cell-total'>" + formattedVal + "</td>" +
+                                    "</tr>";
+                                  }).join("");
+                                })()}
                               </tbody>
                             </table>
                           </div>
@@ -1065,7 +1068,7 @@ export default function TicketsListScreen({
                               </div>
                               
                               <div class="signature-container" style="display: flex; flex-direction: column; align-items: flex-start;">
-                                <img src="https://customer-assets.emergentagent.com/job_zenticket-preview/artifacts/23vqzgm3_Zenticket%20logo%203B.png" style="height: 22px; width: auto; margin-bottom: 5px;" alt="ZenTicket" />
+                                <img src="${logoDark}" style="height: 22px; width: auto; margin-bottom: 5px;" alt="ZenTicket" />
                                 <div class="signature-line"></div>
                                 <span class="signature-title">Firma del Emisor Certificado</span>
                               </div>
