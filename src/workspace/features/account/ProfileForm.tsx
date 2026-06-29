@@ -3733,7 +3733,7 @@ export default function ProfileForm({
           )}
         </div>
 
- {/* Close Left Column (lg:col-span-6) */}
+      </div> {/* Close Left Column (lg:col-span-6) */}
 
       {/* RIGHT COLUMN: PAYMENT METHODS & CONFIGURATION */}
       <div className="lg:col-span-6 space-y-6">
@@ -3826,7 +3826,6 @@ export default function ProfileForm({
 
       </div>
 
-      </div> {/* Close Right Column (lg:col-span-6) */}
       </div> {/* Close Grid layout container */}
 
       {/* 5. AYUDA Header & Columns */}
