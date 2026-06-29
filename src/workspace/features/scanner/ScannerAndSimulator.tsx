@@ -979,8 +979,7 @@ export default function ScannerAndSimulator({
     try {
       await setDoc(trainingDocRef, initialTrainingData);
     } catch (e) {
-      console.error("Error creating training doc, continuing locally:", e);
-      handleFirestoreError(e, OperationType.WRITE, `automation_trainings/${ticketId}`);
+      console.warn("Error creating training doc, continuing locally:", e);
     }
 
     const steps = [
@@ -1008,8 +1007,7 @@ export default function ScannerAndSimulator({
             state: currentData.progress === 100 ? "completed" : "in_progress"
           });
         } catch (e) {
-          console.error("Error updating training doc:", e);
-          handleFirestoreError(e, OperationType.UPDATE, `automation_trainings/${ticketId}`);
+          console.warn("Error updating training doc, continuing locally:", e);
         }
 
         currentStepIdx++;
