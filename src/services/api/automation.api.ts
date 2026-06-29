@@ -89,93 +89,106 @@ const generateLocalPdfHtml = (ticket: any, profile: any, connector: any, folioFi
       const itemSub = itemAmount / 1.16;
       return `
         <tr class="border-b border-zinc-100 last:border-0 hover:bg-zinc-50/50 transition">
-          <td class="py-3 px-4 font-medium text-zinc-800">${idx + 1}</td>
-          <td class="py-3 px-4 font-mono text-xs text-zinc-500">90101501</td>
-          <td class="py-3 px-4 text-zinc-750 text-xs">${escapeXml(item.description || "Consumo general")}</td>
-          <td class="py-3 px-4 text-right font-mono text-xs text-zinc-600">$${itemSub.toFixed(2)}</td>
-          <td class="py-3 px-4 text-right font-mono font-semibold text-xs text-zinc-900">$${itemAmount.toFixed(2)}</td>
+          <td class="py-2 px-3.5 font-medium text-zinc-800">${idx + 1}</td>
+          <td class="py-2 px-3.5 font-mono text-[10px] text-zinc-500">90101501</td>
+          <td class="py-2 px-3.5 text-zinc-700 text-xs">${escapeXml(item.description || "Consumo general")}</td>
+          <td class="py-2 px-3.5 text-right font-mono text-[10px] text-zinc-650">$${itemSub.toFixed(2)}</td>
+          <td class="py-2 px-3.5 text-right font-mono font-semibold text-xs text-zinc-900">$${itemAmount.toFixed(2)}</td>
         </tr>
       `;
     }).join("");
   } else {
     itemsRows = `
       <tr class="border-b border-zinc-100 last:border-0 hover:bg-zinc-50/50 transition">
-        <td class="py-3 px-4 font-semibold text-zinc-850">1</td>
-        <td class="py-3 px-4 font-mono text-xs text-zinc-500">90101501</td>
-        <td class="py-3 px-4 text-zinc-750 text-xs">Consumo de alimentos según ticket folio: ${escapeXml(ticket.folio || "M-8495")}</td>
-        <td class="py-3 px-4 text-right font-mono text-xs text-zinc-600">$${subtotal.toFixed(2)}</td>
-        <td class="py-3 px-4 text-right font-mono font-bold text-xs text-zinc-900">$${total.toFixed(2)}</td>
+        <td class="py-2 px-3.5 font-semibold text-zinc-850">1</td>
+        <td class="py-2 px-3.5 font-mono text-[10px] text-zinc-500">90101501</td>
+        <td class="py-2 px-3.5 text-zinc-700 text-xs">Consumo de alimentos según ticket folio: ${escapeXml(ticket.folio || "M-8495")}</td>
+        <td class="py-2 px-3.5 text-right font-mono text-[10px] text-zinc-650">$${subtotal.toFixed(2)}</td>
+        <td class="py-2 px-3.5 text-right font-mono font-bold text-xs text-zinc-900">$${total.toFixed(2)}</td>
       </tr>
     `;
   }
 
   return `
-    <div class="max-w-4xl mx-auto bg-white p-6 md:p-12 shadow-2xl rounded-2xl border border-zinc-150 text-zinc-800 text-sm font-sans relative overflow-hidden my-6">
-      <div class="absolute top-4 right-4 bg-amber-50 border border-amber-200 text-amber-700 font-bold px-3 py-1 rounded-full text-[10px] uppercase tracking-wider flex items-center gap-1">
-        <span>Prueba Simulada</span>
-      </div>
-
-      <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-zinc-200 pb-8 mb-8 gap-6">
-        <div>
-          <div class="flex items-center gap-2 mb-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-            <span class="text-[11px] font-black text-emerald-600 uppercase tracking-widest">CFDI COMPROBANTE FISCAL 4.0</span>
+    <div class="max-w-4xl mx-auto bg-white p-5 md:p-8 rounded-2xl border border-zinc-150 text-zinc-800 text-xs font-sans relative my-4 shadow-sm select-none print:my-0 print:border-0 print:shadow-none">
+      
+      <!-- HEADER ROW -->
+      <div class="flex flex-row justify-between items-start border-b border-zinc-100 pb-3.5 mb-3.5">
+        <div class="space-y-1">
+          <!-- ZenTicket Logo Lockup -->
+          <div class="flex items-center gap-1.5 select-none">
+            <svg width="22" height="22" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="zt-mark-pdf" x1="0" y1="0" x2="28" y2="28">
+                  <stop offset="0%" stop-color="#5B8CFF" />
+                  <stop offset="100%" stop-color="#2152EE" />
+                </linearGradient>
+              </defs>
+              <rect x="1" y="1" width="26" height="26" rx="7" fill="url(#zt-mark-pdf)" stroke="rgba(15,23,42,0.06)" />
+              <path d="M9 9h10l-9.2 10H19" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            </svg>
+            <span class="text-sm font-black text-slate-900 tracking-tight">ZenTicket</span>
           </div>
-          <h1 class="text-2xl font-black text-zinc-900 leading-tight uppercase select-all">${escapeXml(ticket.nombreEmisor || "RAZÓN SOCIAL EMISOR")}</h1>
-          <p class="text-xs text-zinc-500 mt-1">RFC: <strong class="font-semibold select-all">${escapeXml(ticket.rfcEmisor || "XAXX010101000")}</strong> | Régimen General: Personas Morales (601)</p>
-          <p class="text-xs text-zinc-450 mt-0.5">Lugar de Expedición CP: ${profile.codigoPostal || "01000"}</p>
+          <span class="text-[9px] font-black text-emerald-600 uppercase tracking-wider block">COMPROBANTE FISCAL DIGITAL POR INTERNET (CFDI 4.0)</span>
         </div>
-        <div class="text-left md:text-right border-l md:border-l-0 md:border-r border-zinc-200 pl-4 md:pl-0 md:pr-4">
-          <p class="text-xs text-zinc-400 font-bold uppercase tracking-wider">Folio Digital Factura</p>
-          <span class="text-lg font-black text-zinc-900 tracking-tight font-mono select-all">FT-${Math.floor(10000 + Math.random() * 90000)}</span>
-          <p class="text-[11px] text-zinc-500 mt-1">Fecha Emisión: ${dateStr}</p>
+        <div class="text-right leading-tight">
+          <h2 class="font-extrabold text-sm text-zinc-900 uppercase">${escapeXml(ticket.nombreEmisor || "RAZÓN SOCIAL EMISOR")}</h2>
+          <p class="text-[10px] text-zinc-500 mt-0.5">RFC: <strong class="font-bold select-all">${escapeXml(ticket.rfcEmisor || "XAXX010101000")}</strong> | Régimen: 601</p>
+          <p class="text-[10px] text-zinc-450">Lugar de Expedición CP: ${profile.codigoPostal || "01000"}</p>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-        <div class="bg-zinc-50 p-5 rounded-2xl border border-zinc-150">
-          <h4 class="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">Receptor de Comprobante</h4>
-          <h5 class="font-black text-zinc-900 uppercase tracking-wide leading-snug select-all">${escapeXml(profile.razonSocial || "RECEPTOR DEFAULT")}</h5>
-          <div class="space-y-1 mt-3 text-xs text-zinc-650">
-            <p>RFC: <strong class="font-semibold select-all text-zinc-800">${escapeXml(profile.rfc || "XAXX010101000")}</strong></p>
-            <p>Código Postal Domicilio Fiscal: ${profile.codigoPostal || "01000"}</p>
+      <!-- METADATA GRID (3 columns) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 bg-zinc-50/50 p-3.5 rounded-xl border border-zinc-150">
+        <div>
+          <h4 class="text-[9px] font-black text-zinc-400 uppercase tracking-wider mb-1.5">RECEPTOR</h4>
+          <h5 class="font-extrabold text-zinc-900 uppercase text-[11px] select-all leading-tight">${escapeXml(profile.razonSocial || "RECEPTOR DEFAULT")}</h5>
+          <div class="space-y-0.5 mt-1 text-[10px] text-zinc-500">
+            <p>RFC: <strong class="font-bold select-all text-zinc-700">${escapeXml(profile.rfc || "XAXX010101000")}</strong></p>
             <p>Régimen Receptor: ${profile.regimenFiscal || "605"}</p>
             <p>Uso CFDI: ${profile.usoCFDI || "G03"}</p>
           </div>
         </div>
-        <div class="flex flex-col justify-between p-5 bg-zinc-50 rounded-2xl border border-zinc-150 relative">
-          <div>
-            <h4 class="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Folio Timbrado SAT (UUID)</h4>
-            <span class="text-xs font-bold font-mono text-zinc-600 block bg-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-200/50 break-all select-all">${folioFiscal}</span>
+        
+        <div>
+          <h4 class="text-[9px] font-black text-zinc-400 uppercase tracking-wider mb-1.5">DETALLES CFDI</h4>
+          <div class="space-y-0.5 text-[10px] text-zinc-500">
+            <p>Folio Interno: <strong class="font-bold text-zinc-700">FT-${Math.floor(10000 + Math.random() * 90000)}</strong></p>
+            <p>Fecha Emisión: ${dateStr}</p>
+            <p>Método de Pago: PUE</p>
+            <p>Forma de Pago: 04 (Tarjeta o equiv.)</p>
           </div>
-          <div class="mt-4 pt-4 border-t border-zinc-200 text-xs">
-            <p class="text-zinc-550">Método de Pago: <strong class="text-zinc-800">PUE - Pago en una sola exhibición</strong></p>
-            <p class="text-zinc-550">Forma de Pago: <strong class="text-zinc-800">04 - Tarjeta de crédito (o equivalente)</strong></p>
-          </div>
+        </div>
+
+        <div>
+          <h4 class="text-[9px] font-black text-zinc-400 uppercase tracking-wider mb-1">FOLIO FISCAL (UUID)</h4>
+          <span class="text-[9.5px] font-bold font-mono text-zinc-650 block bg-white px-2.5 py-1.5 rounded-lg border border-zinc-200 break-all select-all leading-tight shadow-3xs">${folioFiscal}</span>
         </div>
       </div>
 
-      <div class="border border-zinc-200 rounded-2xl overflow-hidden mb-8 shadow-xs">
+      <!-- CONCEPTS TABLE -->
+      <div class="border border-zinc-200 rounded-xl overflow-hidden mb-4 shadow-3xs">
         <table class="w-full text-left border-collapse">
           <thead>
-            <tr class="bg-zinc-50 border-b border-zinc-200 text-zinc-500 font-bold text-xs uppercase tracking-wider select-none">
-              <th class="py-3.5 px-4 w-12">Cant</th>
-              <th class="py-3.5 px-4 w-24">Sat ID</th>
-              <th class="py-3.5 px-4">Descripción de Concepto</th>
-              <th class="py-3.5 px-4 text-right w-28">Precio Unit</th>
-              <th class="py-3.5 px-4 text-right w-28">Importe</th>
+            <tr class="bg-zinc-50/70 border-b border-zinc-250 text-zinc-500 font-bold text-[9px] uppercase tracking-wider select-none">
+              <th class="py-2 px-3.5 w-10">Cant</th>
+              <th class="py-2 px-3.5 w-20">Sat ID</th>
+              <th class="py-2 px-3.5">Descripción de Concepto</th>
+              <th class="py-2 px-3.5 text-right w-24">Precio Unit</th>
+              <th class="py-2 px-3.5 text-right w-24">Importe</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-zinc-100 text-xs sm:text-sm">
+          <tbody class="divide-y divide-zinc-100 text-[10.5px]">
             ${itemsRows}
           </tbody>
         </table>
       </div>
 
-      <div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 border-b border-zinc-200 pb-8 mb-8">
-        <div class="flex items-center gap-4 bg-zinc-50 border border-zinc-150 rounded-xl p-4 w-full md:w-auto">
-          <div class="bg-white border rounded-lg p-1.5 shrink-0 shadow-3xs">
-            <svg class="w-16 h-16 text-zinc-800" viewBox="0 0 100 100">
+      <!-- TOTALS & QR ROW -->
+      <div class="flex flex-row justify-between items-end gap-6 border-b border-zinc-150 pb-3.5 mb-3.5">
+        <div class="flex items-center gap-3 bg-zinc-50 border border-zinc-150 rounded-lg p-2.5">
+          <div class="bg-white border rounded-md p-1 shrink-0 shadow-3xs">
+            <svg class="w-12 h-12 text-zinc-800" viewBox="0 0 100 100">
               <rect width="100" height="100" fill="white" />
               <rect x="10" y="10" width="10" height="10" fill="black" />
               <rect x="30" y="10" width="10" height="10" fill="black" />
@@ -191,11 +204,12 @@ const generateLocalPdfHtml = (ticket: any, profile: any, connector: any, folioFi
               <rect x="70" y="50" width="10" height="30" fill="black" />
             </svg>
           </div>
-          <p class="text-[10px] text-zinc-400 max-w-[200px] leading-relaxed">
-            Utilice este código bidimensional QR para la autenticación inmediata del comprobante fiscal directamente ante los canales del SAT en México.
+          <p class="text-[8.5px] text-zinc-400 max-w-[190px] leading-snug">
+            Código bidimensional QR para verificación inmediata del CFDI directamente en los canales del SAT.
           </p>
         </div>
-        <div class="w-full md:w-80 ml-auto space-y-2 text-sm">
+        
+        <div class="w-64 space-y-1 text-xs">
           <div class="flex justify-between text-zinc-500 font-semibold">
             <span>Subtotal:</span>
             <span class="font-mono">$${subtotal.toFixed(2)}</span>
@@ -204,25 +218,26 @@ const generateLocalPdfHtml = (ticket: any, profile: any, connector: any, folioFi
             <span>IVA (16%):</span>
             <span class="font-mono">$${iva.toFixed(2)}</span>
           </div>
-          <div class="flex justify-between border-t border-zinc-200 pt-2 font-black text-lg text-[#0B53F4]">
+          <div class="flex justify-between border-t border-zinc-200 pt-1.5 font-black text-base text-[#0B53F4]">
             <span>Total MXN:</span>
             <span class="font-mono select-all">$${total.toFixed(2)}</span>
           </div>
         </div>
       </div>
 
-      <div class="space-y-4 text-[9.5px] text-zinc-400 font-mono leading-relaxed break-all select-all">
+      <!-- DIGITAL STAMPS (3 columns) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-[7px] text-zinc-400 font-mono leading-tight break-all">
         <div>
-          <p class="font-bold text-zinc-500 uppercase tracking-widest text-[8.5px] mb-0.5">Cadena Original del Timbre SAT</p>
-          <p class="bg-zinc-50 px-3 py-2 rounded-lg border">||1.1|${folioFiscal}|${dateStr}|SAT970701NN3|SIM_SELLOS_CFD_SAT_OK|00001000000504465028||</p>
+          <p class="font-black text-zinc-500 uppercase tracking-wider text-[7.5px] mb-0.5">Cadena Original SAT</p>
+          <p class="bg-zinc-50 p-2 rounded-lg border border-zinc-150 select-all">||1.1|${folioFiscal}|${dateStr}|SAT970701NN3|SIM_SELLOS_CFD_SAT_OK|00001000000504465028||</p>
         </div>
         <div>
-          <p class="font-bold text-zinc-500 uppercase tracking-widest text-[8.5px] mb-0.5">Sello Digital del Contribuyente Emisor</p>
-          <p class="bg-zinc-50 px-3 py-2 rounded-lg border">SIM_COMPLEMENTO_CFD_CADENA_ORIGINAL_SELLADO_DIGITAL_EMISOR_ZENTICKET_OFFLINE</p>
+          <p class="font-black text-zinc-500 uppercase tracking-wider text-[7.5px] mb-0.5">Sello Digital Emisor</p>
+          <p class="bg-zinc-50 p-2 rounded-lg border border-zinc-150 select-all">SIM_COMPLEMENTO_CFD_CADENA_ORIGINAL_SELLADO_DIGITAL_EMISOR_ZENTICKET_OFFLINE</p>
         </div>
         <div>
-          <p class="font-bold text-zinc-500 uppercase tracking-widest text-[8.5px] mb-0.5">Sello Digital SAT</p>
-          <p class="bg-zinc-50 px-3 py-2 rounded-lg border">SIM_COMPLEMENTO_SAT_CADENA_ORIGINAL_SELLADO_DIGITAL_SAT_ZENTICKET_OFFLINE</p>
+          <p class="font-black text-zinc-500 uppercase tracking-wider text-[7.5px] mb-0.5">Sello Digital SAT</p>
+          <p class="bg-zinc-50 p-2 rounded-lg border border-zinc-150 select-all">SIM_COMPLEMENTO_SAT_CADENA_ORIGINAL_SELLADO_DIGITAL_SAT_ZENTICKET_OFFLINE</p>
         </div>
       </div>
     </div>
