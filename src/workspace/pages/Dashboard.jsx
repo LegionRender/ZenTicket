@@ -131,17 +131,7 @@ export const Dashboard = () => {
       correoPago: user.email || "",
       plan: "gratuito",
       onboardingCompleted: true,
-      paymentCards: [
-        {
-          id: "card_real_ricardo",
-          brand: "VISA",
-          last4: "3102",
-          expiry: "12/28",
-          isDefault: true,
-          holderName: "RICARDO CASTRO",
-          bankName: "BBVA Bancomer"
-        }
-      ]
+      paymentCards: []
     };
 
     const getFallbackProfile = () => {
@@ -164,14 +154,7 @@ export const Dashboard = () => {
             correoElectronico: parsed.correoElectronico || user.email || "",
             correoRecepcion: parsed.correoRecepcion || user.email || "",
             correoPago: parsed.correoPago || user.email || "",
-            paymentCards: Array.isArray(parsed.paymentCards)
-              ? parsed.paymentCards.map(c => c.id === "card_real_ricardo" ? {
-                  ...c,
-                  last4: "3102",
-                  holderName: "RICARDO CASTRO",
-                  bankName: "BBVA Bancomer"
-                } : c)
-              : initialDef.paymentCards
+            paymentCards: Array.isArray(parsed.paymentCards) ? parsed.paymentCards : []
           };
         } catch (_) {}
       }
@@ -212,13 +195,7 @@ export const Dashboard = () => {
           const emailLowerProfile = profileEmail.toLowerCase();
           const isAdminEmailProfile = emailLowerProfile.includes("legionrender") || emailLowerProfile.includes("ricardo");
 
-          data.paymentCards = (Array.isArray(data.paymentCards) ? data.paymentCards : initialDef.paymentCards)
-            .map(c => c.id === "card_real_ricardo" ? {
-                ...c,
-                last4: "3102",
-                holderName: "RICARDO CASTRO",
-                bankName: "BBVA Bancomer"
-              } : c);
+          data.paymentCards = Array.isArray(data.paymentCards) ? data.paymentCards : [];
           
           if (!isNewSignup && data.onboardingCompleted !== true) {
             data.onboardingCompleted = true;
@@ -800,14 +777,14 @@ export const Dashboard = () => {
       // Sync/Create Stripe Customer
       const syncStripeCustomer = async () => {
         try {
+          const token = await user.getIdToken();
           await fetch(getApiUrl("/api/billing/sync-customer"), {
             method: "POST",
             headers: {
-              "Content-Type": "application/json"
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
             },
             body: JSON.stringify({
-              userId: user.uid,
-              email: user.email || "",
               name: user.displayName || ""
             })
           });

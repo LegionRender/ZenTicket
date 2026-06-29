@@ -6,7 +6,9 @@ import { GoogleGenAI } from "@google/genai";
 import nodemailer from "nodemailer";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 import axios from "axios";
+import crypto from "crypto";
 
 dotenv.config();
 
@@ -80,8 +82,360 @@ if (!adminDb) {
 }
 
 
+// Middleware de Autenticación de Firebase para Billing
+const authenticateFirebaseToken = async (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    // Modo desarrollo local con bypass habilitado
+    if (process.env.NODE_ENV !== "production" && process.env.DEV_BILLING_AUTH_BYPASS === "true") {
+      const mockUid = req.headers["x-mock-user-id"];
+      const mockEmail = req.headers["x-mock-user-email"];
+      if (mockUid) {
+        req.user = { 
+          uid: mockUid, 
+          email: mockEmail || "mock@example.com",
+          email_verified: true 
+        };
+        next();
+        return;
+      }
+    }
+    res.status(401).json({ error: "Falta el token de autorización o es inválido" });
+    return;
+  }
+
+  const token = authHeader.split("Bearer ")[1];
+  try {
+    // Si no hay credenciales reales de Firebase inicializadas
+    if (!hasRealCredentials) {
+      if (process.env.NODE_ENV !== "production" && process.env.DEV_BILLING_AUTH_BYPASS === "true") {
+        const mockUid = req.headers["x-mock-user-id"] || "mock-local-uid";
+        const mockEmail = req.headers["x-mock-user-email"] || "mock@example.com";
+        req.user = { 
+          uid: mockUid, 
+          email: mockEmail,
+          email_verified: true 
+        };
+        next();
+        return;
+      }
+      res.status(401).json({ error: "Desarrollo local: Habilite DEV_BILLING_AUTH_BYPASS para pruebas" });
+      return;
+    }
+
+    const decodedToken = await getAuth().verifyIdToken(token);
+    req.user = { 
+      uid: decodedToken.uid, 
+      email: decodedToken.email || "",
+      email_verified: decodedToken.email_verified === true 
+    };
+    next();
+  } catch (error: any) {
+    console.error("Error al verificar token de Firebase:", error.message);
+    res.status(401).json({ error: "Token de Firebase inválido o expirado" });
+  }
+};
+
+
+async function resolveStripeCustomerId(uid: string, email: string, emailVerified: boolean): Promise<string | null> {
+  const billingRef = adminDb.collection("billingProfiles").doc(uid);
+  const billingSnap = await billingRef.get();
+  
+  // 1. Si ya existe en billingProfiles, lo retornamos directo
+  if (billingSnap.exists()) {
+    const data = billingSnap.data();
+    if (data?.stripeCustomerId) {
+      return data.stripeCustomerId;
+    }
+  }
+
+  // 2. Si no, revisamos fiscalProfiles (migración segura e histórica)
+  const fiscalRef = adminDb.collection("fiscalProfiles").doc(uid);
+  const fiscalSnap = await fiscalRef.get();
+  if (fiscalSnap.exists()) {
+    const historicalCustomerId = fiscalSnap.data()?.stripeCustomerId;
+    if (historicalCustomerId) {
+      // VALIDACIÓN DE PROPIEDAD:
+      // Validar que email y emailVerified sean válidos, consultar Stripe y comparar email.
+      const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+      if (stripeSecretKey) {
+        try {
+          const res = await axios.get(
+            `https://api.stripe.com/v1/customers/${historicalCustomerId}`,
+            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+          );
+          const customer = res.data;
+          if (email && emailVerified && customer.email && customer.email.toLowerCase() === email.toLowerCase()) {
+            console.log(`[Migration] Migrando stripeCustomerId ${historicalCustomerId} desde fiscalProfiles a billingProfiles para ${uid}`);
+            await billingRef.set({ stripeCustomerId: historicalCustomerId }, { merge: true });
+            return historicalCustomerId;
+          } else {
+            console.warn(`[Migration warning] Email mismatch for historical stripeCustomerId ${historicalCustomerId}. Token email: ${email}, Customer email: ${customer.email}. No se migró.`);
+          }
+        } catch (err: any) {
+          console.error(`[Migration error] Error al validar customer histórico ${historicalCustomerId}:`, err.message);
+        }
+      }
+    }
+  }
+
+  // 3. Si no coincide o no existe, intentamos buscar en Stripe por el correo electrónico verificado
+  if (email && emailVerified) {
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    if (stripeSecretKey) {
+      try {
+        const response = await axios.get(
+          `https://api.stripe.com/v1/customers?email=${encodeURIComponent(email)}`,
+          { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+        );
+        const customers = response.data?.data || [];
+        if (customers.length === 1) {
+          const matchedCustomerId = customers[0].id;
+          console.log(`[Migration] Vinculando stripeCustomerId ${matchedCustomerId} de Stripe por correo verificado ${email} para ${uid}`);
+          await billingRef.set({ stripeCustomerId: matchedCustomerId }, { merge: true });
+          return matchedCustomerId;
+        } else if (customers.length > 1) {
+          console.warn(`[Migration warning] Múltiples clientes encontrados para ${email}. Se requiere resolución manual.`);
+        }
+      } catch (err: any) {
+        console.error(`[Migration error] Error al buscar customer por correo:`, err.message);
+      }
+    }
+  }
+  return null;
+}
+
+
+function verifyStripeSignature(rawBody: string, signatureHeader: string, webhookSecret: string): boolean {
+  if (!signatureHeader || !webhookSecret) return false;
+  
+  // Split header
+  const parts = signatureHeader.split(",");
+  let timestamp = "";
+  const signatures: string[] = [];
+  
+  for (const part of parts) {
+    const [key, val] = part.split("=");
+    if (key === "t") timestamp = val;
+    if (key === "v1") signatures.push(val);
+  }
+  
+  if (!timestamp || signatures.length === 0) return false;
+  
+  // Compute signature
+  const signedPayload = `${timestamp}.${rawBody}`;
+  const computedSig = crypto
+    .createHmac("sha256", webhookSecret)
+    .update(signedPayload)
+    .digest("hex");
+    
+  // Check if computed signature matches any in signatures array
+  const computedBuffer = Buffer.from(computedSig, "hex");
+  for (const sig of signatures) {
+    const sigBuffer = Buffer.from(sig, "hex");
+    if (computedBuffer.length === sigBuffer.length && crypto.timingSafeEqual(computedBuffer, sigBuffer)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+
+// 5.5. Stripe Webhook (Raw Body verification)
+app.post("/api/billing/webhooks/stripe", express.raw({ type: "application/json" }), async (req: any, res: any) => {
+  const sig = req.headers["stripe-signature"];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  
+  if (!sig || !webhookSecret) {
+    console.error("[Stripe Webhook Error] Falta la firma stripe-signature o STRIPE_WEBHOOK_SECRET");
+    res.status(400).send("Webhook signature verification failed");
+    return;
+  }
+
+  const rawBody = req.body.toString("utf8");
+  if (!verifyStripeSignature(rawBody, sig, webhookSecret)) {
+    console.error("[Stripe Webhook Error] Firma de Stripe inválida");
+    res.status(400).send("Webhook signature verification failed");
+    return;
+  }
+
+  let event;
+  try {
+    event = JSON.parse(rawBody);
+  } catch (err: any) {
+    res.status(400).send("Invalid JSON");
+    return;
+  }
+
+  console.log(`[Stripe Webhook] Recibido event verificado: ${event?.type}`);
+
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    res.status(500).send("Webhook config error: missing token");
+    return;
+  }
+
+  try {
+    if (event.type === "setup_intent.succeeded" || event.type === "payment_method.attached" || event.type === "payment_method.detached") {
+      const stripeCustomerId = event.data?.object?.customer;
+      if (stripeCustomerId) {
+        await syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, adminDb);
+      }
+    }
+
+    if (event.type === "payment_intent.succeeded") {
+      const paymentIntentObj = event.data?.object;
+      const paymentIntentId = paymentIntentObj?.id;
+      if (paymentIntentId) {
+        const paymentQuery = await adminDb.collection("payments")
+          .where("providerPaymentId", "==", paymentIntentId)
+          .limit(1)
+          .get();
+        if (!paymentQuery.empty) {
+          await paymentQuery.docs[0].ref.set({
+            status: "paid",
+            paidAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
+      }
+    }
+
+    // Record raw event in Firestore
+    await adminDb.collection("billingEvents").add({
+      provider: "stripe",
+      eventType: event.type || "unknown",
+      providerEventId: event.id || "unknown",
+      processed: true,
+      receivedAt: new Date().toISOString()
+    });
+
+    if (event.type === "checkout.session.completed") {
+      const sessionObj = event.data?.object;
+      if (sessionObj && sessionObj.id) {
+        const sessionId = sessionObj.id;
+
+        // Retrieve checkout session from Stripe API to verify payload is authentic
+        const response = await axios.get(
+          `https://api.stripe.com/v1/checkout/sessions/${sessionId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${stripeSecretKey}`
+            }
+          }
+        );
+
+        const session = response.data;
+        const paymentStatus = session.payment_status;
+        const externalReference = session.client_reference_id; // "userId:planId"
+
+        console.log(`[Stripe] Checkout Session retrieve: status=${session.status}, payment_status=${paymentStatus}, ref=${externalReference}`);
+
+        if (session.mode === "setup" && session.setup_intent && externalReference) {
+          const setupResponse = await axios.get(
+            `https://api.stripe.com/v1/setup_intents/${session.setup_intent}?expand[]=payment_method`,
+            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+          );
+          const paymentMethod = setupResponse.data.payment_method;
+          const card = paymentMethod?.card;
+          if (card) {
+            const billingRef = adminDb.collection("billingProfiles").doc(externalReference);
+            const billingSnapshot = await billingRef.get();
+            const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards)
+              ? billingSnapshot.data().paymentCards
+              : [];
+            const formattedBrand = String(card.brand || "VISA").toUpperCase();
+            const nextCard = {
+              id: paymentMethod.id,
+              brand: formattedBrand,
+              last4: card.last4,
+              expiry: `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`,
+              holderName: session.metadata?.holderName || paymentMethod.billing_details?.name || "Titular",
+              bankName: session.metadata?.bankName || (formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand),
+              isDefault: true,
+              stripePaymentMethodId: paymentMethod.id
+            };
+            const paymentCards = [
+              nextCard,
+              ...existingCards
+                .filter((item: any) => item.id !== paymentMethod.id)
+                .map((item: any) => ({ ...item, isDefault: false }))
+            ];
+            await billingRef.set({ paymentCards, stripeCustomerId: session.customer }, { merge: true });
+          }
+          res.status(200).send("OK");
+          return;
+        }
+
+        if (paymentStatus === "paid" && externalReference) {
+          const [userId, planId] = externalReference.split(":");
+          const amount = session.amount_total ? session.amount_total / 100 : 0;
+
+          const paymentDocId = `stripe_payment_${session.id}`;
+          await adminDb.collection("payments").doc(paymentDocId).set({
+            userId,
+            planId,
+            provider: "stripe",
+            providerPaymentId: session.id,
+            amount: amount,
+            currency: session.currency?.toUpperCase() || "MXN",
+            status: "paid",
+            paidAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+
+          // Update active subscription
+          let limit = 5;
+          if (planId === "brisa") limit = 10;
+          else if (planId === "serenidad") limit = 30;
+          else if (planId === "nirvana") limit = 100;
+          else if (planId === "personal") limit = 20;
+          else if (planId === "empresa") limit = 60;
+
+          await adminDb.collection("subscriptions").doc(userId).set({
+            userId,
+            planId,
+            planName: planId === "personal" ? "Plan Personal" : planId === "empresa" ? "Plan Empresa" : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
+            status: "subscription_active",
+            provider: "stripe",
+            providerSubscriptionId: session.id,
+            currentPeriodStart: new Date().toISOString(),
+            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            invoicesLimit: limit,
+            invoicesUsed: 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+
+          await adminDb.collection("billingProfiles").doc(userId).set({
+            stripeCustomerId: session.customer || null,
+            planId,
+            subscriptionStatus: "paid",
+            subscriptionId: session.id
+          }, { merge: true });
+
+          await adminDb.collection("fiscalProfiles").doc(userId).set({
+            plan: planId,
+            planStartDate: new Date().toISOString(),
+            paymentStatus: "paid",
+            autoRenew: true
+          }, { merge: true });
+        }
+      }
+    }
+
+    res.status(200).send("OK");
+  } catch (error: any) {
+    console.error("Error al procesar webhook de Stripe:", error.response?.data || error.message);
+    res.status(500).send("Error de procesamiento");
+  }
+});
+
 
 // Increase request size limit for image uploads
 app.use(express.json({ limit: "15mb" }));
@@ -1518,289 +1872,15 @@ const getSafeBaseUrl = (req: Request): string => {
 };
 
 
-// 1. Mercado Pago Checkout (Single Preference)
-app.post("/api/billing/checkout/mercadopago", async (req: Request, res: Response) => {
-  const { userId, planId, payerEmail } = req.body;
-  if (!userId || !planId) {
-    res.status(400).json({ error: "Faltan parámetros userId o planId" });
-    return;
-  }
 
-  let price = 0;
-  let title = "";
-  if (planId === "brisa") {
-    price = 2.00;
-    title = "Plan Brisa - ZenTicket";
-  } else if (planId === "serenidad") {
-    price = 250.00;
-    title = "Plan Serenidad - ZenTicket";
-  } else if (planId === "nirvana") {
-    price = 500.00;
-    title = "Plan Nirvana - ZenTicket";
-  } else if (planId === "personal") {
-    price = 150.00;
-    title = "Plan Personal - ZenTicket";
-  } else if (planId === "empresa") {
-    price = 300.00;
-    title = "Plan Empresa - ZenTicket";
-  } else {
-    res.status(400).json({ error: "Plan inválido para pago" });
-    return;
-  }
-
-  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-  if (!accessToken) {
-    res.status(400).json({ error: "Configuración de pasarela Mercado Pago incompleta en el servidor. Falta el token de acceso (MERCADOPAGO_ACCESS_TOKEN) de producción." });
-    return;
-  }
-
-  try {
-    const baseUrl = getSafeBaseUrl(req);
-
-    const response = await axios.post(
-      "https://api.mercadopago.com/checkout/preferences",
-      {
-        items: [
-          {
-            title: title,
-            quantity: 1,
-            unit_price: price,
-            currency_id: "MXN"
-          }
-        ],
-        payer: payerEmail ? { email: payerEmail } : undefined,
-        back_urls: {
-          success: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
-          failure: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
-          pending: process.env.BILLING_PENDING_URL || `${baseUrl}/workspace?tab=cuenta&status=pending`
-        },
-        auto_return: "approved",
-        notification_url: `${baseUrl}/api/billing/webhooks/mercadopago`,
-        external_reference: `${userId}:${planId}`
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    const preference = response.data;
-    const paymentDocId = `mp_pref_${preference.id}`;
-    
-    // Register payment intent in Firestore
-    await adminDb.collection("payments").doc(paymentDocId).set({
-      userId,
-      planId,
-      provider: "mercadopago",
-      providerPaymentId: preference.id,
-      amount: price,
-      currency: "MXN",
-      status: "pending_payment",
-      checkoutUrl: preference.init_point,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-
-    res.json({ checkoutUrl: preference.init_point });
-  } catch (error: any) {
-    console.error("Error al crear preferencia en Mercado Pago:", error.response?.data || error.message);
-    res.status(500).json({ error: "Error al comunicarse con Mercado Pago" });
-  }
-});
-
-// 2. Mercado Pago Subscription (Preapproval)
-app.post("/api/billing/subscription/mercadopago", async (req: Request, res: Response) => {
-  const { userId, planId, payerEmail } = req.body;
-  if (!userId || !planId) {
-    res.status(400).json({ error: "Faltan parámetros userId o planId" });
-    return;
-  }
-
-  let price = 0;
-  let title = "";
-  if (planId === "brisa") {
-    price = 10.00;
-    title = "Plan Brisa (Mínimo Suscripción $10) - ZenTicket";
-  } else if (planId === "serenidad") {
-    price = 250.00;
-    title = "Plan Serenidad - ZenTicket";
-  } else if (planId === "nirvana") {
-    price = 500.00;
-    title = "Plan Nirvana - ZenTicket";
-  } else if (planId === "personal") {
-    price = 150.00;
-    title = "Plan Personal - ZenTicket";
-  } else if (planId === "empresa") {
-    price = 300.00;
-    title = "Plan Empresa - ZenTicket";
-  } else {
-    res.status(400).json({ error: "Plan inválido para suscripción" });
-    return;
-  }
-
-  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-  if (!accessToken) {
-    res.status(400).json({ error: "Configuración de pasarela Mercado Pago incompleta en el servidor. Falta el token de acceso (MERCADOPAGO_ACCESS_TOKEN) de producción." });
-    return;
-  }
-
-  try {
-    const baseUrl = getSafeBaseUrl(req);
-
-    const preapprovalBody: Record<string, unknown> = {
-      back_url: process.env.BILLING_SUCCESS_URL || `${baseUrl}/workspace?tab=cuenta&status=success`,
-      reason: title,
-      auto_recurring: {
-        frequency: 1,
-        frequency_type: "months",
-        transaction_amount: price,
-        currency_id: "MXN"
-      },
-      external_reference: `${userId}:${planId}`
-    };
-    // Only include payer_email when a real verified email is provided;
-    // omitting it lets the payer enter their own Mercado Pago email at checkout.
-    if (payerEmail && (payerEmail as string).trim()) {
-      preapprovalBody.payer_email = (payerEmail as string).trim();
-    }
-
-    const response = await axios.post(
-      "https://api.mercadopago.com/preapproval",
-      preapprovalBody,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    const preapproval = response.data;
-    const paymentDocId = `mp_sub_${preapproval.id}`;
-    
-    // Register subscription intent in Firestore
-    await adminDb.collection("payments").doc(paymentDocId).set({
-      userId,
-      planId,
-      provider: "mercadopago",
-      providerPaymentId: preapproval.id,
-      amount: price,
-      currency: "MXN",
-      status: "pending_payment",
-      checkoutUrl: preapproval.init_point,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-
-    res.json({ checkoutUrl: preapproval.init_point });
-  } catch (error: any) {
-    console.error("Error al crear suscripción en Mercado Pago:", error.response?.data || error.message);
-    res.status(500).json({ error: "Error al crear suscripción en Mercado Pago" });
-  }
-});
-
-// 3. PayPal Checkout (Single Order)
-app.post("/api/billing/checkout/paypal", async (req: Request, res: Response) => {
-  const { userId, planId, payerEmail } = req.body;
-  if (!userId || !planId) {
-    res.status(400).json({ error: "Faltan parámetros userId o planId" });
-    return;
-  }
-
-  let price = 0;
-  let title = "";
-  if (planId === "brisa") {
-    price = 2.00;
-    title = "Plan Brisa - ZenTicket";
-  } else if (planId === "serenidad") {
-    price = 250.00;
-    title = "Plan Serenidad - ZenTicket";
-  } else if (planId === "nirvana") {
-    price = 500.00;
-    title = "Plan Nirvana - ZenTicket";
-  } else if (planId === "personal") {
-    price = 150.00;
-    title = "Plan Personal - ZenTicket";
-  } else if (planId === "empresa") {
-    price = 300.00;
-    title = "Plan Empresa - ZenTicket";
-  } else {
-    res.status(400).json({ error: "Plan inválido para pago" });
-    return;
-  }
-
-  try {
-    const baseUrl = getSafeBaseUrl(req);
-
-    const { accessToken, host } = await getPayPalAccessToken();
-    const orderData: any = {
-      intent: "CAPTURE",
-      purchase_units: [
-        {
-          reference_id: `${userId}:${planId}`,
-          amount: {
-            currency_code: "MXN",
-            value: price.toFixed(2)
-          },
-          description: title
-        }
-      ],
-      application_context: {
-        return_url: process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`,
-        cancel_url: process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`
-      }
-    };
-    if (payerEmail) {
-      orderData.payer = {
-        email_address: payerEmail
-      };
-    }
-
-    const response = await axios.post(
-      `${host}/v2/checkout/orders`,
-      orderData,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    const order = response.data;
-    const approvalUrl = order.links.find((l: any) => l.rel === "approve")?.href;
-    const paymentDocId = `pp_pref_${order.id}`;
-
-    // Register PayPal intent in Firestore
-    await adminDb.collection("payments").doc(paymentDocId).set({
-      userId,
-      planId,
-      provider: "paypal",
-      providerPaymentId: order.id,
-      amount: price,
-      currency: "MXN",
-      status: "pending_payment",
-      checkoutUrl: approvalUrl,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-
-    res.json({ checkoutUrl: approvalUrl, orderId: order.id });
-  } catch (error: any) {
-    console.error("Error al crear orden en PayPal:", error.response?.data || error.message);
-    res.status(500).json({ error: error.message || "Error al comunicarse con PayPal" });
-  }
-});
 
 // 3.4. Stripe Setup Intent (Card Registration)
-app.post("/api/billing/setup/stripe", async (req: Request, res: Response) => {
-  const { userId, payerEmail, holderName, bankName } = req.body;
-  if (!userId || !payerEmail) {
-    res.status(400).json({ error: "Faltan userId o payerEmail" });
-    return;
-  }
+app.post("/api/billing/setup/stripe", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { holderName, bankName } = req.body;
+
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeSecretKey) {
     res.status(500).json({ error: "Configuración de Stripe incompleta" });
@@ -1808,13 +1888,15 @@ app.post("/api/billing/setup/stripe", async (req: Request, res: Response) => {
   }
 
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    let stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    let stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
 
     if (!stripeCustomerId) {
+      if (!email) {
+        res.status(400).json({ error: "El usuario no tiene un correo electrónico verificado." });
+        return;
+      }
       const customerParams = new URLSearchParams({
-        email: payerEmail,
+        email: email,
         "metadata[userId]": userId
       });
       const customerResponse = await axios.post(
@@ -1828,7 +1910,8 @@ app.post("/api/billing/setup/stripe", async (req: Request, res: Response) => {
         }
       );
       stripeCustomerId = customerResponse.data.id;
-      await profileRef.set({ stripeCustomerId, correoPago: payerEmail }, { merge: true });
+      const billingRef = adminDb.collection("billingProfiles").doc(userId);
+      await billingRef.set({ stripeCustomerId }, { merge: true });
     }
 
     const baseUrl = getSafeBaseUrl(req);
@@ -1869,10 +1952,12 @@ app.post("/api/billing/setup/stripe", async (req: Request, res: Response) => {
 });
 
 // 3.6. Stripe Confirm Payment
-app.post("/api/billing/checkout/stripe/confirm", async (req: Request, res: Response) => {
-  const { sessionId, userId } = req.body;
-  if (!sessionId || !userId) {
-    res.status(400).json({ error: "Faltan sessionId o userId" });
+// 3.6. Stripe Confirm Payment
+app.post("/api/billing/checkout/stripe/confirm", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
+  const { sessionId } = req.body;
+  if (!sessionId) {
+    res.status(400).json({ error: "Falta sessionId" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -1940,6 +2025,16 @@ app.post("/api/billing/checkout/stripe/confirm", async (req: Request, res: Respo
       updatedAt: nowIso
     }, { merge: true });
 
+    // Actualizar perfil de facturación aislado billingProfiles
+    const billingRef = adminDb.collection("billingProfiles").doc(userId);
+    await billingRef.set({
+      stripeCustomerId: session.customer || null,
+      subscriptionId: stripeSubscriptionId || null,
+      planId,
+      subscriptionStatus: isSubscription ? "subscription_active" : "paid",
+      defaultPaymentMethodId: paymentMethod?.id || null
+    }, { merge: true });
+
     await adminDb.collection("fiscalProfiles").doc(userId).set({
       plan: planId,
       planStartDate: nowIso,
@@ -1950,10 +2045,9 @@ app.post("/api/billing/checkout/stripe/confirm", async (req: Request, res: Respo
     }, { merge: true });
 
     if (paymentMethod?.id && paymentMethod.card) {
-      const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-      const profileSnapshot = await profileRef.get();
-      const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
-        ? profileSnapshot.data().paymentCards
+      const billingSnapshot = await billingRef.get();
+      const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards)
+        ? billingSnapshot.data().paymentCards
         : [];
       const formattedBrand = String(paymentMethod.card.brand || "VISA").toUpperCase();
       const stripeCard = {
@@ -1972,7 +2066,7 @@ app.post("/api/billing/checkout/stripe/confirm", async (req: Request, res: Respo
           .filter((card: any) => card.id !== paymentMethod.id)
           .map((card: any) => ({ ...card, isDefault: false }))
       ];
-      await profileRef.set({ paymentCards }, { merge: true });
+      await billingRef.set({ paymentCards }, { merge: true });
     }
 
     res.json({ success: true, planId, planName, invoicesLimit });
@@ -1983,10 +2077,13 @@ app.post("/api/billing/checkout/stripe/confirm", async (req: Request, res: Respo
 });
 
 // 3.5. Stripe Checkout (Session Creation)
-app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => {
-  const { userId, planId, payerEmail } = req.body;
-  if (!userId || !planId) {
-    res.status(400).json({ error: "Faltan parámetros userId o planId" });
+app.post("/api/billing/checkout/stripe", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { planId } = req.body;
+  if (!planId) {
+    res.status(400).json({ error: "Falta el parámetro planId" });
     return;
   }
 
@@ -2026,8 +2123,7 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
       : `${baseUrl}/billing-success.html?status=success&plan=${planId}&session_id={CHECKOUT_SESSION_ID}`;
     console.log("DEBUG STRIPE SUCCESSURL:", successUrl);
 
-    const profileSnapshot = await adminDb.collection("fiscalProfiles").doc(userId).get();
-    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
 
     const stripeParams = new URLSearchParams({
       "automatic_payment_methods[enabled]": "true",
@@ -2044,8 +2140,8 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
     
     if (stripeCustomerId) {
       stripeParams.append("customer", stripeCustomerId);
-    } else if (payerEmail) {
-      stripeParams.append("customer_email", payerEmail);
+    } else if (email) {
+      stripeParams.append("customer_email", email);
     }
 
     const response = await axios.post(
@@ -2083,426 +2179,13 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
   }
 });
 
-// 4. Mercado Pago Webhook
-app.post("/api/billing/webhooks/mercadopago", async (req: Request, res: Response) => {
-  const paymentId = req.query.id || req.body?.data?.id || req.body?.id;
-  const topic = req.query.topic || req.body?.type || req.body?.action;
 
-  console.log(`[Mercado Pago Webhook] Recibido event: ${topic} con ID: ${paymentId}`);
 
-  if (paymentId) {
-    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-    if (!accessToken) {
-      res.status(500).send("Webhook config error: missing token");
-      return;
-    }
 
-    try {
-      // Record raw billing event
-      await adminDb.collection("billingEvents").add({
-        provider: "mercadopago",
-        eventType: topic || "unknown",
-        providerEventId: paymentId.toString(),
-        processed: true,
-        receivedAt: new Date().toISOString()
-      });
-
-      if (topic === "payment" || topic === "payment.created" || topic === "payment.updated") {
-        // Fetch payment details from Mercado Pago
-        const response = await axios.get(
-          `https://api.mercadopago.com/v1/payments/${paymentId}`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` }
-          }
-        );
-
-        const paymentData = response.data;
-        const status = paymentData.status;
-        const externalReference = paymentData.external_reference; // "userId:planId"
-
-        console.log(`[Mercado Pago] Estatus de pago para ${paymentId}: ${status}`);
-
-        if (externalReference) {
-          const [userId, planId] = externalReference.split(":");
-          
-          let localStatus: string = "pending_payment";
-          if (status === "approved") localStatus = "paid";
-          else if (status === "in_process" || status === "pending") localStatus = "payment_processing";
-          else if (status === "rejected") localStatus = "payment_rejected";
-          else if (status === "cancelled" || status === "refunded") localStatus = "payment_failed";
-
-          const paymentDocId = `mp_payment_${paymentId}`;
-          await adminDb.collection("payments").doc(paymentDocId).set({
-            userId,
-            planId,
-            provider: "mercadopago",
-            providerPaymentId: paymentId.toString(),
-            amount: paymentData.transaction_amount,
-            currency: paymentData.currency_id || "MXN",
-            status: localStatus,
-            paidAt: status === "approved" ? new Date().toISOString() : null,
-            createdAt: new Date(paymentData.date_created).toISOString(),
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-
-          // If approved, update active subscription in Firestore
-          if (status === "approved") {
-            let limit = 5;
-            if (planId === "brisa") limit = 10;
-            else if (planId === "serenidad") limit = 30;
-            else if (planId === "nirvana") limit = 100;
-            else if (planId === "personal") limit = 20;
-            else if (planId === "empresa") limit = 60;
-
-            await adminDb.collection("subscriptions").doc(userId).set({
-              userId,
-              planId,
-              planName: `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
-              status: "subscription_active",
-              provider: "mercadopago",
-              providerSubscriptionId: paymentId.toString(),
-              currentPeriodStart: new Date().toISOString(),
-              currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-              invoicesLimit: limit,
-              invoicesUsed: 0,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
-            });
-
-            await adminDb.collection("fiscalProfiles").doc(userId).set({
-              plan: planId,
-              planStartDate: new Date().toISOString(),
-              paymentStatus: "paid",
-              autoRenew: true
-            }, { merge: true });
-          }
-        }
-      } else if (topic === "preapproval" || topic === "subscription") {
-        // Fetch subscription preapproval details
-        const response = await axios.get(
-          `https://api.mercadopago.com/preapproval/${paymentId}`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` }
-          }
-        );
-
-        const subData = response.data;
-        const status = subData.status;
-        const externalReference = subData.external_reference;
-
-        if (externalReference) {
-          const [userId, planId] = externalReference.split(":");
-          
-          if (status === "authorized") {
-            let limit = 5;
-            if (planId === "brisa") limit = 10;
-            else if (planId === "serenidad") limit = 30;
-            else if (planId === "nirvana") limit = 100;
-            else if (planId === "personal") limit = 20;
-            else if (planId === "empresa") limit = 60;
-
-            await adminDb.collection("subscriptions").doc(userId).set({
-              userId,
-              planId,
-              planName: `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
-              status: "subscription_active",
-              provider: "mercadopago",
-              providerSubscriptionId: subData.id.toString(),
-              currentPeriodStart: new Date().toISOString(),
-              currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-              invoicesLimit: limit,
-              invoicesUsed: 0,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
-            });
-
-            await adminDb.collection("fiscalProfiles").doc(userId).set({
-              plan: planId,
-              planStartDate: new Date().toISOString(),
-              paymentStatus: "subscription_active",
-              autoRenew: true
-            }, { merge: true });
-          } else if (status === "cancelled") {
-            await adminDb.collection("subscriptions").doc(userId).set({
-              status: "subscription_cancelled",
-              updatedAt: new Date().toISOString()
-            }, { merge: true });
-
-            await adminDb.collection("fiscalProfiles").doc(userId).set({
-              plan: "gratuito",
-              paymentStatus: "subscription_cancelled",
-              autoRenew: false
-            }, { merge: true });
-          }
-        }
-      }
-
-      res.status(200).send("OK");
-      return;
-    } catch (error: any) {
-      console.error("Error al procesar webhook de Mercado Pago:", error.response?.data || error.message);
-      res.status(500).send("Webhook processing error");
-      return;
-    }
-  }
-
-  res.status(200).send("Ignored");
-});
-
-// 5. PayPal Webhook
-app.post("/api/billing/webhooks/paypal", async (req: Request, res: Response) => {
-  const event = req.body;
-
-  console.log(`[PayPal Webhook] Recibido event: ${event?.event_type}`);
-
-  try {
-    // Record raw event in Firestore
-    await adminDb.collection("billingEvents").add({
-      provider: "paypal",
-      eventType: event.event_type || "unknown",
-      providerEventId: event.id || "unknown",
-      processed: true,
-      receivedAt: new Date().toISOString()
-    });
-
-    if (event.event_type === "PAYMENT.CAPTURE.COMPLETED" || event.event_type === "CHECKOUT.ORDER.APPROVED") {
-      const capture = event.resource;
-      const orderId = capture.custom_id || event.resource.supplementary_data?.related_ids?.order_id || capture.id;
-
-      const { accessToken, host } = await getPayPalAccessToken();
-      const orderResponse = await axios.get(
-        `${host}/v2/checkout/orders/${orderId}`,
-        {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        }
-      );
-
-      const orderData = orderResponse.data;
-      const purchaseUnit = orderData.purchase_units?.[0];
-      const externalReference = purchaseUnit?.reference_id; // "userId:planId"
-
-      if (externalReference) {
-        const [userId, planId] = externalReference.split(":");
-        const amount = parseFloat(purchaseUnit.amount.value);
-
-        const paymentDocId = `pp_payment_${capture.id}`;
-        await adminDb.collection("payments").doc(paymentDocId).set({
-          userId,
-          planId,
-          provider: "paypal",
-          providerPaymentId: capture.id,
-          amount: amount,
-          currency: purchaseUnit.amount.currency_code || "MXN",
-          status: "paid",
-          paidAt: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-
-        // Update active subscription
-        let limit = 5;
-        if (planId === "brisa") limit = 10;
-        else if (planId === "serenidad") limit = 30;
-        else if (planId === "nirvana") limit = 100;
-        else if (planId === "personal") limit = 20;
-        else if (planId === "empresa") limit = 60;
-
-        await adminDb.collection("subscriptions").doc(userId).set({
-          userId,
-          planId,
-          planName: `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
-          status: "subscription_active",
-          provider: "paypal",
-          providerSubscriptionId: orderId,
-          currentPeriodStart: new Date().toISOString(),
-          currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          invoicesLimit: limit,
-          invoicesUsed: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-
-        await adminDb.collection("fiscalProfiles").doc(userId).set({
-          plan: planId,
-          planStartDate: new Date().toISOString(),
-          paymentStatus: "paid",
-          autoRenew: true
-        }, { merge: true });
-      }
-    }
-
-    res.status(200).send("OK");
-  } catch (error: any) {
-    console.error("Error al procesar webhook de PayPal:", error.message);
-    res.status(500).send("Error de procesamiento");
-  }
-});
-
-// 5.5. Stripe Webhook
-app.post("/api/billing/webhooks/stripe", async (req: Request, res: Response) => {
-  const event = req.body;
-  console.log(`[Stripe Webhook] Recibido event: ${event?.type}`);
-
-  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-  if (!stripeSecretKey) {
-    res.status(500).send("Webhook config error: missing token");
-    return;
-  }
-
-  try {
-    // Webhook additions for setup_intent, payment_method, and payment_intent sync
-    if (event.type === "setup_intent.succeeded" || event.type === "payment_method.attached" || event.type === "payment_method.detached") {
-      const stripeCustomerId = event.data?.object?.customer;
-      if (stripeCustomerId) {
-        await syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, adminDb);
-      }
-    }
-
-    if (event.type === "payment_intent.succeeded") {
-      const paymentIntentObj = event.data?.object;
-      const paymentIntentId = paymentIntentObj?.id;
-      if (paymentIntentId) {
-        const paymentQuery = await adminDb.collection("payments")
-          .where("providerPaymentId", "==", paymentIntentId)
-          .limit(1)
-          .get();
-        if (!paymentQuery.empty) {
-          await paymentQuery.docs[0].ref.set({
-            status: "paid",
-            paidAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-        }
-      }
-    }
-
-    // Record raw event in Firestore
-    await adminDb.collection("billingEvents").add({
-      provider: "stripe",
-      eventType: event.type || "unknown",
-      providerEventId: event.id || "unknown",
-      processed: true,
-      receivedAt: new Date().toISOString()
-    });
-
-    if (event.type === "checkout.session.completed") {
-      const sessionObj = event.data?.object;
-      if (sessionObj && sessionObj.id) {
-        const sessionId = sessionObj.id;
-
-        // Retrieve checkout session from Stripe API to verify payload is authentic
-        const response = await axios.get(
-          `https://api.stripe.com/v1/checkout/sessions/${sessionId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${stripeSecretKey}`
-            }
-          }
-        );
-
-        const session = response.data;
-        const paymentStatus = session.payment_status;
-        const externalReference = session.client_reference_id; // "userId:planId"
-
-        console.log(`[Stripe] Checkout Session retrieve: status=${session.status}, payment_status=${paymentStatus}, ref=${externalReference}`);
-
-        if (session.mode === "setup" && session.setup_intent && externalReference) {
-          const setupResponse = await axios.get(
-            `https://api.stripe.com/v1/setup_intents/${session.setup_intent}?expand[]=payment_method`,
-            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
-          );
-          const paymentMethod = setupResponse.data.payment_method;
-          const card = paymentMethod?.card;
-          if (card) {
-            const profileRef = adminDb.collection("fiscalProfiles").doc(externalReference);
-            const profileSnapshot = await profileRef.get();
-            const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
-              ? profileSnapshot.data().paymentCards
-              : [];
-            const formattedBrand = String(card.brand || "VISA").toUpperCase();
-            const nextCard = {
-              id: paymentMethod.id,
-              brand: formattedBrand,
-              last4: card.last4,
-              expiry: `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`,
-              holderName: session.metadata?.holderName || paymentMethod.billing_details?.name || "Titular",
-              bankName: session.metadata?.bankName || (formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand),
-              isDefault: true,
-              stripePaymentMethodId: paymentMethod.id
-            };
-            const paymentCards = [
-              nextCard,
-              ...existingCards
-                .filter((item: any) => item.id !== paymentMethod.id)
-                .map((item: any) => ({ ...item, isDefault: false }))
-            ];
-            await profileRef.set({ paymentCards, stripeCustomerId: session.customer }, { merge: true });
-          }
-          res.status(200).send("OK");
-          return;
-        }
-
-        if (paymentStatus === "paid" && externalReference) {
-          const [userId, planId] = externalReference.split(":");
-          const amount = session.amount_total ? session.amount_total / 100 : 0;
-
-          const paymentDocId = `stripe_payment_${session.id}`;
-          await adminDb.collection("payments").doc(paymentDocId).set({
-            userId,
-            planId,
-            provider: "stripe",
-            providerPaymentId: session.id,
-            amount: amount,
-            currency: session.currency?.toUpperCase() || "MXN",
-            status: "paid",
-            paidAt: new Date().toISOString(),
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-
-          // Update active subscription
-          let limit = 5;
-          if (planId === "brisa") limit = 10;
-          else if (planId === "serenidad") limit = 30;
-          else if (planId === "nirvana") limit = 100;
-          else if (planId === "personal") limit = 20;
-          else if (planId === "empresa") limit = 60;
-
-          await adminDb.collection("subscriptions").doc(userId).set({
-            userId,
-            planId,
-            planName: planId === "personal" ? "Plan Personal" : planId === "empresa" ? "Plan Empresa" : `Plan ${planId.charAt(0).toUpperCase() + planId.slice(1)}`,
-            status: "subscription_active",
-            provider: "stripe",
-            providerSubscriptionId: session.id,
-            currentPeriodStart: new Date().toISOString(),
-            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-            invoicesLimit: limit,
-            invoicesUsed: 0,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          });
-
-          await adminDb.collection("fiscalProfiles").doc(userId).set({
-            plan: planId,
-            planStartDate: new Date().toISOString(),
-            paymentStatus: "paid",
-            autoRenew: true
-          }, { merge: true });
-        }
-      }
-    }
-
-    res.status(200).send("OK");
-  } catch (error: any) {
-    console.error("Error al procesar webhook de Stripe:", error.response?.data || error.message);
-    res.status(500).send("Error de procesamiento");
-  }
-});
 
 // 6. Get Billing Status
-app.get("/api/billing/status/:userId", async (req: Request, res: Response) => {
-  const { userId } = req.params;
+app.get("/api/billing/status", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
   try {
     const docSnap = await adminDb.collection("subscriptions").doc(userId).get();
     if (!docSnap.exists) {
@@ -2527,20 +2210,35 @@ app.get("/api/billing/status/:userId", async (req: Request, res: Response) => {
 
 // 7. Cancel Subscription
 
-async function syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, dbRef) {
+async function syncCustomerPaymentMethods(stripeCustomerId: string, stripeSecretKey: string, dbRef: any) {
   if (!stripeCustomerId) return;
   try {
-    const snapshot = await dbRef.collection("fiscalProfiles")
+    let docRef: any = null;
+
+    // Check billingProfiles first
+    const billingSnapshot = await dbRef.collection("billingProfiles")
       .where("stripeCustomerId", "==", stripeCustomerId)
       .limit(1)
       .get();
       
-    if (snapshot.empty) {
-      console.log(`[Stripe Webhook] No user found with customer ID: ${stripeCustomerId}`);
+    if (!billingSnapshot.empty) {
+      docRef = billingSnapshot.docs[0].ref;
+    } else {
+      // Fallback to fiscalProfiles
+      const fiscalSnapshot = await dbRef.collection("fiscalProfiles")
+        .where("stripeCustomerId", "==", stripeCustomerId)
+        .limit(1)
+        .get();
+      if (!fiscalSnapshot.empty) {
+        docRef = fiscalSnapshot.docs[0].ref;
+      }
+    }
+
+    if (!docRef) {
+      console.log(`[Stripe Webhook] No user profile found with customer ID: ${stripeCustomerId}`);
       return;
     }
-    const docRef = snapshot.docs[0].ref;
-    
+
     // Fetch default payment method from Customer
     const customerRes = await axios.get(
       `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
@@ -2591,15 +2289,19 @@ async function syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, dbR
 
     await docRef.set({ paymentCards: pms }, { merge: true });
     console.log(`[Stripe Webhook] Sincronizados ${pms.length} métodos de pago para el cliente ${stripeCustomerId}`);
-  } catch (error) {
+  } catch (error: any) {
     console.error(`[Stripe Webhook] Error al sincronizar métodos de pago para ${stripeCustomerId}:`, error.message);
   }
 }
 
-app.post("/api/billing/sync-customer", async (req: any, res: any) => {
-  const { userId, email, name } = req.body;
-  if (!userId || !email) {
-    res.status(400).json({ error: "Faltan parámetros userId o email" });
+app.post("/api/billing/sync-customer", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { name } = req.body;
+
+  if (!email) {
+    res.status(400).json({ error: "Falta el email del usuario autenticado" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -2608,57 +2310,49 @@ app.post("/api/billing/sync-customer", async (req: any, res: any) => {
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    let stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    let stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
 
     if (!stripeCustomerId) {
-      // Search Stripe for customer by email
-      const searchRes = await axios.get(
-        `https://api.stripe.com/v1/customers?email=${encodeURIComponent(email)}`,
-        { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
-      );
-      if (searchRes.data?.data && searchRes.data.data.length > 0) {
-        stripeCustomerId = searchRes.data.data[0].id;
-      } else {
-        // Create new customer
-        const customerParams = new URLSearchParams({
-          email: email,
-          name: name || "",
-          "metadata[userId]": userId
-        });
-        const customerResponse = await axios.post(
-          "https://api.stripe.com/v1/customers",
-          customerParams.toString(),
-          {
-            headers: {
-              Authorization: `Bearer ${stripeSecretKey}`,
-              "Content-Type": "application/x-www-form-urlencoded"
-            }
+      // Create new customer
+      const customerParams = new URLSearchParams({
+        email: email,
+        name: name || "",
+        "metadata[userId]": userId
+      });
+      const customerResponse = await axios.post(
+        "https://api.stripe.com/v1/customers",
+        customerParams.toString(),
+        {
+          headers: {
+            Authorization: `Bearer ${stripeSecretKey}`,
+            "Content-Type": "application/x-www-form-urlencoded"
           }
-        );
-        stripeCustomerId = customerResponse.data.id;
-      }
-      await profileRef.set({ stripeCustomerId, correoPago: email }, { merge: true });
+        }
+      );
+      stripeCustomerId = customerResponse.data.id;
+      
+      const billingRef = adminDb.collection("billingProfiles").doc(userId);
+      await billingRef.set({ stripeCustomerId }, { merge: true });
     }
     res.json({ stripeCustomerId });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error al sincronizar cliente en Stripe:", error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get("/api/billing/payment-methods/:userId", async (req: any, res: any) => {
-  const { userId } = req.params;
+app.get("/api/billing/payment-methods", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
+  const userEmail = req.user.email;
+  const emailVerified = req.user.email_verified;
+  
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeSecretKey) {
     res.status(500).json({ error: "Configuración de Stripe incompleta" });
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    const stripeCustomerId = await resolveStripeCustomerId(userId, userEmail, emailVerified);
     if (!stripeCustomerId) {
       res.json([]);
       return;
@@ -2685,7 +2379,7 @@ app.get("/api/billing/payment-methods/:userId", async (req: any, res: any) => {
         id: pm.id,
         brand: formattedBrand,
         last4: card.last4,
-        expiry: `${String(card.exp_month).padStart(2, "0")}/&nbsp;${String(card.exp_year).slice(-2)}`.replace('&nbsp;', ''),
+        expiry: `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`,
         holderName: pm.billing_details?.name || "Titular",
         bankName: formattedBrand === "VISA" ? "Tarjeta Visa" : formattedBrand === "MASTERCARD" ? "Mastercard" : formattedBrand,
         isDefault: pm.id === defaultPaymentMethodId,
@@ -2713,20 +2407,24 @@ app.get("/api/billing/payment-methods/:userId", async (req: any, res: any) => {
       }
     }
 
-    // Cache to Firestore fiscalProfile
-    await profileRef.set({ paymentCards: pms }, { merge: true });
+    // Cache to Firestore billingProfiles
+    const billingRef = adminDb.collection("billingProfiles").doc(userId);
+    await billingRef.set({ paymentCards: pms, stripeCustomerId }, { merge: true });
 
     res.json(pms);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error al obtener métodos de pago de Stripe:", error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post("/api/billing/payment-methods/set-default", async (req: any, res: any) => {
-  const { userId, paymentMethodId } = req.body;
-  if (!userId || !paymentMethodId) {
-    res.status(400).json({ error: "Faltan parámetros userId o paymentMethodId" });
+app.post("/api/billing/payment-methods/set-default", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { paymentMethodId } = req.body;
+  if (!paymentMethodId) {
+    res.status(400).json({ error: "Falta el parámetro paymentMethodId" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -2735,9 +2433,7 @@ app.post("/api/billing/payment-methods/set-default", async (req: any, res: any) 
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
     if (!stripeCustomerId) {
       res.status(400).json({ error: "El usuario no tiene un cliente de Stripe creado." });
       return;
@@ -2755,27 +2451,32 @@ app.post("/api/billing/payment-methods/set-default", async (req: any, res: any) 
       }
     );
 
-    // Sync Firestore cached paymentCards list
-    const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
-      ? profileSnapshot.data().paymentCards
+    // Sync Firestore cached paymentCards list from billingProfiles
+    const billingRef = adminDb.collection("billingProfiles").doc(userId);
+    const billingSnapshot = await billingRef.get();
+    const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards)
+      ? billingSnapshot.data().paymentCards
       : [];
     const updatedCards = existingCards.map(c => ({
       ...c,
       isDefault: c.id === paymentMethodId
     }));
-    await profileRef.set({ paymentCards: updatedCards }, { merge: true });
+    await billingRef.set({ paymentCards: updatedCards }, { merge: true });
 
     res.json({ success: true, paymentCards: updatedCards });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error al establecer tarjeta predeterminada en Stripe:", error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post("/api/billing/payment-methods/delete", async (req: any, res: any) => {
-  const { userId, paymentMethodId } = req.body;
-  if (!userId || !paymentMethodId) {
-    res.status(400).json({ error: "Faltan parámetros userId o paymentMethodId" });
+app.post("/api/billing/payment-methods/delete", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { paymentMethodId } = req.body;
+  if (!paymentMethodId) {
+    res.status(400).json({ error: "Falta el parámetro paymentMethodId" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -2784,9 +2485,11 @@ app.post("/api/billing/payment-methods/delete", async (req: any, res: any) => {
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
+    const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
+    if (!stripeCustomerId) {
+      res.status(400).json({ error: "El usuario no tiene un cliente de Stripe creado." });
+      return;
+    }
 
     // Detach from Stripe
     await axios.post(
@@ -2796,20 +2499,22 @@ app.post("/api/billing/payment-methods/delete", async (req: any, res: any) => {
     );
 
     // Retrieve active list to recalculate default card if deleted was default
-    const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
-      ? profileSnapshot.data().paymentCards
+    const billingRef = adminDb.collection("billingProfiles").doc(userId);
+    const billingSnapshot = await billingRef.get();
+    const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards)
+      ? billingSnapshot.data().paymentCards
       : [];
     const deletedCard = existingCards.find(c => c.id === paymentMethodId);
     let updatedCards = existingCards.filter(c => c.id !== paymentMethodId);
 
-    if (deletedCard?.isDefault && updatedCards.length > 0 && stripeCustomerId) {
+    if (deletedCard?.isDefault && updatedCards.length > 0) {
       // Set the first remaining as new default
       const newDefaultId = updatedCards[0].id;
       updatedCards[0].isDefault = true;
       try {
         await axios.post(
           `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
-          `invoice_settings[default_payment_method]=&nbsp;${newDefaultId}`.replace('&nbsp;', ''),
+          `invoice_settings[default_payment_method]=${newDefaultId}`,
           {
             headers: {
               Authorization: `Bearer ${stripeSecretKey}`,
@@ -2822,18 +2527,22 @@ app.post("/api/billing/payment-methods/delete", async (req: any, res: any) => {
       }
     }
 
-    await profileRef.set({ paymentCards: updatedCards }, { merge: true });
+    await billingRef.set({ paymentCards: updatedCards }, { merge: true });
     res.json({ success: true, paymentCards: updatedCards });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error al eliminar tarjeta en Stripe:", error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post("/api/billing/payment-methods/attach", async (req: any, res: any) => {
-  const { userId, paymentMethodId, isDefault } = req.body;
-  if (!userId || !paymentMethodId) {
-    res.status(400).json({ error: "Faltan parámetros userId o paymentMethodId" });
+app.post("/api/billing/payment-methods/attach", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
+  const email = req.user.email;
+  const emailVerified = req.user.email_verified;
+  const { paymentMethodId, isDefault } = req.body;
+
+  if (!paymentMethodId) {
+    res.status(400).json({ error: "Faltan parámetros paymentMethodId" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -2842,17 +2551,30 @@ app.post("/api/billing/payment-methods/attach", async (req: any, res: any) => {
     return;
   }
   try {
-    const profileRef = adminDb.collection("fiscalProfiles").doc(userId);
-    const profileSnapshot = await profileRef.get();
-    let stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
-    
+    const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
     if (!stripeCustomerId) {
-      // Create a customer if one doesn't exist
-      const email = profileSnapshot.data()?.correoRecepcion || profileSnapshot.data()?.correoElectronico || "";
-      const name = profileSnapshot.data()?.razonSocial || "";
-      const customerResponse = await axios.post(
-        "https://api.stripe.com/v1/customers",
-        `email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`,
+      res.status(400).json({ error: "El usuario no tiene un cliente de Stripe creado." });
+      return;
+    }
+
+    // 1. Obtener detalles del método de pago de Stripe para validar propiedad
+    const pmDetailsRes = await axios.get(
+      `https://api.stripe.com/v1/payment_methods/${paymentMethodId}`,
+      { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+    );
+    const pmDetails = pmDetailsRes.data;
+
+    // 2. Si ya está asociado a otro cliente diferente, rechazar de inmediato
+    if (pmDetails.customer && pmDetails.customer !== stripeCustomerId) {
+      res.status(403).json({ error: "No tienes permisos para asociar este método de pago." });
+      return;
+    }
+
+    // 3. Si no está asociado al cliente del usuario, lo adjuntamos
+    if (pmDetails.customer !== stripeCustomerId) {
+      const attachRes = await axios.post(
+        `https://api.stripe.com/v1/payment_methods/${paymentMethodId}/attach`,
+        `customer=${stripeCustomerId}`,
         {
           headers: {
             Authorization: `Bearer ${stripeSecretKey}`,
@@ -2860,25 +2582,18 @@ app.post("/api/billing/payment-methods/attach", async (req: any, res: any) => {
           }
         }
       );
-      stripeCustomerId = customerResponse.data.id;
-      await profileRef.set({ stripeCustomerId }, { merge: true });
+      // Validar propiedad después de adjuntar
+      if (attachRes.data.customer !== stripeCustomerId) {
+        res.status(403).json({ error: "Operación de vinculación inválida." });
+        return;
+      }
     }
 
-    // Attach payment method to customer in Stripe
-    await axios.post(
-      `https://api.stripe.com/v1/payment_methods/${paymentMethodId}/attach`,
-      `customer=${stripeCustomerId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${stripeSecretKey}`,
-          "Content-Type": "application/x-www-form-urlencoded"
-        }
-      }
-    );
-
     // Set as default if requested or if this is the first/only card
-    const existingCards = Array.isArray(profileSnapshot.data()?.paymentCards)
-      ? profileSnapshot.data().paymentCards
+    const billingRef = adminDb.collection("billingProfiles").doc(userId);
+    const billingSnapshot = await billingRef.get();
+    const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards)
+      ? billingSnapshot.data().paymentCards
       : [];
     
     const setAsDefault = isDefault || existingCards.length === 0;
@@ -2899,7 +2614,7 @@ app.post("/api/billing/payment-methods/attach", async (req: any, res: any) => {
     await syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, adminDb);
     
     // Retrieve the newly updated profile to get the sync'ed paymentCards list
-    const updatedSnapshot = await profileRef.get();
+    const updatedSnapshot = await billingRef.get();
     const updatedCards = updatedSnapshot.data()?.paymentCards || [];
 
     res.json({ success: true, paymentCards: updatedCards });
@@ -2910,16 +2625,17 @@ app.post("/api/billing/payment-methods/attach", async (req: any, res: any) => {
 });
 
 
-app.post("/api/billing/cancel-subscription", async (req: Request, res: Response) => {
-  const { userId } = req.body;
-  if (!userId) {
-    res.status(400).json({ error: "Falta userId" });
-    return;
-  }
+app.post("/api/billing/cancel-subscription", authenticateFirebaseToken, async (req: any, res: any) => {
+  const userId = req.user.uid;
   try {
     await adminDb.collection("subscriptions").doc(userId).set({
       status: "subscription_cancelled",
       updatedAt: new Date().toISOString()
+    }, { merge: true });
+
+    await adminDb.collection("billingProfiles").doc(userId).set({
+      subscriptionStatus: "subscription_cancelled",
+      planId: "gratuito"
     }, { merge: true });
 
     await adminDb.collection("fiscalProfiles").doc(userId).set({

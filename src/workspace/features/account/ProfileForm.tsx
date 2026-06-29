@@ -102,22 +102,24 @@ const loadScript = (src: string): Promise<void> => {
   });
 };
 
-const fetchPayPalClientId = async (): Promise<string> => {
-  try {
-    const res = await fetch(getApiUrl("/api/config/paypal-client-id"));
-    const data = await res.json();
-    return data.clientId;
-  } catch (err) {
-    console.error("Error fetching PayPal client ID:", err);
-    return "";
-  }
-};
+
 
 const digitalWallets = [
-  { id: "paypal_wallet", name: "PayPal", displayName: "PayPal", logo: paypalLogo, sub: "Pago rápido y seguro" },
-  { id: "mercadopago_wallet", name: "Mercado Pago", displayName: "Mercado Pago", logo: mercadoPagoLogo, sub: "Tu cuenta digital / Tarjetas" },
   { id: "googlepay_wallet", name: "Google Pay", displayName: "Google Pay", logo: googlePayLogo, sub: "Billetera de Google" },
 ];
+
+const fetchWithAuth = async (path: string, options: RequestInit = {}) => {
+  const token = auth.currentUser ? await auth.currentUser.getIdToken() : "";
+  const headers = {
+    ...options.headers,
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+  return fetch(getApiUrl(path), {
+    ...options,
+    headers
+  });
+};
 
 export default function ProfileForm({ 
   initialProfile, 
@@ -346,18 +348,11 @@ export default function ProfileForm({
 
     try {
       const checkoutPlan = checkoutPlanType || "brisa";
-      let endpoint = "/api/billing/checkout/stripe";
-      if (walletName === "PayPal") {
-        endpoint = "/api/billing/checkout/paypal";
-      } else if (walletName === "Mercado Pago" || walletName === "Mercado Libre") {
-        endpoint = "/api/billing/checkout/mercadopago";
-      }
+      const endpoint = "/api/billing/checkout/stripe";
 
-      const response = await fetch(getApiUrl(endpoint), {
+      const response = await fetchWithAuth(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: resolvedUserId || "guest",
           planId: checkoutPlan,
           autoRenew: autoRenewChoice,
           payerEmail: correoPago || correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail || undefined
@@ -516,17 +511,7 @@ export default function ProfileForm({
   });
 
   const activeCards = React.useMemo(() => {
-    return cards.length > 0 ? cards : [
-      {
-        id: "card_real_ricardo",
-        brand: "VISA",
-        last4: "3102",
-        expiry: "12/28",
-        isDefault: true,
-        holderName: "RICARDO CASTRO",
-        bankName: "BBVA Bancomer"
-      }
-    ];
+    return cards;
   }, [cards]);
 
   // Keep cards in sync with backend profile snapshot.
@@ -547,8 +532,16 @@ export default function ProfileForm({
         }
       }
       setCards(unique);
+    } else {
+      setCards([]);
+      setSelectedCardForPlan("");
     }
   }, [initialProfile?.paymentCards]);
+
+  React.useEffect(() => {
+    setCards([]);
+    setSelectedCardForPlan("");
+  }, [auth.currentUser?.uid]);
 
   const [isAddingCardStripe, setIsAddingCardStripe] = useState(false);
 
@@ -557,11 +550,9 @@ export default function ProfileForm({
     const toastId = toast.loading("Iniciando conexión segura con Stripe...");
     try {
       const payerEmail = correoPago || correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail;
-      const response = await fetch(getApiUrl("/api/billing/setup/stripe"), {
+      const response = await fetchWithAuth("/api/billing/setup/stripe", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: initialProfile?.userId || auth.currentUser?.uid,
           payerEmail,
           holderName: "Tarjeta Stripe",
           bankName: "Stripe Wallet"
@@ -585,9 +576,9 @@ export default function ProfileForm({
 
   React.useEffect(() => {
     const fetchPaymentMethods = async () => {
-      if (!resolvedUserId) return;
+      if (!auth.currentUser) return;
       try {
-        const response = await fetch(getApiUrl(`/api/billing/payment-methods/${resolvedUserId}`));
+        const response = await fetchWithAuth("/api/billing/payment-methods");
         if (response.ok) {
           const data = await response.json();
           if (Array.isArray(data) && data.length > 0) {
@@ -617,7 +608,7 @@ export default function ProfileForm({
       }
     };
     fetchPaymentMethods();
-  }, [resolvedUserId, isAddingCardStripe]);
+  }, [auth.currentUser, isAddingCardStripe]);
 
 
   // Synchronize custom display names from the saved profile only; do not fabricate fiscal or payment data.
@@ -730,14 +721,9 @@ export default function ProfileForm({
       const paymentMethodId = stripeData.id;
 
       // 2. Send pm_... to our backend
-      const userId = initialProfile?.id || initialProfile?.userId || auth.currentUser?.uid;
-      const response = await fetch(getApiUrl("/api/billing/payment-methods/attach"), {
+      const response = await fetchWithAuth("/api/billing/payment-methods/attach", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
         body: JSON.stringify({
-          userId,
           paymentMethodId,
           isDefault: useAsDefault
         })
@@ -956,7 +942,7 @@ export default function ProfileForm({
   const [selectedCardForPlan, setSelectedCardForPlan] = useState<string>(
     (initialProfile?.paymentCards || []).find(c => c.isDefault)?.id || 
     (initialProfile?.paymentCards || [])[0]?.id || 
-    "card_real_ricardo"
+    ""
   );
   const [isAccordionExpanded, setIsAccordionExpanded] = React.useState(false);
 
@@ -1116,12 +1102,10 @@ export default function ProfileForm({
         
         setIsProcessingPayment(true);
         try {
-          const response = await fetch(getApiUrl("/api/billing/checkout/stripe/confirm"), {
+          const response = await fetchWithAuth("/api/billing/checkout/stripe/confirm", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              sessionId,
-              userId: initialProfile?.userId || auth.currentUser?.uid
+              sessionId
             })
           });
           const confirmation = await response.json().catch(() => ({}));
@@ -1232,11 +1216,9 @@ export default function ProfileForm({
                 onClick={async () => {
                   try {
                     const payerEmail = correoPago || correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail;
-                    const response = await fetch(getApiUrl("/api/billing/setup/stripe"), {
+                    const response = await fetchWithAuth("/api/billing/setup/stripe", {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
-                        userId: initialProfile?.userId || auth.currentUser?.uid,
                         payerEmail,
                         holderName: "Tarjeta Stripe",
                         bankName: "Stripe Wallet"
@@ -1440,11 +1422,9 @@ export default function ProfileForm({
                 try {
                   const payerEmail = correoPago || correoElectronico || auth.currentUser?.email || currentUserEmail;
                   const bankInfo = getCardBankInfo(cleanNum);
-                  const response = await fetch(getApiUrl("/api/billing/setup/stripe"), {
+                  const response = await fetchWithAuth("/api/billing/setup/stripe", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                      userId: initialProfile?.userId || auth.currentUser?.uid,
                       payerEmail,
                       holderName: newCardHolder.toUpperCase().trim(),
                       bankName: bankInfo.bankName
@@ -1700,6 +1680,29 @@ export default function ProfileForm({
                         {renderPayButtonInline()}
                       </div>
                     </div>
+                  )}
+                </div>
+              );
+            }
+
+            if (activeCards.length === 0) {
+              return (
+                <div className="flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-[#0a0d19]/45 border border-slate-200/80 dark:border-slate-800/80 rounded-3xl w-full text-center space-y-3.5 select-none animate-fade-in">
+                  <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-850 flex items-center justify-center text-slate-400 dark:text-slate-500">
+                    <CreditCard className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <span className="text-sm font-black text-slate-800 dark:text-white block">No tienes tarjetas vinculadas</span>
+                    <span className="text-xs text-slate-450 dark:text-slate-400 font-semibold block">Agrega una tarjeta para realizar pagos</span>
+                  </div>
+                  {!addingCard && (
+                    <button
+                      type="button"
+                      onClick={() => setAddingCard(true)}
+                      className="px-5 py-2 bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-black rounded-xl transition cursor-pointer active:scale-95 shadow-sm shadow-[#0B53F4]/10"
+                    >
+                      Agregar tarjeta
+                    </button>
                   )}
                 </div>
               );
@@ -1987,11 +1990,9 @@ export default function ProfileForm({
                     type="button"
                     onClick={async () => {
                       try {
-                        const res = await fetch(getApiUrl("/api/billing/payment-methods/set-default"), {
+                        const res = await fetchWithAuth("/api/billing/payment-methods/set-default", {
                           method: "POST",
-                          headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
-                            userId: initialProfile?.id || initialProfile?.userId || auth.currentUser?.uid || "guest",
                             paymentMethodId: card.id
                           })
                         });
@@ -2018,11 +2019,9 @@ export default function ProfileForm({
                     type="button"
                     onClick={async () => {
                       try {
-                        const res = await fetch(getApiUrl("/api/billing/payment-methods/delete"), {
+                        const res = await fetchWithAuth("/api/billing/payment-methods/delete", {
                           method: "POST",
-                          headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
-                            userId: initialProfile?.id || initialProfile?.userId || auth.currentUser?.uid || "guest",
                             paymentMethodId: card.id
                           })
                         });
