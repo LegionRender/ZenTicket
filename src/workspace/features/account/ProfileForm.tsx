@@ -576,7 +576,7 @@ export default function ProfileForm({
       } else if (userEmail) {
         setCorreoPago(userEmail);
       }
-      setCorreoElectronico(initialProfile.correoElectronico || userEmail || "");
+      setCorreoElectronico(userEmail || "");
       if (initialProfile.facturacionAutomatica !== undefined) {
         setFacturacionAutomatica(initialProfile.facturacionAutomatica);
       }
@@ -588,7 +588,7 @@ export default function ProfileForm({
       setCorreoPago(userEmail);
     }
     if (userEmail) {
-      setCorreoElectronico(initialProfile?.correoElectronico || userEmail);
+      setCorreoElectronico(userEmail);
     }
   }, [currentUserEmail, initialProfile, auth.currentUser?.email]);
 
@@ -2349,13 +2349,13 @@ export default function ProfileForm({
           {/* Correo Electrónico */}
           <div className="space-y-1">
             <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Correo Electrónico
+              Correo Electrónico (No modificable)
             </label>
             <input
               type="email"
               value={correoElectronico}
-              onChange={(e) => setCorreoElectronico(e.target.value)}
-              className="w-full text-sm font-medium bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
+              disabled={true}
+              className="w-full text-sm font-medium bg-[#F8F9FE] disabled:bg-slate-50 disabled:text-slate-450 border border-slate-200/70 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400 disabled:cursor-not-allowed"
             />
           </div>
 
@@ -2544,9 +2544,8 @@ export default function ProfileForm({
             <input
               type="email"
               value={correoRecepcion}
-              disabled={hasSavedFiscalData}
               onChange={(e) => setCorreoRecepcion(e.target.value)}
-              className="w-full text-sm font-medium bg-[#F8F9FE] disabled:bg-slate-50 disabled:text-slate-455 border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400 disabled:cursor-not-allowed"
+              className="w-full text-sm font-medium bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
             />
           </div>
         </div>
