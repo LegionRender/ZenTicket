@@ -910,10 +910,10 @@ export default function ProfileForm({
     const paymentStatus = initialProfile?.paymentStatus;
     const hasActivePaidPlan = currentPlan !== "gratuito" && (paymentStatus === "paid" || paymentStatus === "subscription_active");
 
-    const planStartDateStr = initialProfile?.planStartDate || initialProfile?.createdAt || new Date().toISOString();
-    const planStartDate = new Date(planStartDateStr);
+    const planStartDateStr = initialProfile?.planStartDate;
+    const planStartDate = planStartDateStr ? new Date(planStartDateStr) : null;
     const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
-    const isPlanExpired = (Date.now() - planStartDate.getTime()) >= oneMonthMs;
+    const isPlanExpired = planStartDate ? (Date.now() - planStartDate.getTime()) >= oneMonthMs : false;
 
     if (saved) {
       if (hasActivePaidPlan && currentPlan === saved && !isPlanExpired) {
@@ -1149,7 +1149,9 @@ export default function ProfileForm({
   );
 
   const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
-  const isPlanExpired = (Date.now() - planStartDate.getTime()) >= oneMonthMs;
+  const isPlanExpired = initialProfile?.planStartDate
+    ? (Date.now() - new Date(initialProfile.planStartDate).getTime()) >= oneMonthMs
+    : false;
   const isMonthlyQuotaExhausted = currentPlan !== "gratuito" && cycleInvoicesCount >= currentPlanLimit;
 
   React.useEffect(() => {
