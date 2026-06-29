@@ -976,7 +976,8 @@ app.post("/api/billing/setup/stripe", authenticateFirebaseToken, async (req, res
       customer: stripeCustomerId,
       success_url: `${getSafeBaseUrl(req)}/billing-setup-success.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${getSafeBaseUrl(req)}/billing-failure.html`,
-      "payment_method_types[0]": "card"
+      "payment_method_types[0]": "card",
+      "wallet_options[link][enabled]": "false"
     });
 
     const sessionResponse = await axios.post(
@@ -1037,6 +1038,7 @@ app.post("/api/billing/checkout/stripe", authenticateFirebaseToken, async (req, 
     sessionParams.append("success_url", `${getSafeBaseUrl(req)}/billing-success.html?session_id={CHECKOUT_SESSION_ID}`);
     sessionParams.append("cancel_url", `${getSafeBaseUrl(req)}/billing-failure.html`);
     sessionParams.append("customer", stripeCustomerId);
+    sessionParams.append("wallet_options[link][enabled]", "false");
 
     if (mode === "subscription") {
       sessionParams.append("mode", "subscription");
