@@ -113,6 +113,13 @@ const fetchPayPalClientId = async (): Promise<string> => {
   }
 };
 
+const digitalWallets = [
+  { id: "stripe_wallet", name: "Stripe", displayName: "Tarjeta (Stripe)", logo: stripeLogo, sub: "Pago seguro con tarjeta, Google Pay o Link" },
+  { id: "paypal_wallet", name: "PayPal", displayName: "PayPal", logo: paypalLogo, sub: "Pago rápido y seguro" },
+  { id: "mercadopago_wallet", name: "Mercado Pago", displayName: "Mercado Pago", logo: mercadoPagoLogo, sub: "Tu cuenta digital / Tarjetas" },
+  { id: "googlepay_wallet", name: "Google Pay", displayName: "Google Pay", logo: googlePayLogo, sub: "Billetera de Google" },
+];
+
 export default function ProfileForm({ 
   initialProfile, 
   onSave, 
@@ -340,7 +347,13 @@ export default function ProfileForm({
 
     try {
       const checkoutPlan = checkoutPlanType || "brisa";
-      const endpoint = getCheckoutEndpointForWallet();
+      let endpoint = "/api/billing/checkout/stripe";
+      if (walletName === "PayPal") {
+        endpoint = "/api/billing/checkout/paypal";
+      } else if (walletName === "Mercado Pago" || walletName === "Mercado Libre") {
+        endpoint = "/api/billing/checkout/mercadopago";
+      }
+
       const response = await fetch(getApiUrl(endpoint), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1604,7 +1617,15 @@ export default function ProfileForm({
                 return;
               }
 
-              await handleDigitalWalletPayment("Stripe");
+              if (selectedCardForPlan === "paypal_wallet") {
+                await handleDigitalWalletPayment("PayPal");
+              } else if (selectedCardForPlan === "mercadopago_wallet") {
+                await handleDigitalWalletPayment("Mercado Pago");
+              } else if (selectedCardForPlan === "googlepay_wallet") {
+                await handleDigitalWalletPayment("Google Pay");
+              } else {
+                await handleDigitalWalletPayment("Stripe");
+              }
             }}
             className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-40 text-white text-sm font-black py-3.5 rounded-2xl transition cursor-pointer text-center flex items-center justify-center gap-2 shadow-md shadow-[#0B53F4]/10 active:scale-98"
           >
@@ -1630,6 +1651,21 @@ export default function ProfileForm({
             </span>
           
           {(() => {
+            const wallet = digitalWallets.find(w => w.id === selectedCardForPlan);
+            if (wallet) {
+              return (
+                <div className="flex items-center gap-3.5 p-4.5 bg-slate-50 border border-slate-200/80 rounded-2xl w-full">
+                  <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                    <img src={wallet.logo} className="w-full h-full object-contain" alt={wallet.name} />
+                  </div>
+                  <div className="text-left leading-tight min-w-0">
+                    <span className="text-sm font-black text-slate-800 block">{wallet.displayName}</span>
+                    <span className="text-xs text-slate-400 font-semibold block mt-1 truncate">{wallet.sub}</span>
+                  </div>
+                </div>
+              );
+            }
+
             const card = cards.find(c => c.id === selectedCardForPlan) || cards.find(c => c.isDefault) || cards[0];
             if (card) {
               return (
@@ -1658,35 +1694,58 @@ export default function ProfileForm({
   };
 
   const renderAccordionPaymentMethods = () => {
+    const selectableCards = cards.filter((card) => card.id !== selectedCardForPlan);
+    const selectableWallets = digitalWallets.filter((wallet) => wallet.id !== selectedCardForPlan);
+
     return (
       <div className="space-y-3">
-        {!addingCard && cards.filter((card) => card.id !== selectedCardForPlan).map((card) => (
-          <button
-            key={card.id}
-            type="button"
-            onClick={() => setSelectedCardForPlan(card.id)}
-            className={`w-full flex items-center gap-4 p-4 border rounded-2xl text-left transition ${
-              selectedCardForPlan === card.id
-                ? "border-[#0B53F4] bg-[#EBF1FF]/60"
-                : "border-slate-200 bg-slate-50 hover:border-[#0B53F4]/50"
-            }`}
-          >
-            {renderVisualBrandBlock(card, "md")}
-            <div className="min-w-0">
-              <span className="text-sm font-black text-slate-800 block">
-                {card.bankName || (card.brand === "VISA" ? "Tarjeta Visa" : "Mastercard")}
-              </span>
-              <span className="text-xs text-slate-500 font-semibold block mt-1 truncate">{card.holderName}</span>
-              <span className="text-xs text-slate-400 font-mono block mt-0.5">•••• {card.last4}</span>
-            </div>
-          </button>
-        ))}
+        {!addingCard && (
+          <>
+            {/* List other saved cards */}
+            {selectableCards.map((card) => (
+              <button
+                key={card.id}
+                type="button"
+                onClick={() => setSelectedCardForPlan(card.id)}
+                className="w-full flex items-center gap-4.5 p-4.5 border border-slate-200 bg-slate-50 hover:bg-slate-100/70 hover:border-[#0B53F4]/50 rounded-2xl text-left transition cursor-pointer group"
+              >
+                {renderVisualBrandBlock(card, "md")}
+                <div className="min-w-0">
+                  <span className="text-sm font-black text-slate-800 block">
+                    {card.bankName || (card.brand === "VISA" ? "Tarjeta Visa" : "Mastercard")}
+                  </span>
+                  <span className="text-xs text-slate-500 font-semibold block mt-1 truncate">Titular: {card.holderName}</span>
+                  <span className="text-xs text-slate-400 font-mono block mt-0.5">•••• {card.last4}</span>
+                </div>
+              </button>
+            ))}
+
+            {/* List other digital wallets */}
+            {selectableWallets.map((wallet) => (
+              <button
+                key={wallet.id}
+                type="button"
+                onClick={() => setSelectedCardForPlan(wallet.id)}
+                className="w-full flex items-center gap-4.5 p-4.5 border border-slate-200 bg-slate-50 hover:bg-slate-100/70 hover:border-[#0B53F4]/50 rounded-2xl text-left transition cursor-pointer group"
+              >
+                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                  <img src={wallet.logo} className="w-full h-full object-contain" alt={wallet.name} />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-sm font-black text-slate-800 block">{wallet.displayName}</span>
+                  <span className="text-xs text-slate-400 font-semibold block mt-1">{wallet.sub}</span>
+                </div>
+              </button>
+            ))}
+          </>
+        )}
+        
         <button
           type="button"
           onClick={() => setAddingCard(true)}
-          className="w-full text-xs font-bold py-3 rounded-xl transition cursor-pointer bg-[#0B53F4] hover:bg-[#0747D1] text-white"
+          className="w-full text-xs font-bold py-3.5 rounded-2xl transition cursor-pointer bg-[#0B53F4] hover:bg-[#0747D1] text-white zt-btn-primary"
         >
-          Agregar otra tarjeta
+          Vincular nueva tarjeta
         </button>
 
       </div>

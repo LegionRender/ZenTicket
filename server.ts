@@ -2020,8 +2020,13 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
   try {
     const baseUrl = getSafeBaseUrl(req);
     console.log("DEBUG STRIPE BASEURL:", baseUrl);
-    const successUrl = process.env.BILLING_SUCCESS_URL ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}` : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}`;
+    const successUrl = process.env.BILLING_SUCCESS_URL 
+      ? `${process.env.BILLING_SUCCESS_URL}&plan=${planId}&session_id={CHECKOUT_SESSION_ID}` 
+      : `${baseUrl}/workspace?tab=cuenta&status=success&plan=${planId}&session_id={CHECKOUT_SESSION_ID}`;
     console.log("DEBUG STRIPE SUCCESSURL:", successUrl);
+
+    const profileSnapshot = await adminDb.collection("fiscalProfiles").doc(userId).get();
+    const stripeCustomerId = profileSnapshot.data()?.stripeCustomerId;
 
     const stripeParams = new URLSearchParams({
       "automatic_payment_methods[enabled]": "true",
@@ -2034,7 +2039,10 @@ app.post("/api/billing/checkout/stripe", async (req: Request, res: Response) => 
       "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/workspace?tab=cuenta&status=failure`,
       "client_reference_id": `${userId}:${planId}`
     });
-    if (payerEmail) {
+    
+    if (stripeCustomerId) {
+      stripeParams.append("customer", stripeCustomerId);
+    } else if (payerEmail) {
       stripeParams.append("customer_email", payerEmail);
     }
 
