@@ -663,7 +663,7 @@ export default function TicketsListScreen({
                           .invoice-title-box h1 {
                             font-size: 32px;
                             font-weight: 900;
-                            color: #0b53f4;
+                            color: #0072fc;
                             margin: 0 0 8px 0;
                             letter-spacing: 0.05em;
                             text-transform: uppercase;
@@ -689,13 +689,13 @@ export default function TicketsListScreen({
                             z-index: 10;
                           }
                           .bill-to-box {
-                            border-top: 3px solid #0b53f4;
+                            border-top: 3px solid #0072fc;
                             padding-top: 10px;
                           }
                           .bill-title {
                             font-size: 11px;
                             font-weight: 800;
-                            color: #0b53f4;
+                            color: #0072fc;
                             text-transform: uppercase;
                             letter-spacing: 0.12em;
                             margin-bottom: 8px;
@@ -727,7 +727,7 @@ export default function TicketsListScreen({
                             text-align: left;
                           }
                           .invoice-table th {
-                            background-color: #0b53f4;
+                            background-color: #0072fc;
                             color: #ffffff;
                             font-size: 10px;
                             font-weight: 800;
@@ -865,7 +865,7 @@ export default function TicketsListScreen({
                           }
                           
                           .grand-total-blue-badge {
-                            background: linear-gradient(90deg, #0b53f4 0%, #0942c4 100%);
+                            background: linear-gradient(90deg, #0072fc 0%, #0056be 100%);
                             border-radius: 10px;
                             padding: 10px 14px;
                             display: flex;
@@ -951,7 +951,7 @@ export default function TicketsListScreen({
                           /* Compact clean footer banner */
                           .custom-decor-footer-banner {
                             margin-top: 25px;
-                            background-color: #0b53f4;
+                            background-color: #0072fc;
                             border-radius: 12px;
                             padding: 10px 16px;
                             display: flex;
@@ -985,6 +985,7 @@ export default function TicketsListScreen({
                           <!-- Top Header info -->
                           <div class="header-container">
                             <div class="issuer-box">
+                              <h1 style="color: #0072fc; font-size: 26px; font-weight: 900; text-transform: uppercase; margin: 0 0 6px 0; font-family: sans-serif; letter-spacing: 0.5px; line-height: 1;">FACTURA</h1>
                               <div style="margin-top: 5px;">
                                 <h3 style="font-size: 13px; font-weight: 850; color: #0f172a; margin: 0 0 2px 0;">${emisorCorp}</h3>
                                 <p style="font-size: 11px; color: #475569; margin: 0;"><strong>RFC Emisor:</strong> ${rfcEmisorVal}</p>
@@ -993,8 +994,7 @@ export default function TicketsListScreen({
                             </div>
                             
                             <div class="invoice-title-box" style="display: flex; flex-direction: column; align-items: flex-end;">
-                              <img src="${logoLight}" style="height: 40px; width: auto; margin-bottom: 8px; object-fit: contain;" alt="ZenTicket" />
-                              <h1 style="margin: 0 0 8px 0; line-height: 1;">Factura</h1>
+                              <img src="${logoLight}" style="height: 48px; width: auto; margin-bottom: 12px; object-fit: contain;" alt="ZenTicket" />
                               <div class="invoice-meta-item">Fecha: <strong>${formattedDate}</strong></div>
                               <div class="invoice-meta-item">Folio Fiscal (UUID): <strong>${uuidVal}</strong></div>
                               <div class="invoice-meta-item">Lugar de Expedición: <strong>${lugarExpedicion}</strong></div>
@@ -1067,13 +1067,7 @@ export default function TicketsListScreen({
                             <div class="payment-and-signs">
                               <div class="notes-block">
                                 <h4>Términos y Condiciones de Certificación</h4>
-                                <p>Este documento es una representación impresa de un CFDI versión 4.0. El pago se efectúa mediante una sola exhibición (PUE). Cualquier aclaración referente a la facturación de su ticket favor de realizarla dentro de los 30 días posteriores a la fecha de emisión.</p>
-                              </div>
-                              
-                              <div class="signature-container" style="display: flex; flex-direction: column; align-items: flex-start;">
-                                <img src="${logoLight}" style="height: 22px; width: auto; margin-bottom: 5px; object-fit: contain;" alt="ZenTicket" />
-                                <div class="signature-line"></div>
-                                <span class="signature-title">Firma del Emisor Certificado</span>
+                                <p>Este documento es una representation impresa de un CFDI versión 4.0. El pago se efectúa mediante una sola exhibición (PUE). Cualquier aclaración referente a la facturación de su ticket favor de realizarla dentro de los 30 días posteriores a la fecha de emisión.</p>
                               </div>
                             </div>
                             
