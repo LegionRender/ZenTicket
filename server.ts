@@ -1478,6 +1478,7 @@ async function getPayPalAccessToken() {
     };
   } catch (error: any) {
     const errData = error.response?.data;
+    console.warn("PayPal Live Authentication failed. Error details:", errData || error.message);
     if (errData && errData.error === "invalid_client") {
       // 2. Try Sandbox fallback
       try {
