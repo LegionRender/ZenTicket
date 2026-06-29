@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Ticket, Invoice } from "@/shared/types/types";
 import { getConfigStatus, sendEmail } from "@/services/api";
-import logoDark from "@/assets/logos/logo-dark.png";
+import logoLight from "@/assets/logos/logo-light.png";
 import { 
   ChevronLeft, ChevronRight, Share2, FileText, Check, Download, ArrowLeft, 
   Coffee, ShoppingBag, Car, Plus, Printer, Mail, Trash2, 
@@ -352,8 +352,9 @@ export default function TicketsListScreen({
       return map[code] || `${code} - Uso CFDI`;
     };
 
-    // Parse XML to extract real CFDI metadata if available
+     // Parse XML to extract real CFDI metadata if available
     let selloSAT = "JX9A23KSF841HLWND82HJKLSW0K295LW0192LSLW0KND82910NSDLUQ9W892019ADJLW2";
+    let selloCFD = "f9aC1D2E3F4G5H6I7J8K9L0M1N2O3P4Q5R6S7T8U9V0W1X2Y3Z4A5B6C7D8E9F0G1H2I3J4K";
     let noCertificadoSAT = "00001000000504465028";
     let noCertificadoEmisor = "00001000000503932847";
     let lugarExpedicion = "CDMX, México";
@@ -376,6 +377,7 @@ export default function TicketsListScreen({
         const tfd = xmlDoc.getElementsByTagName("tfd:TimbreFiscalDigital")[0] || xmlDoc.getElementsByTagName("TimbreFiscalDigital")[0];
         if (tfd) {
           selloSAT = tfd.getAttribute("SelloSAT") || selloSAT;
+          selloCFD = tfd.getAttribute("SelloCFD") || selloCFD;
           noCertificadoSAT = tfd.getAttribute("NoCertificadoSAT") || noCertificadoSAT;
         }
         
@@ -383,6 +385,7 @@ export default function TicketsListScreen({
         const comprobante = xmlDoc.getElementsByTagName("cfdi:Comprobante")[0] || xmlDoc.getElementsByTagName("Comprobante")[0];
         if (comprobante) {
           noCertificadoEmisor = comprobante.getAttribute("NoCertificado") || noCertificadoEmisor;
+          selloCFD = comprobante.getAttribute("Sello") || selloCFD;
           const cp = comprobante.getAttribute("LugarExpedicion");
           if (cp) lugarExpedicion = cp + ", México";
           
@@ -990,7 +993,7 @@ export default function TicketsListScreen({
                             </div>
                             
                             <div class="invoice-title-box" style="display: flex; flex-direction: column; align-items: flex-end;">
-                              <img src="${logoDark}" style="height: 44px; width: auto; margin-bottom: 10px;" alt="ZenTicket" />
+                              <img src="${logoLight}" style="height: 40px; width: auto; margin-bottom: 8px; object-fit: contain;" alt="ZenTicket" />
                               <h1 style="margin: 0 0 8px 0; line-height: 1;">Factura</h1>
                               <div class="invoice-meta-item">Fecha: <strong>${formattedDate}</strong></div>
                               <div class="invoice-meta-item">Folio Fiscal (UUID): <strong>${uuidVal}</strong></div>
@@ -1068,7 +1071,7 @@ export default function TicketsListScreen({
                               </div>
                               
                               <div class="signature-container" style="display: flex; flex-direction: column; align-items: flex-start;">
-                                <img src="${logoDark}" style="height: 22px; width: auto; margin-bottom: 5px;" alt="ZenTicket" />
+                                <img src="${logoLight}" style="height: 22px; width: auto; margin-bottom: 5px; object-fit: contain;" alt="ZenTicket" />
                                 <div class="signature-line"></div>
                                 <span class="signature-title">Firma del Emisor Certificado</span>
                               </div>
@@ -1098,6 +1101,8 @@ export default function TicketsListScreen({
                               <img src="${satQrCodeImgSrc}" style="width: 100%; height: 100%; object-fit: contain;" alt="SAT Verification QR" />
                             </div>
                             <div class="stamp-details-box">
+                              <h5 class="stamp-headline">Sello Digital del Emisor (CFD)</h5>
+                              <p class="stamp-content" style="margin-bottom: 8px;">${selloCFD}</p>
                               <h5 class="stamp-headline">Sello Digital del SAT</h5>
                               <p class="stamp-content">${selloSAT}</p>
                               <span class="certified-pill">
@@ -1121,7 +1126,10 @@ export default function TicketsListScreen({
                     </html>
                   `);
                   printWindow.document.close();
-                  printWindow.print();
+                  // Delay execution to allow external images (dynamic SAT QR server and logo-light asset) to load
+                  setTimeout(() => {
+                    printWindow.print();
+                  }, 1200);
                 }
               }, 400);
             }}
