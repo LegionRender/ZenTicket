@@ -489,54 +489,11 @@ export default function ProfileForm({
   };
 
   // Cards saved in Firestore. New cards are captured only by the official processor checkout.
-  const [cards, setCards] = useState<PaymentCard[]>(() => {
-    if (initialProfile?.paymentCards && initialProfile.paymentCards.length > 0) {
-      const filtered = initialProfile.paymentCards.filter(
-        (card) =>
-          card.last4 !== "Cuenta Vinculada" &&
-          (card.stripePaymentMethodId || card.id)
-      );
-      const unique: PaymentCard[] = [];
-      const seen = new Set<string>();
-      for (const card of filtered) {
-        const key = `${card.brand}-${card.last4}-${card.expiry}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          unique.push(card);
-        }
-      }
-      return unique;
-    }
-    return [];
-  });
+  const [cards, setCards] = useState<PaymentCard[]>([]);
 
   const activeCards = React.useMemo(() => {
     return cards;
   }, [cards]);
-
-  // Keep cards in sync with backend profile snapshot.
-  React.useEffect(() => {
-    if (initialProfile?.paymentCards) {
-      const filtered = initialProfile.paymentCards.filter(
-        (card) =>
-          card.last4 !== "Cuenta Vinculada" &&
-          (card.stripePaymentMethodId || card.id)
-      );
-      const unique: PaymentCard[] = [];
-      const seen = new Set<string>();
-      for (const card of filtered) {
-        const key = `${card.brand}-${card.last4}-${card.expiry}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          unique.push(card);
-        }
-      }
-      setCards(unique);
-    } else {
-      setCards([]);
-      setSelectedCardForPlan("");
-    }
-  }, [initialProfile?.paymentCards]);
 
   React.useEffect(() => {
     setCards([]);
@@ -581,26 +538,8 @@ export default function ProfileForm({
         const response = await fetchWithAuth("/api/billing/payment-methods");
         if (response.ok) {
           const data = await response.json();
-          if (Array.isArray(data) && data.length > 0) {
+          if (Array.isArray(data)) {
             setCards(data);
-          } else {
-            if (initialProfile?.paymentCards) {
-              const filtered = initialProfile.paymentCards.filter(
-                (card) =>
-                  card.last4 !== "Cuenta Vinculada" &&
-                  (card.stripePaymentMethodId || card.id)
-              );
-              const unique: PaymentCard[] = [];
-              const seen = new Set<string>();
-              for (const card of filtered) {
-                const key = `${card.brand}-${card.last4}-${card.expiry}`;
-                if (!seen.has(key)) {
-                  seen.add(key);
-                  unique.push(card);
-                }
-              }
-              setCards(unique);
-            }
           }
         }
       } catch (err) {
@@ -970,11 +909,7 @@ export default function ProfileForm({
   }, [checkoutPlanType]);
 
   const selectedPlan = checkoutPlanType !== null ? checkoutPlanType : currentPlan;
-  const [selectedCardForPlan, setSelectedCardForPlan] = useState<string>(
-    (initialProfile?.paymentCards || []).find(c => c.isDefault)?.id || 
-    (initialProfile?.paymentCards || [])[0]?.id || 
-    ""
-  );
+  const [selectedCardForPlan, setSelectedCardForPlan] = useState<string>("");
   const [isAccordionExpanded, setIsAccordionExpanded] = React.useState(false);
 
   // Synchronize selectedCardForPlan with default card when cards array updates
@@ -1517,7 +1452,7 @@ export default function ProfileForm({
                     createdAt: initialProfile?.createdAt || new Date().toISOString(),
                     personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
                     plan: initialProfile?.plan || "gratuito",
-                    paymentCards: updatedCardsList
+                    paymentCards: []
                   });
                   toast.success("Tarjeta vinculada con exito en tu cuenta.", "Metodo actualizado");
                 } catch (e) {
@@ -1595,7 +1530,7 @@ export default function ProfileForm({
                 plan: "gratuito",
                 planStartDate: new Date().toISOString(),
                 autoRenew: false,
-                paymentCards: cards
+                paymentCards: []
               });
               setIsProcessingPayment(false);
               setCheckoutPlanType(null);
@@ -2160,7 +2095,7 @@ export default function ProfileForm({
         createdAt: initialProfile?.createdAt || new Date().toISOString(),
         personalGeminiKey: personalGeminiKey.trim(),
         plan: initialProfile?.plan || "gratuito",
-        paymentCards: initialProfile?.paymentCards || cards || [],
+        paymentCards: [],
         correoRecepcion: correoRecepcion.trim(),
         correoPago: correoPago.trim(),
         facturacionAutomatica,
@@ -2214,7 +2149,7 @@ export default function ProfileForm({
         createdAt: initialProfile?.createdAt || new Date().toISOString(),
         personalGeminiKey: personalGeminiKey.trim(),
         plan: initialProfile?.plan || "gratuito",
-        paymentCards: initialProfile?.paymentCards || cards || [],
+        paymentCards: [],
         correoRecepcion: correoRecepcion.trim(),
         correoPago: correoPago.trim(),
         facturacionAutomatica,
