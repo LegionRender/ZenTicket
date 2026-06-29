@@ -683,24 +683,27 @@ const getSafeBaseUrl = (req) => {
   if (referer) {
     try {
       const parsed = new URL(referer);
-      return parsed.origin;
+      if (!parsed.host.includes("cloudfunctions.net") && !parsed.host.includes("a.run.app")) {
+        return parsed.origin;
+      }
     } catch (e) {
       // Ignorar error de parsing
     }
   }
   const origin = req.headers.origin;
-  if (origin) {
+  if (origin && !origin.includes("cloudfunctions.net") && !origin.includes("a.run.app")) {
     return origin;
   }
-  let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
-  if (Array.isArray(proto)) {
-    proto = proto[0];
+  
+  const host = req.get("host") || "";
+  if (host.includes("localhost") || host.includes("127.0.0.1")) {
+    let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+    if (Array.isArray(proto)) proto = proto[0];
+    if (typeof proto === "string" && proto.includes(",")) proto = proto.split(",")[0].trim();
+    return `${proto}://${host}`;
   }
-  if (typeof proto === "string" && proto.includes(",")) {
-    proto = proto.split(",")[0].trim();
-  }
-  const host = req.get("host") || "localhost:3000";
-  return `${proto}://${host}`;
+  
+  return "https://factubolt.web.app";
 };
 
 // ==================== MIDDLEWARE & HELPERS ====================
