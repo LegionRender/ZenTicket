@@ -3620,10 +3620,8 @@ export default function ProfileForm({
         </div>
       )}
 
-      {/* Grid container layout for widescreen desktop preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* LEFT COLUMN: IDENTITY & SUBSCRIPTION */}
-        <div className="lg:col-span-6 space-y-6">
+      {/* Container layout stacked in a single, clean column */}
+      <div className="max-w-2xl mx-auto space-y-6">
           {/* 1. Profile card with larger rounded border andJD Avatar */}
       <div className="bg-white border border-slate-200/40 rounded-3xl p-5 shadow-sm flex items-center justify-between font-body">
         <div className="flex items-center gap-4">
@@ -3733,10 +3731,7 @@ export default function ProfileForm({
           )}
         </div>
 
-      </div> {/* Close Left Column (lg:col-span-6) */}
 
-      {/* RIGHT COLUMN: PAYMENT METHODS & CONFIGURATION */}
-      <div className="lg:col-span-6 space-y-6">
 
       <div className="pt-2">
               {/* 4. CONFIGURACION Header & Options List with interactive components */}
@@ -3825,8 +3820,6 @@ export default function ProfileForm({
 
 
       </div>
-
-      </div> {/* Close Grid layout container */}
 
       {/* 5. AYUDA Header & Columns */}
       <div className="space-y-2.5">
