@@ -138,24 +138,10 @@ const authenticateFirebaseToken = async (req: any, res: any, next: any) => {
 
 
 async function resolveStripeCustomerId(uid: string, email: string, emailVerified: boolean): Promise<string | null> {
-  const fiscalRef = adminDb.collection("fiscalProfiles").doc(uid);
-  const fiscalSnap = await fiscalRef.get();
-  let historicalCustomerId = null;
-  if (fiscalSnap.exists) {
-    historicalCustomerId = fiscalSnap.data()?.stripeCustomerId;
-  }
-
   const billingRef = adminDb.collection("billingProfiles").doc(uid);
   const billingSnap = await billingRef.get();
-
-  if (historicalCustomerId) {
-    if (!billingSnap.exists || billingSnap.data()?.stripeCustomerId !== historicalCustomerId) {
-      console.log(`[Migration] Sincronizando stripeCustomerId ${historicalCustomerId} desde fiscalProfiles a billingProfiles para ${uid}`);
-      await billingRef.set({ stripeCustomerId: historicalCustomerId }, { merge: true });
-    }
-    return historicalCustomerId;
-  }
-
+  
+  // 1. Si ya existe en billingProfiles, lo retornamos directo
   if (billingSnap.exists) {
     const data = billingSnap.data();
     if (data?.stripeCustomerId) {
@@ -163,8 +149,38 @@ async function resolveStripeCustomerId(uid: string, email: string, emailVerified
     }
   }
 
-  // 3. Si no coincide o no existe, intentamos buscar en Stripe por el correo electrónico
-  if (email) {
+  // 2. Si no, revisamos fiscalProfiles (migración segura e histórica)
+  const fiscalRef = adminDb.collection("fiscalProfiles").doc(uid);
+  const fiscalSnap = await fiscalRef.get();
+  if (fiscalSnap.exists) {
+    const historicalCustomerId = fiscalSnap.data()?.stripeCustomerId;
+    if (historicalCustomerId) {
+      // VALIDACIÓN DE PROPIEDAD:
+      // Validar que email y emailVerified sean válidos, consultar Stripe y comparar email.
+      const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+      if (stripeSecretKey) {
+        try {
+          const res = await axios.get(
+            `https://api.stripe.com/v1/customers/${historicalCustomerId}`,
+            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+          );
+          const customer = res.data;
+          if (email && emailVerified && customer.email && customer.email.toLowerCase() === email.toLowerCase()) {
+            console.log(`[Migration] Migrando stripeCustomerId ${historicalCustomerId} desde fiscalProfiles a billingProfiles para ${uid}`);
+            await billingRef.set({ stripeCustomerId: historicalCustomerId }, { merge: true });
+            return historicalCustomerId;
+          } else {
+            console.warn(`[Migration warning] Email mismatch for historical stripeCustomerId ${historicalCustomerId}. Token email: ${email}, Customer email: ${customer.email}. No se migró.`);
+          }
+        } catch (err: any) {
+          console.error(`[Migration error] Error al validar customer histórico ${historicalCustomerId}:`, err.message);
+        }
+      }
+    }
+  }
+
+  // 3. Si no coincide o no existe, intentamos buscar en Stripe por el correo electrónico verificado
+  if (email && emailVerified) {
     const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
     if (stripeSecretKey) {
       try {
@@ -175,7 +191,7 @@ async function resolveStripeCustomerId(uid: string, email: string, emailVerified
         const customers = response.data?.data || [];
         if (customers.length === 1) {
           const matchedCustomerId = customers[0].id;
-          console.log(`[Migration] Vinculando stripeCustomerId ${matchedCustomerId} de Stripe por correo ${email} para ${uid}`);
+          console.log(`[Migration] Vinculando stripeCustomerId ${matchedCustomerId} de Stripe por correo verificado ${email} para ${uid}`);
           await billingRef.set({ stripeCustomerId: matchedCustomerId }, { merge: true });
           return matchedCustomerId;
         } else if (customers.length > 1) {
@@ -1878,27 +1894,24 @@ const getSafeBaseUrl = (req: Request): string => {
   if (referer) {
     try {
       const parsed = new URL(referer);
-      if (!parsed.host.includes("cloudfunctions.net") && !parsed.host.includes("a.run.app") && !parsed.host.includes("api-2yeoxrnita-uc.a.run.app")) {
-        return parsed.origin;
-      }
+      return parsed.origin;
     } catch (e) {
       // Ignorar error de parsing
     }
   }
   const origin = req.headers.origin;
-  if (origin && typeof origin === "string" && !origin.includes("cloudfunctions.net") && !origin.includes("a.run.app")) {
+  if (origin) {
     return origin;
   }
-  
-  const host = req.get("host") || "";
-  if (host.includes("localhost") || host.includes("127.0.0.1")) {
-    let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
-    if (Array.isArray(proto)) proto = proto[0];
-    if (typeof proto === "string" && proto.includes(",")) proto = proto.split(",")[0].trim();
-    return `${proto}://${host}`;
+  let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  if (Array.isArray(proto)) {
+    proto = proto[0];
   }
-  
-  return "https://factubolt.web.app";
+  if (typeof proto === "string" && proto.includes(",")) {
+    proto = proto.split(",")[0].trim();
+  }
+  const host = req.get("host") || "localhost:3000";
+  return `${proto}://${host}`;
 };
 
 
@@ -2323,24 +2336,6 @@ async function syncCustomerPaymentMethods(stripeCustomerId: string, stripeSecret
     console.error(`[Stripe Webhook] Error al sincronizar métodos de pago para ${stripeCustomerId}:`, error.message);
   }
 }
-
-app.get("/api/billing/debug-user-profile", authenticateFirebaseToken, async (req: any, res: any) => {
-  const userId = req.user.uid;
-  try {
-    const fiscalSnap = await adminDb.collection("fiscalProfiles").doc(userId).get();
-    const subSnap = await adminDb.collection("subscriptions").doc(userId).get();
-    const billingSnap = await adminDb.collection("billingProfiles").doc(userId).get();
-    
-    res.json({
-      userId,
-      fiscalProfile: fiscalSnap.exists ? fiscalSnap.data() : null,
-      subscription: subSnap.exists ? subSnap.data() : null,
-      billingProfile: billingSnap.exists ? billingSnap.data() : null
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 app.post("/api/billing/sync-subscription", authenticateFirebaseToken, async (req: any, res: any) => {
   const userId = req.user.uid;

@@ -683,27 +683,24 @@ const getSafeBaseUrl = (req) => {
   if (referer) {
     try {
       const parsed = new URL(referer);
-      if (!parsed.host.includes("cloudfunctions.net") && !parsed.host.includes("a.run.app")) {
-        return parsed.origin;
-      }
+      return parsed.origin;
     } catch (e) {
       // Ignorar error de parsing
     }
   }
   const origin = req.headers.origin;
-  if (origin && !origin.includes("cloudfunctions.net") && !origin.includes("a.run.app")) {
+  if (origin) {
     return origin;
   }
-  
-  const host = req.get("host") || "";
-  if (host.includes("localhost") || host.includes("127.0.0.1")) {
-    let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
-    if (Array.isArray(proto)) proto = proto[0];
-    if (typeof proto === "string" && proto.includes(",")) proto = proto.split(",")[0].trim();
-    return `${proto}://${host}`;
+  let proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  if (Array.isArray(proto)) {
+    proto = proto[0];
   }
-  
-  return "https://factubolt.web.app";
+  if (typeof proto === "string" && proto.includes(",")) {
+    proto = proto.split(",")[0].trim();
+  }
+  const host = req.get("host") || "localhost:3000";
+  return `${proto}://${host}`;
 };
 
 // ==================== MIDDLEWARE & HELPERS ====================
@@ -744,23 +741,8 @@ const authenticateFirebaseToken = async (req, res, next) => {
 };
 
 async function resolveStripeCustomerId(uid, email, emailVerified) {
-  const fiscalRef = db.collection("fiscalProfiles").doc(uid);
-  const fiscalSnap = await fiscalRef.get();
-  let historicalCustomerId = null;
-  if (fiscalSnap.exists) {
-    historicalCustomerId = fiscalSnap.data()?.stripeCustomerId;
-  }
-
   const billingRef = db.collection("billingProfiles").doc(uid);
   const billingSnap = await billingRef.get();
-
-  if (historicalCustomerId) {
-    if (!billingSnap.exists || billingSnap.data()?.stripeCustomerId !== historicalCustomerId) {
-      console.log(`[Migration] Sincronizando stripeCustomerId ${historicalCustomerId} desde fiscalProfiles a billingProfiles para ${uid}`);
-      await billingRef.set({ stripeCustomerId: historicalCustomerId }, { merge: true });
-    }
-    return historicalCustomerId;
-  }
   
   if (billingSnap.exists) {
     const data = billingSnap.data();
@@ -769,7 +751,34 @@ async function resolveStripeCustomerId(uid, email, emailVerified) {
     }
   }
 
-  if (email) {
+  const fiscalRef = db.collection("fiscalProfiles").doc(uid);
+  const fiscalSnap = await fiscalRef.get();
+  if (fiscalSnap.exists) {
+    const historicalCustomerId = fiscalSnap.data()?.stripeCustomerId;
+    if (historicalCustomerId) {
+      const stripeSecretKey = secretOrEnv(stripeSecretKeyParam, "STRIPE_SECRET_KEY");
+      if (stripeSecretKey) {
+        try {
+          const res = await axios.get(
+            `https://api.stripe.com/v1/customers/${historicalCustomerId}`,
+            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
+          );
+          const customer = res.data;
+          if (email && emailVerified && customer.email && customer.email.toLowerCase() === email.toLowerCase()) {
+            console.log(`[Migration] Migrando stripeCustomerId ${historicalCustomerId} desde fiscalProfiles a billingProfiles para ${uid}`);
+            await billingRef.set({ stripeCustomerId: historicalCustomerId }, { merge: true });
+            return historicalCustomerId;
+          } else {
+            console.warn(`[Migration warning] Email mismatch for historical stripeCustomerId ${historicalCustomerId}. Token email: ${email}, Customer email: ${customer.email}. No se migró.`);
+          }
+        } catch (err) {
+          console.error(`[Migration error] Error al validar customer histórico ${historicalCustomerId}:`, err.message);
+        }
+      }
+    }
+  }
+
+  if (email && emailVerified) {
     const stripeSecretKey = secretOrEnv(stripeSecretKeyParam, "STRIPE_SECRET_KEY");
     if (stripeSecretKey) {
       try {
@@ -780,7 +789,7 @@ async function resolveStripeCustomerId(uid, email, emailVerified) {
         const customers = response.data?.data || [];
         if (customers.length === 1) {
           const matchedCustomerId = customers[0].id;
-          console.log(`[Migration] Vinculando stripeCustomerId ${matchedCustomerId} de Stripe por correo ${email} para ${uid}`);
+          console.log(`[Migration] Vinculando stripeCustomerId ${matchedCustomerId} de Stripe por correo verificado ${email} para ${uid}`);
           await billingRef.set({ stripeCustomerId: matchedCustomerId }, { merge: true });
           return matchedCustomerId;
         } else if (customers.length > 1) {
@@ -1307,24 +1316,6 @@ app.post("/api/billing/webhooks/stripe", express.raw({ type: "application/json" 
   } catch (error) {
     console.error("Error en webhook de Stripe:", error.message);
     res.status(400).json({ error: `Error de webhook: ${error.message}` });
-  }
-});
-
-app.get("/api/billing/debug-user-profile", authenticateFirebaseToken, async (req, res) => {
-  const userId = req.user.uid;
-  try {
-    const fiscalSnap = await db.collection("fiscalProfiles").doc(userId).get();
-    const subSnap = await db.collection("subscriptions").doc(userId).get();
-    const billingSnap = await db.collection("billingProfiles").doc(userId).get();
-    
-    res.json({
-      userId,
-      fiscalProfile: fiscalSnap.exists ? fiscalSnap.data() : null,
-      subscription: subSnap.exists ? subSnap.data() : null,
-      billingProfile: billingSnap.exists ? billingSnap.data() : null
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
   }
 });
 

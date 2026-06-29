@@ -1,6 +1,19 @@
 # Checklist de Tareas Completadas
 
 - [x] Mostrar la parte de métodos de pago en formato checkout inmediatamente desde el inicio (inicializando `checkoutPlanType` a `"personal"`).
+- [x] Subir y respaldar todas las modificaciones en el repositorio de GitHub.
+- [x] Resolver restricción de tokenización de Stripe mediante redirección directa a Stripe Checkout / Setup Session en producción.
+- [x] Corregir excepción runtime de Firebase Admin DocumentSnapshot `.exists` en el resolvedor de Stripe.
+- [x] Corregir redirección del pop-up en getSafeBaseUrl para usar el referer/origin del frontend.
+- [x] Remover Google Pay de las opciones en el frontend.
+- [x] Implementar deduplicación de tarjetas por marca y últimos 4 dígitos.
+- [x] Agregar botón de eliminación a la tarjeta predeterminada con desasociación en Stripe.
+- [x] Agregar botón 'Agregar otra tarjeta' visible afuera del acordeón cuando hay tarjetas vinculadas.
+- [x] Desactivar Stripe Link en los Checkout y Setup Sessions para ir directo al formulario de tarjeta (Omitido por incompatibilidad de versión de API de Stripe, manejado en dashboard / botón 'Pagar sin Link').
+- [x] Migrar el endpoint de checkout en producción para que cobre dinámicamente con price_data sin requerir IDs preconfigurados en Stripe.
+- [x] Corregir lógica de procesamiento de pagos y webhook en index.js.
+- [x] Agregar botón '¿Ya pagaste? Sincronizar estado' en el frontend y endpoint de sincronización manual en el backend.
+- [x] Implementar la lógica de límites duales (mes de duración o facturas consumidas), el estado 'Pagado' en badge y el aviso en la sección de suscripción.
 - [x] No separar tarjetas de crédito de las billeteras digitales: se unificó la visualización de tarjetas de crédito y billeteras en una cuadrícula única en el acordeón de métodos de pago, utilizando el formato visual homogéneo (logo/tarjeta a la izquierda y detalles a la derecha).
 - [x] Eliminar la cabecera/sección "Tus tarjetas vinculadas" / "Selecciona una tarjeta para la compra".
 - [x] Eliminar por completo la pantalla de checkout duplicada de la ventana modal "Gestionar Plan", haciendo que muestre únicamente la lista directa de planes.

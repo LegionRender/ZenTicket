@@ -104,19 +104,6 @@ const loadScript = (src: string): Promise<void> => {
 
 
 
-const parseFirestoreDate = (val: any): Date => {
-  if (!val) return new Date();
-  if (val instanceof Date) return val;
-  if (typeof val === "string") {
-    const d = new Date(val);
-    return isNaN(d.getTime()) ? new Date() : d;
-  }
-  if (typeof val === "number") return new Date(val);
-  if (val.seconds) return new Date(val.seconds * 1000);
-  if (typeof val.toDate === "function") return val.toDate();
-  return new Date();
-};
-
 const digitalWallets: any[] = [];
 
 const fetchWithAuth = async (path: string, options: RequestInit = {}) => {
@@ -921,11 +908,12 @@ export default function ProfileForm({
     const saved = localStorage.getItem("zenticket_checkout_plan") || localStorage.getItem("selectedPlanOnSignup");
     const currentPlan = initialProfile?.plan || "gratuito";
     const paymentStatus = initialProfile?.paymentStatus;
-    const hasActivePaidPlan = currentPlan !== "gratuito" && (paymentStatus === "paid" || paymentStatus === "subscription_active" || paymentStatus === "active");
+    const hasActivePaidPlan = currentPlan !== "gratuito" && (paymentStatus === "paid" || paymentStatus === "subscription_active");
 
-    const planStartDate = initialProfile?.planStartDate ? parseFirestoreDate(initialProfile.planStartDate) : null;
+    const planStartDateStr = initialProfile?.planStartDate || initialProfile?.createdAt || new Date().toISOString();
+    const planStartDate = new Date(planStartDateStr);
     const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
-    const isPlanExpired = planStartDate ? (Date.now() - planStartDate.getTime()) >= oneMonthMs : false;
+    const isPlanExpired = (Date.now() - planStartDate.getTime()) >= oneMonthMs;
 
     if (saved) {
       if (hasActivePaidPlan && currentPlan === saved && !isPlanExpired) {
@@ -1145,7 +1133,8 @@ export default function ProfileForm({
   const [selectedDetailsCard, setSelectedDetailsCard] = useState<PaymentCard | null>(null);
 
   // Invoices cycle calculation
-  const planStartDate = parseFirestoreDate(initialProfile?.planStartDate);
+  const planStartDateStr = initialProfile?.planStartDate || initialProfile?.createdAt || new Date().toISOString();
+  const planStartDate = new Date(planStartDateStr);
   const cycleInvoices = invoices.filter(inv => {
     if (!inv.createdAt) return false;
     return new Date(inv.createdAt) >= planStartDate;
@@ -1160,9 +1149,7 @@ export default function ProfileForm({
   );
 
   const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
-  const isPlanExpired = initialProfile?.planStartDate
-    ? (Date.now() - parseFirestoreDate(initialProfile.planStartDate).getTime()) >= oneMonthMs
-    : false;
+  const isPlanExpired = (Date.now() - planStartDate.getTime()) >= oneMonthMs;
   const isMonthlyQuotaExhausted = currentPlan !== "gratuito" && cycleInvoicesCount >= currentPlanLimit;
 
   React.useEffect(() => {
@@ -1173,8 +1160,6 @@ export default function ProfileForm({
       }
     }
   }, [currentPlan, isPlanExpired, isMonthlyQuotaExhausted, checkoutPlanType]);
-
-
   const getPlanDescription = (plan?: string) => {
     if (plan === "brisa") return "Para personas que facturan algunos consumos al mes y quieren evitar hacerlo manualmente. Incluye 10 facturas generadas al mes, historial ampliado de tickets y soporte por email.";
     if (plan === "personal") return "Plan intermedio para profesionistas independientes que necesitan mayor volumen. Incluye 20 facturas generadas al mes, panel de gastos y soporte por email.";
@@ -1201,32 +1186,11 @@ export default function ProfileForm({
     return "$0";
   };
   const hasActivePaidPlan = currentPlan !== "gratuito" &&
-    (initialProfile?.paymentStatus === "paid" || 
-     initialProfile?.paymentStatus === "subscription_active" || 
-     initialProfile?.paymentStatus === "active") &&
+    (initialProfile?.paymentStatus === "paid" || initialProfile?.paymentStatus === "subscription_active") &&
     !isPlanExpired &&
     !isMonthlyQuotaExhausted;
   const isPayingSameActivePlan = checkoutPlanType === currentPlan && hasActivePaidPlan;
   const shouldDisablePayButton = checkoutPlanType !== "gratuito" && isPayingSameActivePlan && !isMonthlyQuotaExhausted;
-
-  React.useEffect(() => {
-    console.log("=== PROFILE BILLING DEBUG ===");
-    console.log("Current Plan:", currentPlan);
-    console.log("Payment Status:", initialProfile?.paymentStatus);
-    console.log("Plan Start Date:", initialProfile?.planStartDate);
-    console.log("Is Plan Expired:", isPlanExpired);
-    console.log("Invoices Used (Cycle):", cycleInvoicesCount, "Limit:", currentPlanLimit);
-    console.log("Is Quota Exhausted:", isMonthlyQuotaExhausted);
-    console.log("Has Active Paid Plan:", hasActivePaidPlan);
-    console.log("Checkout Plan Type:", checkoutPlanType);
-    console.log("Is Paying Same Active Plan:", isPayingSameActivePlan);
-    console.log("Should Disable Pay Button:", shouldDisablePayButton);
-    
-    fetchWithAuth("/api/billing/debug-user-profile")
-      .then(res => res.json())
-      .then(data => console.log("DEBUG REST PROFILE:", data))
-      .catch(err => console.error("DEBUG REST PROFILE ERROR:", err));
-  }, [initialProfile, currentPlan, hasActivePaidPlan, checkoutPlanType, isPlanExpired, isMonthlyQuotaExhausted, isPayingSameActivePlan, shouldDisablePayButton]);
 
   const isProfileComplete = true; // No validation locks - the app is completely open for navigation and operation
 
