@@ -3898,7 +3898,7 @@ export default function ProfileForm({
                 </span>
                 <p className="text-[10.5px] text-slate-450 mt-1 font-semibold leading-relaxed">
                   {selectedPlan !== "gratuito" 
-                    ? "Vigencia de 1 mes o hasta agotar facturas."
+                    ? "Tu plan estará activo durante 30 días o hasta que uses todas las facturas incluidas."
                     : "Plan de prueba permanente."}
                 </p>
               </div>
