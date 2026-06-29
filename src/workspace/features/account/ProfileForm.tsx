@@ -927,6 +927,7 @@ export default function ProfileForm({
     (initialProfile?.paymentCards || [])[0]?.id || 
     "stripe_wallet"
   );
+  const [isAccordionExpanded, setIsAccordionExpanded] = React.useState(false);
 
   // Synchronize selectedCardForPlan with default card when cards array updates
   React.useEffect(() => {
@@ -1527,22 +1528,109 @@ export default function ProfileForm({
     return (
       <div className="space-y-4">
         {isCheckoutMode && (
-          <>
-            <div className="flex items-center gap-2.5 p-3.5 bg-white rounded-2xl border border-slate-200/60 text-xs text-slate-700 leading-tight select-none mt-4 mb-2">
-              <input
-                type="checkbox"
-                id="autoRenewCheckoutChoice"
-                checked={autoRenewChoice}
-                onChange={(e) => setAutoRenewChoice(e.target.checked)}
-                className="w-4 h-4 text-[#0B53F4] border-slate-350 rounded focus:ring-[#0B53F4] cursor-pointer shrink-0"
-              />
-              <label htmlFor="autoRenewCheckoutChoice" className="cursor-pointer">
-                <span className="font-extrabold text-slate-800 block">Renovación automática cada mes</span>
-              </label>
-            </div>
+          <div className="flex items-center gap-2.5 p-3.5 bg-white rounded-2xl border border-slate-200/60 text-xs text-slate-700 leading-tight select-none mt-4 mb-2">
+            <input
+              type="checkbox"
+              id="autoRenewCheckoutChoice"
+              checked={autoRenewChoice}
+              onChange={(e) => setAutoRenewChoice(e.target.checked)}
+              className="w-4 h-4 text-[#0B53F4] border-slate-350 rounded focus:ring-[#0B53F4] cursor-pointer shrink-0"
+            />
+            <label htmlFor="autoRenewCheckoutChoice" className="cursor-pointer">
+              <span className="font-extrabold text-slate-800 block">Renovación automática cada mes</span>
+            </label>
+          </div>
+        )}
 
+        {/* 3.2 Pago Predeterminado o Seleccionado (Visual Card Principal) */}
+        <div className="space-y-1.5 text-left">
+          <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-0.5">
+            {isCheckoutMode ? "Método de Pago Seleccionado" : "Pago Predeterminado / Tarjetas Guardadas"}
+          </span>
+        
+          {(() => {
+            const wallet = digitalWallets.find(w => w.id === selectedCardForPlan);
+            if (wallet) {
+              return (
+                <div className="flex flex-col gap-3 p-5 bg-gradient-to-br from-slate-50 to-slate-100/70 border border-slate-200/90 rounded-2xl w-full shadow-2xs relative overflow-hidden animate-fade-in">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3.5">
+                      <div style={{ backgroundColor: '#ffffff' }} className="w-12 h-12 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                        <img src={wallet.logo} className="w-full h-full object-contain" alt={wallet.name} />
+                      </div>
+                      <div className="text-left leading-tight min-w-0">
+                        <span className="text-sm font-black text-slate-800 block">{wallet.displayName}</span>
+                        <span className="text-xs text-slate-400 font-semibold block mt-0.5 truncate">{wallet.sub}</span>
+                      </div>
+                    </div>
+                    {/* Badges */}
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <span className="flex items-center gap-1 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider shadow-3xs">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" /> Vinculada con éxito
+                      </span>
+                      <span className="bg-slate-200/75 text-slate-600 border border-slate-350/30 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider">
+                        Pago seleccionado
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            const card = cards.find(c => c.id === selectedCardForPlan) || cards.find(c => c.isDefault) || cards[0];
+            if (card) {
+              return (
+                <div className="flex flex-col gap-3 p-5 bg-gradient-to-br from-slate-50 to-slate-100/70 border border-slate-200/90 rounded-2xl w-full shadow-2xs relative overflow-hidden animate-fade-in">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3.5">
+                      {renderVisualBrandBlock(card, "md")}
+                      <div className="text-left leading-tight min-w-0">
+                        <span className="text-sm font-black text-slate-800 block">
+                          {card.bankName || (card.brand === "VISA" ? "Tarjeta Visa" : "Mastercard")}
+                        </span>
+                        <span className="text-xs text-slate-450 font-mono mt-0.5 block">
+                          •••• •••• •••• {card.last4}
+                        </span>
+                      </div>
+                    </div>
+                    {/* Badges */}
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <span className="flex items-center gap-1 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider shadow-3xs">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" /> Vinculada con éxito
+                      </span>
+                      <span className="bg-[#EBF1FF] text-[#0B53F4] border border-[#0B53F4]/10 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider">
+                        Pago predeterminado
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center pt-2.5 border-t border-slate-200/60 mt-0.5 text-left">
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Titular</span>
+                      <span className="text-[11.5px] font-extrabold text-slate-700 block truncate max-w-[200px]">{card.holderName}</span>
+                    </div>
+                    {card.expiryMonth && card.expiryYear && (
+                      <div className="text-right">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Expira</span>
+                        <span className="text-[11.5px] font-extrabold text-slate-700 block font-mono">{card.expiryMonth}/{card.expiryYear}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-500">
+                Selecciona un método de pago a continuación.
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Botón único de pago (Directamente debajo de la tarjeta predeterminada) */}
+        {isCheckoutMode && (
+          <>
             {/* Correo para Cuentas de Pago */}
-            <div className="space-y-1 bg-white border border-slate-200/60 rounded-2xl p-4 mt-3 mb-3 text-left">
+            <div className="space-y-1 bg-white border border-slate-200/60 rounded-2xl p-4 text-left animate-fade-in">
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                 Correo para Cuentas de Pago (Stripe/PayPal/Mercado Pago)
               </label>
@@ -1587,7 +1675,6 @@ export default function ProfileForm({
               </p>
             </div>
 
-            {/* Botón único de pago */}
             <button
               type="button"
               disabled={isProcessingPayment || isProcessingWallet || shouldDisablePayButton}
@@ -1658,51 +1745,23 @@ export default function ProfileForm({
           </>
         )}
 
-        {/* 3.2 Pago Predeterminado */}
-        <div className="space-y-1.5 text-left">
-          <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest block ml-0.5">
-            {isCheckoutMode ? "Método de Pago Seleccionado" : "Pago Predeterminado / Tarjetas Guardadas"}
-          </span>
-        
-          {(() => {
-            const wallet = digitalWallets.find(w => w.id === selectedCardForPlan);
-            if (wallet) {
-              return (
-                <div className="flex items-center gap-3.5 p-4.5 bg-slate-50 border border-slate-200/80 rounded-2xl w-full">
-                  <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
-                    <img src={wallet.logo} className="w-full h-full object-contain" alt={wallet.name} />
-                  </div>
-                  <div className="text-left leading-tight min-w-0">
-                    <span className="text-sm font-black text-slate-800 block">{wallet.displayName}</span>
-                    <span className="text-xs text-slate-400 font-semibold block mt-1 truncate">{wallet.sub}</span>
-                  </div>
-                </div>
-              );
-            }
-
-            const card = cards.find(c => c.id === selectedCardForPlan) || cards.find(c => c.isDefault) || cards[0];
-            if (card) {
-              return (
-                <div className="flex items-center gap-3.5 p-4.5 bg-slate-50 border border-slate-200/80 rounded-2xl w-full">
-                  {renderVisualBrandBlock(card, "md")}
-                  <div className="text-left leading-tight min-w-0">
-                    <span className="text-sm font-black text-slate-800 block">{card.bankName || (card.brand === "VISA" ? "Tarjeta Visa" : "Mastercard")}</span>
-                    <span className="text-xs text-slate-500 font-semibold block mt-1 truncate">Titular: {card.holderName}</span>
-                    <span className="text-xs text-slate-400 font-semibold block mt-0.5 font-mono">Terminación {card.last4}</span>
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-500">
-                Selecciona un método de pago a continuación.
-              </div>
-            );
-          })()}
+        {/* 3.3 Menú Desplegable (Acordeón Colapsable) */}
+        <div className="pt-2 select-none">
+          <button
+            type="button"
+            onClick={() => setIsAccordionExpanded(!isAccordionExpanded)}
+            className="w-full flex items-center justify-between p-4.5 bg-slate-50 border border-slate-200/80 hover:bg-slate-100/70 rounded-2xl transition cursor-pointer text-left font-black text-xs text-slate-600 uppercase tracking-wider"
+          >
+            <span>Cambiar método de pago / Ver opciones</span>
+            <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${isAccordionExpanded ? "rotate-180" : ""}`} />
+          </button>
         </div>
 
-        {/* 3.3 Menú desplegable */}
-        {renderAccordionPaymentMethods()}
+        {isAccordionExpanded && (
+          <div className="space-y-3 pt-1 animate-fade-in duration-200">
+            {renderAccordionPaymentMethods()}
+          </div>
+        )}
 
         {addingCard && renderLocalCardForm()}
       </div>
