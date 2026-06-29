@@ -488,6 +488,7 @@ export default function ProfileForm({
 
   // Cards saved in Firestore. New cards are captured only by the official processor checkout.
   const [cards, setCards] = useState<PaymentCard[]>([]);
+  const [isLoadingCards, setIsLoadingCards] = useState(true);
 
   const activeCards = React.useMemo(() => {
     return cards;
@@ -532,6 +533,7 @@ export default function ProfileForm({
   React.useEffect(() => {
     const fetchPaymentMethods = async () => {
       if (!auth.currentUser) return;
+      setIsLoadingCards(true);
       try {
         const response = await fetchWithAuth("/api/billing/payment-methods");
         if (response.ok) {
@@ -542,6 +544,8 @@ export default function ProfileForm({
         }
       } catch (err) {
         console.warn("Could not load Stripe payment methods:", err);
+      } finally {
+        setIsLoadingCards(false);
       }
     };
     fetchPaymentMethods();
@@ -1690,6 +1694,22 @@ export default function ProfileForm({
               );
             }
 
+            if (isLoadingCards) {
+              return (
+                <div className="flex flex-col gap-3 p-5 bg-white dark:bg-[#0a0d19] border border-slate-200/80 dark:border-slate-800/80 rounded-3xl w-full shadow-xs relative overflow-hidden animate-pulse">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3.5 w-full">
+                      <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-800 shrink-0" />
+                      <div className="space-y-2 w-1/2">
+                        <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded w-3/4" />
+                        <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
             if (activeCards.length === 0) {
               return (
                 <div className="flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-[#0a0d19]/45 border border-slate-200/80 dark:border-slate-800/80 rounded-3xl w-full text-center space-y-3.5 select-none animate-fade-in">
@@ -1839,7 +1859,13 @@ export default function ProfileForm({
 
     return (
       <div className="space-y-3">
-        {!addingCard && (
+        {isLoadingCards ? (
+          <div className="space-y-3 animate-pulse">
+            <div className="w-full h-20 bg-slate-100 dark:bg-slate-800 rounded-2xl animate-pulse" />
+            <div className="w-full h-20 bg-slate-100 dark:bg-slate-800 rounded-2xl animate-pulse" />
+          </div>
+        ) : (
+          !addingCard && (
           <>
             {/* List other saved cards */}
             {selectableCards.map((card) => (
@@ -1877,7 +1903,8 @@ export default function ProfileForm({
                 </div>
               </button>
             ))}
-          </>
+            </>
+          )
         )}
         
         <button
@@ -3866,7 +3893,7 @@ export default function ProfileForm({
       {/* 2. SUSCRIPCION Header & Detail Panel */}
       <div className="space-y-2.5">
         <div className="flex items-center justify-between select-none">
-          <span className="text-[11px] font-extrabold text-[#0B53F4]/80 uppercase tracking-widest font-display">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
             Suscripción
           </span>
         </div>
@@ -3949,7 +3976,7 @@ export default function ProfileForm({
         {/* 3. MÉTODOS DE PAGO */}
         <div className="space-y-2.5">
           <div className="flex items-center justify-between select-none">
-            <span className="text-[11px] font-extrabold text-[#0B53F4]/80 uppercase tracking-widest font-display">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
               Métodos de pago
             </span>
             <span className="flex items-center gap-1 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider shadow-xs">
