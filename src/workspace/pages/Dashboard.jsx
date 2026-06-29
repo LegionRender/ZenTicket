@@ -5,6 +5,7 @@ import { analyzeTicket, runAutomation } from "@/services/api";
 import { db } from "@/services/firebase/firebase";
 import {
   collection,
+  collectionGroup,
   doc,
   setDoc,
   getDocs,
@@ -274,8 +275,7 @@ export const Dashboard = () => {
   useEffect(() => {
     if (!user) return;
     const q = query(
-      collection(db, "invoices"),
-      where("userId", "==", user.uid)
+      collection(db, "users", user.uid, "invoices")
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = [];
@@ -452,7 +452,7 @@ export const Dashboard = () => {
       console.error("Firestore Admin Tickets onSnapshot Error:", err);
     });
 
-    const qInvoices = query(collection(db, "invoices"));
+    const qInvoices = query(collectionGroup(db, "invoices"));
     const unsubscribeInvoices = onSnapshot(qInvoices, (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ ...d.data(), id: d.id }));
@@ -715,10 +715,12 @@ export const Dashboard = () => {
 
         // Migrate invoices
         try {
-          const qInvoices = query(collection(db, "invoices"), where("userId", "==", oldUid));
+          const qInvoices = query(collection(db, "users", oldUid, "invoices"));
           const snapInvoices = await getDocs(qInvoices);
           for (const iDoc of snapInvoices.docs) {
-            await setDoc(doc(db, "invoices", iDoc.id), { userId: user.uid }, { merge: true });
+            const data = iDoc.data();
+            await setDoc(doc(db, "users", user.uid, "invoices", iDoc.id), { ...data, userId: user.uid }, { merge: true });
+            await deleteDoc(doc(db, "users", oldUid, "invoices", iDoc.id));
             totalInvoicesMigrated++;
           }
         } catch (invoiceErr) {
@@ -975,6 +977,7 @@ export const Dashboard = () => {
     if (!user) return;
     try {
       const gId = "invoice_" + Math.random().toString(36).substring(2, 11);
+      const invoiceNumber = invoices.length + 1;
       const invoicePayload = {
         id: gId,
         userId: user.uid,
@@ -990,11 +993,12 @@ export const Dashboard = () => {
         createdAt: new Date().toISOString(),
         cost,
         rawCost,
-        connectorType
+        connectorType,
+        invoiceNumber
       };
 
       try {
-        const docRef = doc(db, "invoices", gId);
+        const docRef = doc(db, "users", user.uid, "invoices", gId);
         await setDoc(docRef, invoicePayload);
       } catch (dbErr) {
         console.warn("Invoice DB save failed due to quota, saving locally:", dbErr);
