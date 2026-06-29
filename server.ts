@@ -138,10 +138,24 @@ const authenticateFirebaseToken = async (req: any, res: any, next: any) => {
 
 
 async function resolveStripeCustomerId(uid: string, email: string, emailVerified: boolean): Promise<string | null> {
+  const fiscalRef = adminDb.collection("fiscalProfiles").doc(uid);
+  const fiscalSnap = await fiscalRef.get();
+  let historicalCustomerId = null;
+  if (fiscalSnap.exists) {
+    historicalCustomerId = fiscalSnap.data()?.stripeCustomerId;
+  }
+
   const billingRef = adminDb.collection("billingProfiles").doc(uid);
   const billingSnap = await billingRef.get();
-  
-  // 1. Si ya existe en billingProfiles, lo retornamos directo
+
+  if (historicalCustomerId) {
+    if (!billingSnap.exists || billingSnap.data()?.stripeCustomerId !== historicalCustomerId) {
+      console.log(`[Migration] Sincronizando stripeCustomerId ${historicalCustomerId} desde fiscalProfiles a billingProfiles para ${uid}`);
+      await billingRef.set({ stripeCustomerId: historicalCustomerId }, { merge: true });
+    }
+    return historicalCustomerId;
+  }
+
   if (billingSnap.exists) {
     const data = billingSnap.data();
     if (data?.stripeCustomerId) {
@@ -149,38 +163,8 @@ async function resolveStripeCustomerId(uid: string, email: string, emailVerified
     }
   }
 
-  // 2. Si no, revisamos fiscalProfiles (migración segura e histórica)
-  const fiscalRef = adminDb.collection("fiscalProfiles").doc(uid);
-  const fiscalSnap = await fiscalRef.get();
-  if (fiscalSnap.exists) {
-    const historicalCustomerId = fiscalSnap.data()?.stripeCustomerId;
-    if (historicalCustomerId) {
-      // VALIDACIÓN DE PROPIEDAD:
-      // Validar que email y emailVerified sean válidos, consultar Stripe y comparar email.
-      const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-      if (stripeSecretKey) {
-        try {
-          const res = await axios.get(
-            `https://api.stripe.com/v1/customers/${historicalCustomerId}`,
-            { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
-          );
-          const customer = res.data;
-          if (email && emailVerified && customer.email && customer.email.toLowerCase() === email.toLowerCase()) {
-            console.log(`[Migration] Migrando stripeCustomerId ${historicalCustomerId} desde fiscalProfiles a billingProfiles para ${uid}`);
-            await billingRef.set({ stripeCustomerId: historicalCustomerId }, { merge: true });
-            return historicalCustomerId;
-          } else {
-            console.warn(`[Migration warning] Email mismatch for historical stripeCustomerId ${historicalCustomerId}. Token email: ${email}, Customer email: ${customer.email}. No se migró.`);
-          }
-        } catch (err: any) {
-          console.error(`[Migration error] Error al validar customer histórico ${historicalCustomerId}:`, err.message);
-        }
-      }
-    }
-  }
-
-  // 3. Si no coincide o no existe, intentamos buscar en Stripe por el correo electrónico verificado
-  if (email && emailVerified) {
+  // 3. Si no coincide o no existe, intentamos buscar en Stripe por el correo electrónico
+  if (email) {
     const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
     if (stripeSecretKey) {
       try {
@@ -191,7 +175,7 @@ async function resolveStripeCustomerId(uid: string, email: string, emailVerified
         const customers = response.data?.data || [];
         if (customers.length === 1) {
           const matchedCustomerId = customers[0].id;
-          console.log(`[Migration] Vinculando stripeCustomerId ${matchedCustomerId} de Stripe por correo verificado ${email} para ${uid}`);
+          console.log(`[Migration] Vinculando stripeCustomerId ${matchedCustomerId} de Stripe por correo ${email} para ${uid}`);
           await billingRef.set({ stripeCustomerId: matchedCustomerId }, { merge: true });
           return matchedCustomerId;
         } else if (customers.length > 1) {
