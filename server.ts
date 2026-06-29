@@ -2571,37 +2571,45 @@ app.post("/api/billing/payment-methods/attach", authenticateFirebaseToken, async
   const emailVerified = req.user.email_verified;
   const { paymentMethodId, isDefault } = req.body;
 
+  console.log(`[Attach PM] Inicio. userId: ${userId}, email: ${email}, verified: ${emailVerified}, pmId: ${paymentMethodId}, isDefault: ${isDefault}`);
+
   if (!paymentMethodId) {
+    console.warn("[Attach PM] Error: Falta el parámetro paymentMethodId");
     res.status(400).json({ error: "Faltan parámetros paymentMethodId" });
     return;
   }
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeSecretKey) {
+    console.error("[Attach PM] Error: STRIPE_SECRET_KEY no está configurado");
     res.status(500).json({ error: "Configuración de Stripe incompleta" });
     return;
   }
   try {
+    console.log("[Attach PM] Resolviendo stripeCustomerId...");
     const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
+    console.log(`[Attach PM] stripeCustomerId resuelto: ${stripeCustomerId}`);
     if (!stripeCustomerId) {
+      console.warn("[Attach PM] Error: No se pudo resolver stripeCustomerId");
       res.status(400).json({ error: "El usuario no tiene un cliente de Stripe creado." });
       return;
     }
 
-    // 1. Obtener detalles del método de pago de Stripe para validar propiedad
+    console.log(`[Attach PM] Obteniendo detalles de PaymentMethod ${paymentMethodId} desde Stripe...`);
     const pmDetailsRes = await axios.get(
       `https://api.stripe.com/v1/payment_methods/${paymentMethodId}`,
       { headers: { Authorization: `Bearer ${stripeSecretKey}` } }
     );
     const pmDetails = pmDetailsRes.data;
+    console.log(`[Attach PM] Detalles obtenidos. Cliente actual del PM en Stripe: ${pmDetails.customer}`);
 
-    // 2. Si ya está asociado a otro cliente diferente, rechazar de inmediato
     if (pmDetails.customer && pmDetails.customer !== stripeCustomerId) {
+      console.warn(`[Attach PM] Error de permisos: PM pertenece a otro cliente (${pmDetails.customer})`);
       res.status(403).json({ error: "No tienes permisos para asociar este método de pago." });
       return;
     }
 
-    // 3. Si no está asociado al cliente del usuario, lo adjuntamos
     if (pmDetails.customer !== stripeCustomerId) {
+      console.log(`[Attach PM] Vinculando PM ${paymentMethodId} al cliente ${stripeCustomerId}...`);
       const attachRes = await axios.post(
         `https://api.stripe.com/v1/payment_methods/${paymentMethodId}/attach`,
         `customer=${stripeCustomerId}`,
@@ -2612,22 +2620,25 @@ app.post("/api/billing/payment-methods/attach", authenticateFirebaseToken, async
           }
         }
       );
-      // Validar propiedad después de adjuntar
+      console.log(`[Attach PM] Vinculado con éxito. Cliente reportado por attach: ${attachRes.data.customer}`);
       if (attachRes.data.customer !== stripeCustomerId) {
+        console.error("[Attach PM] Error: Operación de vinculación inválida");
         res.status(403).json({ error: "Operación de vinculación inválida." });
         return;
       }
     }
 
-    // Set as default if requested or if this is the first/only card
+    console.log("[Attach PM] Obteniendo perfil de facturación actual de Firestore...");
     const billingRef = adminDb.collection("billingProfiles").doc(userId);
     const billingSnapshot = await billingRef.get();
     const existingCards = Array.isArray(billingSnapshot.data()?.paymentCards)
       ? billingSnapshot.data().paymentCards
       : [];
+    console.log(`[Attach PM] Tarjetas existentes en Firestore: ${existingCards.length}`);
     
     const setAsDefault = isDefault || existingCards.length === 0;
     if (setAsDefault) {
+      console.log(`[Attach PM] Configurando PM ${paymentMethodId} como predeterminado en Stripe...`);
       await axios.post(
         `https://api.stripe.com/v1/customers/${stripeCustomerId}`,
         `invoice_settings[default_payment_method]=${paymentMethodId}`,
@@ -2638,18 +2649,20 @@ app.post("/api/billing/payment-methods/attach", authenticateFirebaseToken, async
           }
         }
       );
+      console.log("[Attach PM] Predeterminado configurado con éxito en Stripe.");
     }
 
-    // Sync Firestore cached paymentCards list using our existing function
+    console.log("[Attach PM] Sincronizando métodos de pago de Stripe a Firestore...");
     await syncCustomerPaymentMethods(stripeCustomerId, stripeSecretKey, adminDb);
+    console.log("[Attach PM] Sincronización completada.");
     
-    // Retrieve the newly updated profile to get the sync'ed paymentCards list
     const updatedSnapshot = await billingRef.get();
     const updatedCards = updatedSnapshot.data()?.paymentCards || [];
+    console.log(`[Attach PM] Retornando ${updatedCards.length} tarjetas actualizadas.`);
 
     res.json({ success: true, paymentCards: updatedCards });
   } catch (error: any) {
-    console.error("Error al vincular tarjeta en Stripe:", error.response?.data || error.message);
+    console.error("[Attach PM] EXCEPCIÓN DETECTADA:", error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });

@@ -689,6 +689,7 @@ export default function ProfileForm({
 
     setIsSavingCard(true);
     const toastId = toast.loading("Registrando método de pago seguro...");
+    console.log("[Save Card Frontend] Iniciando guardado de tarjeta local...");
 
     try {
       // 1. Tokenize directly with Stripe Public API
@@ -704,6 +705,7 @@ export default function ProfileForm({
         params.append("billing_details[address][postal_code]", newCardZip);
       }
 
+      console.log("[Save Card Frontend] Enviando petición de tokenización a Stripe...");
       const stripeResponse = await fetch("https://api.stripe.com/v1/payment_methods", {
         method: "POST",
         headers: {
@@ -713,14 +715,18 @@ export default function ProfileForm({
         body: params.toString()
       });
 
+      console.log(`[Save Card Frontend] Respuesta de Stripe recibida. Status: ${stripeResponse.status}`);
       const stripeData = await stripeResponse.json();
       if (!stripeResponse.ok || !stripeData.id) {
+        console.error("[Save Card Frontend] Error de tokenización en Stripe:", stripeData.error);
         throw new Error(stripeData.error?.message || "No se pudo tokenizar la tarjeta con Stripe.");
       }
 
       const paymentMethodId = stripeData.id;
+      console.log(`[Save Card Frontend] Token de PaymentMethod obtenido con éxito: ${paymentMethodId}`);
 
       // 2. Send pm_... to our backend
+      console.log("[Save Card Frontend] Enviando PM a nuestro backend para vincular...");
       const response = await fetchWithAuth("/api/billing/payment-methods/attach", {
         method: "POST",
         body: JSON.stringify({
@@ -729,13 +735,22 @@ export default function ProfileForm({
         })
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "No se pudo vincular la tarjeta en tu cuenta.");
+      console.log(`[Save Card Frontend] Respuesta del backend recibida. Status: ${response.status}`);
+      let resData;
+      try {
+        resData = await response.json();
+      } catch (jsonErr) {
+        console.error("[Save Card Frontend] Error al decodificar respuesta JSON del backend:", jsonErr);
+        resData = {};
       }
 
-      const resData = await response.json();
-      setCards(resData.paymentCards);
+      if (!response.ok) {
+        console.error("[Save Card Frontend] El backend reportó error de vinculación:", resData.error);
+        throw new Error(resData.error || "No se pudo vincular la tarjeta en tu cuenta.");
+      }
+
+      console.log("[Save Card Frontend] Vinculación completada con éxito. Actualizando tarjetas...");
+      setCards(resData.paymentCards || []);
       
       // Clear fields
       setNewCardNumber("");
@@ -749,6 +764,7 @@ export default function ProfileForm({
       toast.removeToast(toastId);
       toast.success("Tarjeta guardada y vinculada exitosamente.", "Método de pago listo");
     } catch (err: any) {
+      console.error("[Save Card Frontend] Excepción atrapada durante el flujo:", err);
       toast.removeToast(toastId);
       toast.error(err.message || "Ocurrió un error al guardar la tarjeta.");
     } finally {
