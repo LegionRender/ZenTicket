@@ -1001,23 +1001,33 @@ app.post("/api/billing/checkout/stripe", authenticateFirebaseToken, async (req, 
   const userId = req.user.uid;
   const email = req.user.email;
   const emailVerified = req.user.email_verified;
-  const { planId, payerEmail } = req.body;
+  const { planId } = req.body;
 
   if (!planId) {
     res.status(400).json({ error: "Faltan parámetros planId" });
     return;
   }
 
-  let priceId = "";
-  let mode = "subscription";
-
+  let price = 0;
+  let title = "";
   if (planId === "brisa") {
-    priceId = "price_1TmLKzIMU9aoBatu12345678"; 
-    mode = "payment";
+    price = 15.00;
+    title = "Plan Brisa (Prueba Stripe Mínima $15) - ZenTicket";
   } else if (planId === "serenidad") {
-    priceId = "price_1TmLKzIMU9aoBatul698yQv7"; 
+    price = 250.00;
+    title = "Plan Serenidad - ZenTicket";
   } else if (planId === "nirvana") {
-    priceId = "price_1TmLM1IMU9aoBatuZ3kI1O2z";
+    price = 500.00;
+    title = "Plan Nirvana - ZenTicket";
+  } else if (planId === "personal") {
+    price = 150.00;
+    title = "Plan Personal - ZenTicket";
+  } else if (planId === "empresa") {
+    price = 300.00;
+    title = "Plan Empresa - ZenTicket";
+  } else {
+    res.status(400).json({ error: "Plan inválido para pago" });
+    return;
   }
 
   const stripeSecretKey = secretOrEnv(stripeSecretKeyParam, "STRIPE_SECRET_KEY");
@@ -1033,27 +1043,19 @@ app.post("/api/billing/checkout/stripe", authenticateFirebaseToken, async (req, 
       return;
     }
 
-    const sessionParams = new URLSearchParams();
-    sessionParams.append("success_url", `${getSafeBaseUrl(req)}/billing-success.html?session_id={CHECKOUT_SESSION_ID}`);
-    sessionParams.append("cancel_url", `${getSafeBaseUrl(req)}/billing-failure.html`);
-    sessionParams.append("customer", stripeCustomerId);
-
-    if (mode === "subscription") {
-      sessionParams.append("mode", "subscription");
-      sessionParams.append("line_items[0][price]", priceId);
-      sessionParams.append("line_items[0][quantity]", "1");
-      sessionParams.append("subscription_data[metadata][userId]", userId);
-      sessionParams.append("subscription_data[metadata][planId]", planId);
-    } else {
-      sessionParams.append("mode", "payment");
-      sessionParams.append("line_items[0][price]", priceId);
-      sessionParams.append("line_items[0][quantity]", "1");
-      sessionParams.append("payment_intent_data[setup_future_usage]", "off_session");
-      sessionParams.append("payment_intent_data[metadata][userId]", userId);
-      sessionParams.append("payment_intent_data[metadata][planId]", planId);
-      sessionParams.append("metadata[userId]", userId);
-      sessionParams.append("metadata[planId]", planId);
-    }
+    const sessionParams = new URLSearchParams({
+      "automatic_payment_methods[enabled]": "true",
+      "line_items[0][price_data][currency]": "mxn",
+      "line_items[0][price_data][product_data][name]": title,
+      "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
+      "line_items[0][quantity]": "1",
+      mode: "payment",
+      success_url: `${getSafeBaseUrl(req)}/billing-success.html?status=success&plan=${planId}&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${getSafeBaseUrl(req)}/billing-failure.html?status=failure`,
+      client_reference_id: `${userId}:${planId}`,
+      "payment_intent_data[setup_future_usage]": "off_session",
+      customer: stripeCustomerId
+    });
 
     const sessionResponse = await axios.post(
       "https://api.stripe.com/v1/checkout/sessions",
