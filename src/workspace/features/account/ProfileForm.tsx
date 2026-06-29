@@ -902,7 +902,21 @@ export default function ProfileForm({
   // Checkout and Purchase state
   const [checkoutPlanType, setCheckoutPlanType] = useState<"gratuito" | "brisa" | "personal" | "serenidad" | "empresa" | "nirvana" | null>(() => {
     const saved = localStorage.getItem("zenticket_checkout_plan") || localStorage.getItem("selectedPlanOnSignup");
+    const currentPlan = initialProfile?.plan || "gratuito";
+    const paymentStatus = initialProfile?.paymentStatus;
+    const hasActivePaidPlan = currentPlan !== "gratuito" && (paymentStatus === "paid" || paymentStatus === "subscription_active");
+
+    const planStartDateStr = initialProfile?.planStartDate || initialProfile?.createdAt || new Date().toISOString();
+    const planStartDate = new Date(planStartDateStr);
+    const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
+    const isPlanExpired = (Date.now() - planStartDate.getTime()) >= oneMonthMs;
+
     if (saved) {
+      if (hasActivePaidPlan && currentPlan === saved && !isPlanExpired) {
+        localStorage.removeItem("zenticket_checkout_plan");
+        localStorage.removeItem("selectedPlanOnSignup");
+        return null;
+      }
       if (saved === "gratuito" || saved === "brisa" || saved === "personal" || saved === "serenidad" || saved === "empresa" || saved === "nirvana") {
         return saved as any;
       }
@@ -1129,6 +1143,19 @@ export default function ProfileForm({
     currentPlan === "personal" ? 20 : 
     currentPlan === "brisa" ? 10 : 5
   );
+
+  const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
+  const isPlanExpired = (Date.now() - planStartDate.getTime()) >= oneMonthMs;
+  const isMonthlyQuotaExhausted = currentPlan !== "gratuito" && cycleInvoicesCount >= currentPlanLimit;
+
+  React.useEffect(() => {
+    if (currentPlan === "gratuito") return;
+    if (isPlanExpired || isMonthlyQuotaExhausted) {
+      if (checkoutPlanType === null) {
+        setCheckoutPlanType(currentPlan);
+      }
+    }
+  }, [currentPlan, isPlanExpired, isMonthlyQuotaExhausted, checkoutPlanType]);
   const getPlanDescription = (plan?: string) => {
     if (plan === "brisa") return "Para personas que facturan algunos consumos al mes y quieren evitar hacerlo manualmente. Incluye 10 facturas generadas al mes, historial ampliado de tickets y soporte por email.";
     if (plan === "personal") return "Plan intermedio para profesionistas independientes que necesitan mayor volumen. Incluye 20 facturas generadas al mes, panel de gastos y soporte por email.";
@@ -1155,8 +1182,9 @@ export default function ProfileForm({
     return "$0";
   };
   const hasActivePaidPlan = currentPlan !== "gratuito" &&
-    (initialProfile?.paymentStatus === "paid" || initialProfile?.paymentStatus === "subscription_active");
-  const isMonthlyQuotaExhausted = currentPlan !== "gratuito" && cycleInvoicesCount >= currentPlanLimit;
+    (initialProfile?.paymentStatus === "paid" || initialProfile?.paymentStatus === "subscription_active") &&
+    !isPlanExpired &&
+    !isMonthlyQuotaExhausted;
   const isPayingSameActivePlan = checkoutPlanType === currentPlan && hasActivePaidPlan;
   const shouldDisablePayButton = checkoutPlanType !== "gratuito" && isPayingSameActivePlan && !isMonthlyQuotaExhausted;
 
@@ -3850,15 +3878,28 @@ export default function ProfileForm({
                 <span className="font-display font-extrabold text-sm text-slate-800 capitalize">
                   {getPlanLabel(selectedPlan)}
                 </span>
-                <span className={`text-[9.5px] uppercase font-black px-2 py-0.5 rounded-md tracking-wider leading-none ${checkoutPlanType !== null ? "bg-amber-100 text-amber-700" : "bg-[#ebf1ff] text-[#0B53F4]"}`}>
-                  {checkoutPlanType !== null ? "Por pagar" : "Activo"}
+                <span className={`text-[9.5px] uppercase font-black px-2 py-0.5 rounded-md tracking-wider leading-none ${
+                  checkoutPlanType !== null 
+                    ? "bg-amber-100 text-amber-700" 
+                    : (currentPlan === "gratuito" ? "bg-[#ebf1ff] text-[#0B53F4]" : "bg-emerald-100 text-emerald-700")
+                }`}>
+                  {checkoutPlanType !== null ? "Por pagar" : (currentPlan === "gratuito" ? "Gratuito" : "Pagado")}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 {checkoutPlanType !== null 
-                  ? "Elegiste este plan. Por favor, confirma el pago abajo para activarlo." 
-                  : (currentPlan === "gratuito" ? "Plan de prueba permanente" : `Facturado mensual - Prox: ${new Date(planStartDate.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`)}
+                  ? (isPlanExpired || isMonthlyQuotaExhausted
+                      ? "Tu plan ha vencido o se han agotado las facturas del ciclo. Confirma el pago abajo para reactivarlo."
+                      : "Elegiste este plan. Por favor, confirma el pago abajo para activarlo.")
+                  : (currentPlan === "gratuito" 
+                      ? "Plan de prueba permanente" 
+                      : `Facturado mensual - Prox: ${new Date(planStartDate.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`)}
               </p>
+              {selectedPlan !== "gratuito" && (
+                <p className="text-[9.5px] text-slate-400/80 font-medium mt-1.5 italic">
+                  * Vigencia: 1 mes de servicio o hasta agotar facturas del plan, lo que ocurra primero.
+                </p>
+              )}
             </div>
             {/* Amount details */}
             <div className="text-right flex items-baseline gap-1">
