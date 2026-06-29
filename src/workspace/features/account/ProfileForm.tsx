@@ -557,12 +557,13 @@ export default function ProfileForm({
     }
   };
 
+  const resolvedUserId = initialProfile?.id || initialProfile?.userId || auth.currentUser?.uid;
+
   React.useEffect(() => {
     const fetchPaymentMethods = async () => {
-      const userId = initialProfile?.userId || auth.currentUser?.uid;
-      if (!userId) return;
+      if (!resolvedUserId) return;
       try {
-        const response = await fetch(getApiUrl(`/api/billing/payment-methods/${userId}`));
+        const response = await fetch(getApiUrl(`/api/billing/payment-methods/${resolvedUserId}`));
         if (response.ok) {
           const data = await response.json();
           setCards(data);
@@ -572,7 +573,7 @@ export default function ProfileForm({
       }
     };
     fetchPaymentMethods();
-  }, [initialProfile?.userId, isAddingCardStripe]);
+  }, [resolvedUserId, isAddingCardStripe]);
 
 
   // Synchronize custom display names from the saved profile only; do not fabricate fiscal or payment data.
@@ -624,6 +625,266 @@ export default function ProfileForm({
   const [newCardCvv, setNewCardCvv] = useState("");
   const [newCardHolder, setNewCardHolder] = useState("");
   const [newCardBrand, setNewCardBrand] = useState<"VISA" | "MASTERCARD">("VISA");
+
+  const [newCardZip, setNewCardZip] = useState("");
+  const [useAsDefault, setUseAsDefault] = useState(true);
+  const [isSavingCard, setIsSavingCard] = useState(false);
+
+  const handleSaveCardLocally = async () => {
+    if (!newCardNumber || !newCardExpiry || !newCardCvv || !newCardHolder) {
+      toast.error("Por favor completa los campos requeridos de la tarjeta.");
+      return;
+    }
+
+    const cleanNumber = newCardNumber.replace(/\s+/g, '');
+    const cleanExpiry = newCardExpiry.replace(/\s+/g, '');
+    if (cleanNumber.length < 15 || cleanNumber.length > 16) {
+      toast.error("Número de tarjeta inválido.");
+      return;
+    }
+
+    const parts = cleanExpiry.split('/');
+    if (parts.length !== 2 || parts[0].length !== 2 || parts[1].length !== 2) {
+      toast.error("Formato de fecha de vencimiento inválido (MM/AA).");
+      return;
+    }
+
+    const expMonth = parts[0];
+    const expYear = "20" + parts[1]; // Convert AA to 20AA
+
+    setIsSavingCard(true);
+    const toastId = toast.loading("Registrando método de pago seguro...");
+
+    try {
+      // 1. Tokenize directly with Stripe Public API
+      const stripePubKey = "pk_live_51TmHoCIMU9aoBatutx7aHAwiCWK6VaH0uOxeEUWLEepifuM2vl8Hq6cYTu86YkXLEIPZiZpajB4KseghUelJPF3J00eiziqqhP";
+      const params = new URLSearchParams();
+      params.append("type", "card");
+      params.append("card[number]", cleanNumber);
+      params.append("card[exp_month]", expMonth);
+      params.append("card[exp_year]", expYear);
+      params.append("card[cvc]", newCardCvv);
+      params.append("billing_details[name]", newCardHolder);
+      if (newCardZip) {
+        params.append("billing_details[address][postal_code]", newCardZip);
+      }
+
+      const stripeResponse = await fetch("https://api.stripe.com/v1/payment_methods", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${stripePubKey}`,
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: params.toString()
+      });
+
+      const stripeData = await stripeResponse.json();
+      if (!stripeResponse.ok || !stripeData.id) {
+        throw new Error(stripeData.error?.message || "No se pudo tokenizar la tarjeta con Stripe.");
+      }
+
+      const paymentMethodId = stripeData.id;
+
+      // 2. Send pm_... to our backend
+      const userId = initialProfile?.id || initialProfile?.userId || auth.currentUser?.uid;
+      const response = await fetch(getApiUrl("/api/billing/payment-methods/attach"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          userId,
+          paymentMethodId,
+          isDefault: useAsDefault
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "No se pudo vincular la tarjeta en tu cuenta.");
+      }
+
+      const resData = await response.json();
+      setCards(resData.paymentCards);
+      
+      // Clear fields
+      setNewCardNumber("");
+      setNewCardExpiry("");
+      setNewCardCvv("");
+      setNewCardHolder("");
+      setNewCardZip("");
+      setUseAsDefault(true);
+      setAddingCard(false);
+
+      toast.dismiss(toastId);
+      toast.success("Tarjeta guardada y vinculada exitosamente.", "Método de pago listo");
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      toast.error(err.message || "Ocurrió un error al guardar la tarjeta.");
+    } finally {
+      setIsSavingCard(false);
+    }
+  };
+
+  const renderLocalCardForm = () => {
+    return (
+      <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 mt-4 mb-4 animate-fade-in text-left space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-[#0B53F4]" />
+            <div>
+              <span className="text-xs font-black text-slate-850 uppercase tracking-wide block">Agregar nueva tarjeta</span>
+              <span className="text-[9px] text-[#0B53F4] font-bold block mt-0.5">Pago seguro con Stripe</span>
+            </div>
+          </div>
+          <button 
+            type="button"
+            onClick={() => setAddingCard(false)}
+            className="text-slate-400 hover:text-slate-600 font-bold text-xs p-1 cursor-pointer bg-transparent border-none outline-none"
+          >
+            Cancelar
+          </button>
+        </div>
+
+        <p className="text-[10px] text-slate-450 leading-relaxed font-semibold">
+          Tus datos se procesan de forma segura. ZenTicket nunca almacena el número completo ni el CVV.
+        </p>
+
+        <div className="space-y-3.5">
+          {/* Card Number Input */}
+          <div className="space-y-1.5 text-left">
+            <label className="block text-[9.5px] font-black text-slate-400 uppercase tracking-widest ml-1">
+              Número de tarjeta
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                maxLength={19}
+                placeholder="1234 1234 1234 1234"
+                value={newCardNumber}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "");
+                  const matches = val.match(/\d{1,4}/g);
+                  const formatted = matches ? matches.join(" ") : "";
+                  setNewCardNumber(formatted);
+                }}
+                className="w-full bg-white border border-slate-200 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-xs text-slate-800 font-medium placeholder-slate-350 outline-none transition"
+              />
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300">
+                <CreditCard className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Holder Name Input */}
+          <div className="space-y-1.5 text-left">
+            <label className="block text-[9.5px] font-black text-slate-400 uppercase tracking-widest ml-1">
+              Nombre del titular
+            </label>
+            <input
+              type="text"
+              placeholder="Como aparece en la tarjeta"
+              value={newCardHolder}
+              onChange={(e) => setNewCardHolder(e.target.value)}
+              className="w-full bg-white border border-slate-200 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-xs text-slate-800 font-medium placeholder-slate-350 outline-none transition"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Expiry Input */}
+            <div className="space-y-1.5 text-left">
+              <label className="block text-[9.5px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                MM/AA
+              </label>
+              <input
+                type="text"
+                maxLength={5}
+                placeholder="MM/AA"
+                value={newCardExpiry}
+                onChange={(e) => {
+                  let val = e.target.value.replace(/\D/g, "");
+                  if (val.length > 2) {
+                    val = val.substring(0, 2) + "/" + val.substring(2, 4);
+                  }
+                  setNewCardExpiry(val);
+                }}
+                className="w-full bg-white border border-slate-200 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-xs text-slate-800 font-medium placeholder-slate-350 outline-none transition text-center"
+              />
+            </div>
+
+            {/* CVV Input */}
+            <div className="space-y-1.5 text-left">
+              <label className="block text-[9.5px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                CVV
+              </label>
+              <input
+                type="password"
+                maxLength={4}
+                placeholder="123"
+                value={newCardCvv}
+                onChange={(e) => setNewCardCvv(e.target.value.replace(/\D/g, ""))}
+                className="w-full bg-white border border-slate-200 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-xs text-slate-800 font-medium placeholder-slate-350 outline-none transition text-center"
+              />
+            </div>
+          </div>
+
+          {/* Postal Code Input */}
+          <div className="space-y-1.5 text-left">
+            <label className="block text-[9.5px] font-black text-slate-400 uppercase tracking-widest ml-1">
+              Código postal (opcional)
+            </label>
+            <input
+              type="text"
+              maxLength={10}
+              placeholder="Código postal"
+              value={newCardZip}
+              onChange={(e) => setNewCardZip(e.target.value)}
+              className="w-full bg-white border border-slate-200 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-xs text-slate-800 font-medium placeholder-slate-350 outline-none transition"
+            />
+          </div>
+
+          {/* Use as default checkbox */}
+          <div className="flex items-center gap-2 pt-1 select-none">
+            <input
+              type="checkbox"
+              id="useCardAsDefaultCheckbox"
+              checked={useAsDefault}
+              onChange={(e) => setUseAsDefault(e.target.checked)}
+              className="w-4 h-4 text-[#0B53F4] border-slate-300 rounded focus:ring-[#0B53F4] cursor-pointer"
+            />
+            <label htmlFor="useCardAsDefaultCheckbox" className="text-xs text-slate-650 font-bold cursor-pointer">
+              Usar esta tarjeta como predeterminada
+            </label>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex gap-3 pt-2">
+          <button
+            type="button"
+            onClick={handleSaveCardLocally}
+            disabled={isSavingCard}
+            className="flex-1 bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-50 text-white text-xs font-black py-3.5 rounded-2xl transition cursor-pointer text-center"
+          >
+            {isSavingCard ? "Guardando..." : "Guardar tarjeta"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAddingCard(false)}
+            className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold py-3.5 rounded-2xl transition cursor-pointer text-center"
+          >
+            Cancelar
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1.5 justify-center pt-2 text-[10px] text-slate-400 font-semibold">
+          <Shield className="w-3.5 h-3.5" />
+          <span>Protegido por Stripe</span>
+        </div>
+      </div>
+    );
+  };
+
 
   const currentPlan = initialProfile?.plan || "gratuito";
 
@@ -1422,11 +1683,10 @@ export default function ProfileForm({
         ))}
         <button
           type="button"
-          onClick={handleAddCardWithStripe}
-          disabled={isAddingCardStripe}
-          className="w-full text-xs font-bold py-3 rounded-xl transition cursor-pointer bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-50 text-white"
+          onClick={() => setAddingCard(true)}
+          className="w-full text-xs font-bold py-3 rounded-xl transition cursor-pointer bg-[#0B53F4] hover:bg-[#0747D1] text-white"
         >
-          {isAddingCardStripe ? "Cargando Stripe..." : "Agregar otra tarjeta"}
+          Agregar otra tarjeta
         </button>
 
       </div>
@@ -3457,16 +3717,20 @@ export default function ProfileForm({
             {checkoutPlanType === null && (
               <button 
                 type="button"
-                onClick={handleAddCardWithStripe}
-                disabled={isAddingCardStripe}
-                className="bg-[#ebf1ff] hover:bg-[#dee8ff] disabled:opacity-50 text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
+                onClick={() => setAddingCard(true)}
+                className="bg-[#ebf1ff] hover:bg-[#dee8ff] text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
               >
-                {isAddingCardStripe ? "Iniciando..." : "+ Agregar otra tarjeta"}
+                + Agregar otra tarjeta
               </button>
             )}
           </div>
 
-          {checkoutPlanType !== null ? renderCheckoutSection() : renderNormalSection()}
+          {checkoutPlanType !== null ? renderCheckoutSection() : (
+            <>
+              {renderNormalSection()}
+              {addingCard && renderLocalCardForm()}
+            </>
+          )}
         </div>
 
  {/* Close Left Column (lg:col-span-6) */}
