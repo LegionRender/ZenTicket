@@ -562,10 +562,10 @@ export default function ProfileForm({
       if (!response.ok || !data.checkoutUrl) {
         throw new Error(data.error || "Stripe no devolvió una sesión de registro.");
       }
-      toast.dismiss(toastId);
+      toast.removeToast(toastId);
       openOfficialCheckoutPopup(data.checkoutUrl, "Stripe");
     } catch (error: any) {
-      toast.dismiss(toastId);
+      toast.removeToast(toastId);
       toast.error(error.message || "No se pudo iniciar el registro con Stripe.");
     } finally {
       setIsAddingCardStripe(false);
@@ -746,10 +746,10 @@ export default function ProfileForm({
       setUseAsDefault(true);
       setAddingCard(false);
 
-      toast.dismiss(toastId);
+      toast.removeToast(toastId);
       toast.success("Tarjeta guardada y vinculada exitosamente.", "Método de pago listo");
     } catch (err: any) {
-      toast.dismiss(toastId);
+      toast.removeToast(toastId);
       toast.error(err.message || "Ocurrió un error al guardar la tarjeta.");
     } finally {
       setIsSavingCard(false);
