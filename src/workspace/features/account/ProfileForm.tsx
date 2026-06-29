@@ -357,7 +357,7 @@ export default function ProfileForm({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: initialProfile?.userId || "guest",
+          userId: resolvedUserId || "guest",
           planId: checkoutPlan,
           autoRenew: autoRenewChoice,
           payerEmail: correoPago || correoRecepcion || correoElectronico || auth.currentUser?.email || currentUserEmail || undefined
@@ -1497,7 +1497,7 @@ export default function ProfileForm({
                 // Instantly save to Firebase for real tests
                 try {
                   await onSave({
-                    userId: initialProfile?.userId || "guest",
+                    userId: resolvedUserId || "guest",
                     rfc: rfc || initialProfile?.rfc || "",
                     razonSocial: razonSocial || initialProfile?.razonSocial || "",
                     regimenFiscal: regimenFiscal || initialProfile?.regimenFiscal || "",
@@ -1573,7 +1573,7 @@ export default function ProfileForm({
             setIsProcessingPayment(true);
             try {
               await onSave({
-                userId: initialProfile?.userId || "guest",
+                userId: resolvedUserId || "guest",
                 rfc: rfc || "CABE850101ABC",
                 razonSocial: razonSocial.trim().toUpperCase(),
                 regimenFiscal,
@@ -2159,7 +2159,7 @@ export default function ProfileForm({
 
     try {
       await onSave({
-        userId: initialProfile?.userId || "guest",
+        userId: resolvedUserId || "guest",
         rfc: cleanedRFC,
         razonSocial: razonSocial.trim().toUpperCase(),
         regimenFiscal,
@@ -2213,7 +2213,7 @@ export default function ProfileForm({
 
     try {
       await onSave({
-        userId: initialProfile?.userId || "guest",
+        userId: resolvedUserId || "guest",
         rfc: cleanedRFC,
         razonSocial: razonSocial.trim().toUpperCase(),
         regimenFiscal,

@@ -1418,13 +1418,11 @@ export const Dashboard = () => {
                       }`}
                     >
                       {isHighlighted && !isDisabled && (
-                        <motion.div
-                          layoutId="desktop-sidebar-nav-pill"
+                        <div
                           className="absolute inset-0 zt-btn-primary -z-10 rounded-xl"
-                          transition={{ type: "spring", stiffness: 350, damping: 30 }}
                         />
                       )}
-                      <span className={`transition-transform duration-150 relative z-10 ${isHighlighted && !isDisabled ? "text-white scale-110" : "text-slate-400 group-hover:scale-110"}`}>
+                      <span className={`transition-colors duration-150 relative z-10 ${isHighlighted && !isDisabled ? "text-white" : "text-slate-400"}`}>
                         {item.icon}
                       </span>
                       <span className="relative z-10">{item.label}</span>
