@@ -34,4 +34,4 @@ npm run build
 npx firebase-tools deploy --only functions,hosting,firestore:rules
 ```
 
-After deployment, `https://<your-domain>/api/tickets/analyze` is served by the backend function and uses provider failover for real OCR. Failed OCR attempts are recorded in `ocr_jobs`, queued in `ocr_retry_queue`, and surfaced to admins through `ocr_alerts`.
+After deployment, `https://factubolt.web.app/api/tickets/analyze` is served by the backend function and uses provider failover for real OCR. Failed OCR attempts are recorded in `ocr_jobs`, queued in `ocr_retry_queue`, and surfaced to admins through `ocr_alerts`.
