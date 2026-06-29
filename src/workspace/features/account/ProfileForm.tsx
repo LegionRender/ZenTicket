@@ -1694,20 +1694,91 @@ export default function ProfileForm({
   };
 
   const renderNormalSection = () => {
-    return (
-      <>
-        {addingCard && renderAddingCardForm()}
+    if (cards.length === 0) {
+      return (
+        <div className="bg-white dark:bg-[#0d1225]/40 border border-slate-200/50 dark:border-slate-800/60 rounded-3xl p-6 text-center text-xs text-slate-400 font-semibold shadow-[0_4px_20px_rgba(15,23,42,0.02)] select-none">
+          No tienes tarjetas dadas de alta. Agrega una arriba para realizar compras.
+        </div>
+      );
+    }
 
-        <div className="bg-white dark:bg-[#0d1225]/40 border border-slate-200/50 dark:border-slate-800/60 rounded-3xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800/40 shadow-[0_4px_20px_rgba(15,23,42,0.02)]">
-          {cards.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-400 font-semibold">
-              No tienes tarjetas dadas de alta. Agrega una arriba para realizar compras.
-            </div>
-          ) : (
-            cards.map((card) => {
-              const isDefault = card.isDefault;
-              return (
-                <div key={card.id} className="flex items-center justify-between p-4.5 hover:bg-slate-50/40 dark:hover:bg-slate-800/30 transition">
+    const currentPlan = initialProfile?.plan || "gratuito";
+
+    return (
+      <div className="space-y-4">
+        {cards.map((card) => {
+          const isDefault = card.isDefault;
+          return (
+            <div 
+              key={card.id} 
+              className={`border rounded-3xl p-5 relative space-y-4 text-left transition-all ${
+                isDefault 
+                  ? "border-[#0B53F4]/40 bg-[#070b19]/90 shadow-[0_10px_30px_rgba(11,83,244,0.04)]" 
+                  : "border-slate-200 bg-white dark:border-slate-800/60 dark:bg-[#0d1225]/20"
+              }`}
+            >
+              {/* Header row */}
+              <div className="flex items-center justify-between select-none">
+                <span className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                  {isDefault ? "Método principal" : "Método adicional"}
+                </span>
+                {isDefault && (
+                  <span className="text-[9px] font-black bg-[#0B53F4]/10 text-[#0B53F4] border border-[#0B53F4]/20 px-2.5 py-1 rounded-lg">
+                    Predeterminada
+                  </span>
+                )}
+              </div>
+
+              {/* Card visual block & details */}
+              <div className="flex flex-col sm:flex-row gap-5 items-start sm:items-center justify-between">
+                {/* Credit Card Mockup */}
+                <div className="w-56 h-32 rounded-2xl bg-gradient-to-br from-[#0c1a30] to-[#040915] border border-slate-800 p-4 flex flex-col justify-between shadow-md shrink-0 select-none">
+                  <div className="flex justify-between items-start">
+                    <span className="font-extrabold text-sm text-white italic tracking-wider">
+                      {card.brand || "VISA"}
+                    </span>
+                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">
+                      stripe
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-mono text-base text-white tracking-widest block py-2">
+                      •••• •••• •••• {card.last4}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9px] font-mono text-slate-400">
+                      Vence {card.expiry}
+                    </span>
+                    <span className="text-[8.5px] font-bold text-slate-400 uppercase tracking-wide truncate max-w-[100px]">
+                      {card.holderName}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Sincronizada con Stripe Info */}
+                <div className="flex items-start gap-2.5 text-left flex-grow">
+                  <div className="w-8 h-8 rounded-full bg-[#EBF1FF] flex items-center justify-center text-[#0B53F4] shrink-0">
+                    <CreditCard className="w-4.5 h-4.5" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-black text-slate-300 block">Sincronizada con Stripe</span>
+                    <span className="text-[10px] text-slate-450 font-bold block mt-1 leading-normal">
+                      Vinculada a tu cuenta para pagos automáticos.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Row: default status pill & action buttons */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/40">
+                {/* Green confirmation pill */}
+                {isDefault ? (
+                  <div className="flex items-center gap-1.5 bg-emerald-950/20 text-emerald-500 border border-emerald-900/40 px-3.5 py-2 rounded-xl text-[10.5px] font-bold select-none">
+                    <Check className="w-3.5 h-3.5 text-emerald-500 stroke-[3]" />
+                    <span>Esta tarjeta se usará para tus pagos.</span>
+                  </div>
+                ) : (
                   <button
                     type="button"
                     onClick={async () => {
@@ -1716,7 +1787,7 @@ export default function ProfileForm({
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
-                            userId: initialProfile?.userId || auth.currentUser?.uid || "guest",
+                            userId: initialProfile?.id || initialProfile?.userId || auth.currentUser?.uid || "guest",
                             paymentMethodId: card.id
                           })
                         });
@@ -1731,136 +1802,58 @@ export default function ProfileForm({
                         toast.error("Ocurrió un error al predeterminar tu tarjeta.");
                       }
                     }}
-                    className="flex items-center gap-3.5 flex-1 text-left cursor-pointer hover:opacity-85 transition bg-transparent border-none outline-none p-0 mr-4"
-                    title="Haz click para establecer como predeterminada"
+                    className="text-xs font-bold text-[#0B53F4] hover:underline bg-transparent border-none outline-none cursor-pointer"
                   >
-                    {/* Visual Brand Block */}
-                    {renderVisualBrandBlock(card, "md")}
+                    Establecer como predeterminada
+                  </button>
+                )}
 
-                    <div className="text-left leading-none font-sans">
-                      <span className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                        **** {card.last4} 
-                      </span>
-                      <span className="text-[10px] text-slate-400 mt-1.5 block font-mono font-medium">Vence: {card.expiry} | {card.holderName}</span>
-                    </div>
+                {/* Right side actions: delete & pay now */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(getApiUrl("/api/billing/payment-methods/delete"), {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            userId: initialProfile?.id || initialProfile?.userId || auth.currentUser?.uid || "guest",
+                            paymentMethodId: card.id
+                          })
+                        });
+                        if (res.ok) {
+                          const data = await res.json();
+                          setCards(data.paymentCards);
+                          toast.success("Método de pago eliminado con éxito.", "Tarjeta Eliminada");
+                        } else {
+                          throw new Error("API error");
+                        }
+                      } catch (err) {
+                        toast.error("Ocurrió un error al eliminar tu tarjeta.");
+                      }
+                    }}
+                    className="flex items-center gap-1.5 border border-rose-950/30 hover:bg-rose-950/10 text-rose-500 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Eliminar</span>
                   </button>
 
-                  <div className="flex items-center gap-2">
-                    {isDefault ? (
-                      <span className="text-emerald-600 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 p-1.5 rounded-lg flex items-center justify-center shadow-3xs" title="Predeterminado">
-                        <Check className="w-4 h-4 stroke-[3.5]" />
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            const res = await fetch(getApiUrl("/api/billing/payment-methods/set-default"), {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                userId: initialProfile?.userId || auth.currentUser?.uid || "guest",
-                                paymentMethodId: card.id
-                              })
-                            });
-                            if (res.ok) {
-                              const data = await res.json();
-                              setCards(data.paymentCards);
-                              toast.success("Se ha cambiado tu tarjeta predeterminada.", "Tarjeta Actualizada");
-                            } else {
-                              throw new Error("API error");
-                            }
-                          } catch (err) {
-                            toast.error("Ocurrió un error al predeterminar tu tarjeta.");
-                          }
-                        }}
-                        className="text-slate-350 dark:text-slate-500 hover:text-[#0B53F4] transition p-1.5 rounded-lg bg-transparent border-none outline-none cursor-pointer"
-                        title="Establecer como predeterminada"
-                      >
-                        <div className="w-4.5 h-4.5 rounded-full border border-slate-300 dark:border-slate-700" />
-                      </button>
-                    )}
-
-                    <button 
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          const res = await fetch(getApiUrl("/api/billing/payment-methods/delete"), {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              userId: initialProfile?.userId || auth.currentUser?.uid || "guest",
-                              paymentMethodId: card.id
-                            })
-                          });
-                          if (res.ok) {
-                            const data = await res.json();
-                            setCards(data.paymentCards);
-                            toast.success("Método de pago eliminado con éxito.", "Tarjeta Eliminada");
-                          } else {
-                            throw new Error("API error");
-                          }
-                        } catch (err) {
-                          toast.error("Ocurrió un error al eliminar tu tarjeta.");
-                        }
-                      }}
-                      className="text-slate-405 dark:text-slate-500 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition p-1.5 rounded-lg bg-transparent border-none outline-none cursor-pointer"
-                      title="Eliminar método de pago"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCheckoutPlanType(currentPlan || "brisa");
+                    }}
+                    className="bg-[#0B53F4] hover:bg-[#0747D1] text-white px-5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer active:scale-98"
+                  >
+                    Pagar ahora
+                  </button>
                 </div>
-              );
-            })
-          )}
-        </div>
-          {/* Correo para Cuentas de Pago */}
-          <div className="space-y-1 bg-white border border-slate-200/60 rounded-2xl p-4 mt-4 text-left">
-            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-              Correo para Cuentas de Pago (Stripe/PayPal/Mercado Pago)
-            </label>
-            <div className="flex gap-2 mt-1.5">
-              <input
-                type="email"
-                value={correoPago}
-                onChange={(e) => setCorreoPago(e.target.value)}
-                placeholder="Ej. mi-cuenta-de-pago@email.com"
-                className="flex-grow text-xs font-semibold bg-[#F8F9FE] border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-xl px-3.5 py-2.5 text-slate-800 focus:outline-none transition-all placeholder-slate-400"
-              />
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!correoPago.trim()) {
-                    toast.error("El correo no puede estar vacío.");
-                    return;
-                  }
-                  try {
-                    const trimmedEmail = correoPago.trim();
-                    await onSave({
-                      ...initialProfile,
-                      correoPago: trimmedEmail
-                    });
-                    
-                    setCorreoPago(trimmedEmail);
-                    if (!selectedCardForPlan && cards.length > 0) {
-                      setSelectedCardForPlan(cards.find(card => card.isDefault)?.id || cards[0].id);
-                    }
-                    toast.success("Correo guardado para Stripe Checkout y Stripe Link.", "Correo actualizado");
-                  } catch (e) {
-                    toast.error("No se pudo vincular el correo de pagos.");
-                  }
-                }}
-                className="bg-[#0B53F4] hover:bg-[#0747D1] text-white text-[11px] font-black px-4 py-2.5 rounded-xl transition cursor-pointer shrink-0 active:scale-95"
-              >
-                Guardar
-              </button>
+              </div>
             </div>
-            <p className="text-[10px] text-slate-400 mt-1 ml-1 leading-normal">
-              Vincula automáticamente las tarjetas predeterminadas y pre-llena tus datos en las pasarelas al pagar.
-            </p>
-          </div>
-      </>
+          );
+        })}
+      </div>
     );
   };
 
@@ -3708,24 +3701,29 @@ export default function ProfileForm({
 
         {/* 3. MÉTODOS DE PAGO */}
         <div className="space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+          <div className="flex items-center justify-between select-none">
+            <span className="text-[11px] font-extrabold text-[#0B53F4]/80 uppercase tracking-widest font-display">
               Métodos de pago
             </span>
-            {checkoutPlanType === null && (
-              <button 
-                type="button"
-                onClick={() => setAddingCard(true)}
-                className="bg-[#ebf1ff] hover:bg-[#dee8ff] text-[#0B53F4] text-xs font-bold px-4 py-2 rounded-xl transition active:scale-[0.98] cursor-pointer"
-              >
-                + Agregar otra tarjeta
-              </button>
-            )}
+            <span className="flex items-center gap-1 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[8.5px] uppercase font-black px-2 py-0.5 rounded-full tracking-wider shadow-xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Stripe vinculado
+            </span>
           </div>
 
           {checkoutPlanType !== null ? renderCheckoutSection() : (
             <>
               {renderNormalSection()}
+              {checkoutPlanType === null && !addingCard && cards.length > 0 && (
+                <div className="flex justify-end pt-2 select-none">
+                  <button 
+                    type="button"
+                    onClick={() => setAddingCard(true)}
+                    className="bg-[#0B53F4] hover:bg-[#0747D1] text-white text-xs font-black px-5 py-2.5 rounded-xl transition active:scale-[0.98] cursor-pointer shadow-sm shadow-[#0B53F4]/10"
+                  >
+                    + Agregar otra tarjeta
+                  </button>
+                </div>
+              )}
               {addingCard && renderLocalCardForm()}
             </>
           )}
