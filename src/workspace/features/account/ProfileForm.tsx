@@ -1174,24 +1174,7 @@ export default function ProfileForm({
     }
   }, [currentPlan, isPlanExpired, isMonthlyQuotaExhausted, checkoutPlanType]);
 
-  React.useEffect(() => {
-    console.log("=== PROFILE BILLING DEBUG ===");
-    console.log("Current Plan:", currentPlan);
-    console.log("Payment Status:", initialProfile?.paymentStatus);
-    console.log("Plan Start Date:", initialProfile?.planStartDate);
-    console.log("Is Plan Expired:", isPlanExpired);
-    console.log("Invoices Used (Cycle):", cycleInvoicesCount, "Limit:", currentPlanLimit);
-    console.log("Is Quota Exhausted:", isMonthlyQuotaExhausted);
-    console.log("Has Active Paid Plan:", hasActivePaidPlan);
-    console.log("Checkout Plan Type:", checkoutPlanType);
-    console.log("Is Paying Same Active Plan:", isPayingSameActivePlan);
-    console.log("Should Disable Pay Button:", shouldDisablePayButton);
-    
-    fetchWithAuth("/api/billing/debug-user-profile")
-      .then(res => res.json())
-      .then(data => console.log("DEBUG REST PROFILE:", data))
-      .catch(err => console.error("DEBUG REST PROFILE ERROR:", err));
-  }, [initialProfile, currentPlan, hasActivePaidPlan, checkoutPlanType, isPlanExpired, isMonthlyQuotaExhausted, isPayingSameActivePlan, shouldDisablePayButton]);
+
   const getPlanDescription = (plan?: string) => {
     if (plan === "brisa") return "Para personas que facturan algunos consumos al mes y quieren evitar hacerlo manualmente. Incluye 10 facturas generadas al mes, historial ampliado de tickets y soporte por email.";
     if (plan === "personal") return "Plan intermedio para profesionistas independientes que necesitan mayor volumen. Incluye 20 facturas generadas al mes, panel de gastos y soporte por email.";
@@ -1225,6 +1208,25 @@ export default function ProfileForm({
     !isMonthlyQuotaExhausted;
   const isPayingSameActivePlan = checkoutPlanType === currentPlan && hasActivePaidPlan;
   const shouldDisablePayButton = checkoutPlanType !== "gratuito" && isPayingSameActivePlan && !isMonthlyQuotaExhausted;
+
+  React.useEffect(() => {
+    console.log("=== PROFILE BILLING DEBUG ===");
+    console.log("Current Plan:", currentPlan);
+    console.log("Payment Status:", initialProfile?.paymentStatus);
+    console.log("Plan Start Date:", initialProfile?.planStartDate);
+    console.log("Is Plan Expired:", isPlanExpired);
+    console.log("Invoices Used (Cycle):", cycleInvoicesCount, "Limit:", currentPlanLimit);
+    console.log("Is Quota Exhausted:", isMonthlyQuotaExhausted);
+    console.log("Has Active Paid Plan:", hasActivePaidPlan);
+    console.log("Checkout Plan Type:", checkoutPlanType);
+    console.log("Is Paying Same Active Plan:", isPayingSameActivePlan);
+    console.log("Should Disable Pay Button:", shouldDisablePayButton);
+    
+    fetchWithAuth("/api/billing/debug-user-profile")
+      .then(res => res.json())
+      .then(data => console.log("DEBUG REST PROFILE:", data))
+      .catch(err => console.error("DEBUG REST PROFILE ERROR:", err));
+  }, [initialProfile, currentPlan, hasActivePaidPlan, checkoutPlanType, isPlanExpired, isMonthlyQuotaExhausted, isPayingSameActivePlan, shouldDisablePayButton]);
 
   const isProfileComplete = true; // No validation locks - the app is completely open for navigation and operation
 
