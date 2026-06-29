@@ -620,13 +620,13 @@ export default function TicketsListScreen({
                             -webkit-print-color-adjust: exact;
                             print-color-adjust: exact;
                           }
-                          .page-wrapper {
+                           .page-wrapper {
                             max-width: 800px;
                             margin: 0 auto;
                             background-color: #ffffff;
                             border: 1px solid #e2e8f0;
                             border-radius: 24px;
-                            padding: 35px;
+                            padding: 48px 35px 35px 35px;
                             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
                             position: relative;
                             overflow: hidden;
@@ -981,13 +981,16 @@ export default function TicketsListScreen({
                                 <p style="font-size: 11px; color: #475569; margin: 0;"><strong>RFC Emisor:</strong> ${rfcEmisorVal}</p>
                                 <p style="font-size: 11px; color: #475569; margin: 2px 0 0 0;"><strong>Régimen Fiscal Emisor:</strong> ${getRegimenLabel(activeInvoiceData.regimenFiscalEmisor || "601")}</p>
                               </div>
+                              
+                              <div style="margin-top: 15px; border-left: 2px solid #0072fc; padding-left: 10px; text-align: left;">
+                                <div class="invoice-meta-item" style="margin: 2px 0; font-size: 10px; text-align: left;">Fecha: <strong>${formattedDate}</strong></div>
+                                <div class="invoice-meta-item" style="margin: 2px 0; font-size: 10px; text-align: left;">Folio Fiscal (UUID): <strong style="word-break: break-all;">${uuidVal}</strong></div>
+                                <div class="invoice-meta-item" style="margin: 2px 0; font-size: 10px; text-align: left;">Lugar de Expedición: <strong>${lugarExpedicion}</strong></div>
+                              </div>
                             </div>
                             
-                            <div class="invoice-title-box" style="display: flex; flex-direction: column; align-items: flex-end;">
-                              <img src="${logoLight}" style="height: 48px; width: auto; margin-bottom: 12px; object-fit: contain;" alt="ZenTicket" />
-                              <div class="invoice-meta-item">Fecha: <strong>${formattedDate}</strong></div>
-                              <div class="invoice-meta-item">Folio Fiscal (UUID): <strong>${uuidVal}</strong></div>
-                              <div class="invoice-meta-item">Lugar de Expedición: <strong>${lugarExpedicion}</strong></div>
+                            <div class="invoice-title-box" style="display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-start; margin-top: 4px;">
+                              <img src="${logoLight}" style="height: 48px; width: auto; margin-bottom: 0; object-fit: contain;" alt="ZenTicket" />
                             </div>
                           </div>
                           
