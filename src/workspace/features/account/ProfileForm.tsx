@@ -104,9 +104,7 @@ const loadScript = (src: string): Promise<void> => {
 
 
 
-const digitalWallets = [
-  { id: "googlepay_wallet", name: "Google Pay", displayName: "Google Pay", logo: googlePayLogo, sub: "Billetera de Google" },
-];
+const digitalWallets: any[] = [];
 
 const fetchWithAuth = async (path: string, options: RequestInit = {}) => {
   const token = auth.currentUser ? await auth.currentUser.getIdToken() : "";
@@ -539,7 +537,7 @@ export default function ProfileForm({
         if (response.ok) {
           const data = await response.json();
           if (Array.isArray(data)) {
-            setCards(data);
+            setCards(deduplicateCards(data));
           }
         }
       } catch (err) {
@@ -689,7 +687,7 @@ export default function ProfileForm({
       }
 
       console.log("[Save Card Frontend] Vinculación completada con éxito. Actualizando tarjetas...");
-      setCards(resData.paymentCards || []);
+      setCards(deduplicateCards(resData.paymentCards || []));
       
       // Clear fields
       setNewCardNumber("");
@@ -737,6 +735,19 @@ export default function ProfileForm({
       console.error("[Stripe Setup] Error al iniciar setup:", error);
       toast.error(error.message || "No se pudo iniciar la conexión con Stripe.");
     }
+  };
+
+  const deduplicateCards = (data: PaymentCard[]): PaymentCard[] => {
+    const unique: PaymentCard[] = [];
+    const seen = new Set<string>();
+    for (const card of data) {
+      const key = `${card.brand || ""}-${card.last4 || ""}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(card);
+      }
+    }
+    return unique;
   };
 
   const renderLocalCardForm = () => {
@@ -1704,24 +1715,51 @@ export default function ProfileForm({
                       <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block truncate max-w-[200px]">{card.holderName}</span>
                     </div>
                     
-                    {isCheckoutMode ? (
-                      <div className="flex items-center gap-3 shrink-0">
-                        {card.expiryMonth && card.expiryYear && (
-                          <div className="text-right mr-1.5 hidden sm:block">
-                            <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Expira</span>
-                            <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block font-mono leading-none mt-0.5">{card.expiryMonth}/{card.expiryYear}</span>
-                          </div>
-                        )}
-                        {renderPayButtonInline()}
-                      </div>
-                    ) : (
-                      card.expiryMonth && card.expiryYear && (
-                        <div className="text-right">
+                    <div className="flex items-center gap-3 shrink-0 text-right select-none">
+                      {card.expiryMonth && card.expiryYear && (
+                        <div className="mr-1.5 hidden sm:block">
                           <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Expira</span>
-                          <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block font-mono">{card.expiryMonth}/{card.expiryYear}</span>
+                          <span className="text-[11.5px] font-extrabold text-slate-700 dark:text-slate-200 block font-mono leading-none mt-0.5">{card.expiryMonth}/{card.expiryYear}</span>
                         </div>
-                      )
-                    )}
+                      )}
+                      
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const confirmDelete = window.confirm("¿Estás seguro de que deseas eliminar este método de pago? Se desvinculará permanentemente de tu cuenta.");
+                          if (!confirmDelete) return;
+                          
+                          const toastId = toast.loading("Eliminando tarjeta...");
+                          try {
+                            const res = await fetchWithAuth("/api/billing/payment-methods/delete", {
+                              method: "POST",
+                              body: JSON.stringify({
+                                paymentMethodId: card.id
+                              })
+                            });
+                            if (res.ok) {
+                              const data = await res.json();
+                              setCards(deduplicateCards(data.paymentCards || []));
+                              setSelectedCardForPlan("");
+                              toast.removeToast(toastId);
+                              toast.success("Método de pago eliminado con éxito.", "Tarjeta Eliminada");
+                            } else {
+                              throw new Error("API error");
+                            }
+                          } catch (err) {
+                            toast.removeToast(toastId);
+                            toast.error("Ocurrió un error al eliminar tu tarjeta.");
+                          }
+                        }}
+                        className="flex items-center gap-1.5 border border-rose-350/40 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-500 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer font-black"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                        <span>Eliminar</span>
+                      </button>
+
+                      {isCheckoutMode && renderPayButtonInline()}
+                    </div>
                   </div>
                 </div>
               );
@@ -1914,7 +1952,7 @@ export default function ProfileForm({
                         });
                         if (res.ok) {
                           const data = await res.json();
-                          setCards(data.paymentCards);
+                          setCards(deduplicateCards(data.paymentCards || []));
                           toast.success("Se ha cambiado tu tarjeta predeterminada.", "Tarjeta Actualizada");
                         } else {
                           throw new Error("API error");
@@ -1943,7 +1981,7 @@ export default function ProfileForm({
                         });
                         if (res.ok) {
                           const data = await res.json();
-                          setCards(data.paymentCards);
+                          setCards(deduplicateCards(data.paymentCards || []));
                           toast.success("Método de pago eliminado con éxito.", "Tarjeta Eliminada");
                         } else {
                           throw new Error("API error");
