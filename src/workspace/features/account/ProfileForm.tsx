@@ -114,7 +114,6 @@ const fetchPayPalClientId = async (): Promise<string> => {
 };
 
 const digitalWallets = [
-  { id: "stripe_wallet", name: "Stripe", displayName: "Tarjeta (Stripe)", logo: stripeLogo, sub: "Pago seguro con tarjeta, Google Pay o Link" },
   { id: "paypal_wallet", name: "PayPal", displayName: "PayPal", logo: paypalLogo, sub: "Pago rápido y seguro" },
   { id: "mercadopago_wallet", name: "Mercado Pago", displayName: "Mercado Pago", logo: mercadoPagoLogo, sub: "Tu cuenta digital / Tarjetas" },
   { id: "googlepay_wallet", name: "Google Pay", displayName: "Google Pay", logo: googlePayLogo, sub: "Billetera de Google" },
@@ -957,7 +956,7 @@ export default function ProfileForm({
   const [selectedCardForPlan, setSelectedCardForPlan] = useState<string>(
     (initialProfile?.paymentCards || []).find(c => c.isDefault)?.id || 
     (initialProfile?.paymentCards || [])[0]?.id || 
-    "stripe_wallet"
+    "card_real_ricardo"
   );
   const [isAccordionExpanded, setIsAccordionExpanded] = React.useState(false);
 
@@ -3007,7 +3006,7 @@ export default function ProfileForm({
                     type="button"
                     onClick={() => {
                       setCheckoutPlanType("brisa");
-                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                      setSelectedCardForPlan(activeCards.find(c => c.isDefault)?.id || activeCards[0]?.id);
                     }}
                     className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
                       selectedPlan === "brisa"
@@ -3053,7 +3052,7 @@ export default function ProfileForm({
                     type="button"
                     onClick={() => {
                       setCheckoutPlanType("personal");
-                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                      setSelectedCardForPlan(activeCards.find(c => c.isDefault)?.id || activeCards[0]?.id);
                     }}
                     className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
                       selectedPlan === "personal"
@@ -3103,7 +3102,7 @@ export default function ProfileForm({
                     type="button"
                     onClick={() => {
                       setCheckoutPlanType("serenidad");
-                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                      setSelectedCardForPlan(activeCards.find(c => c.isDefault)?.id || activeCards[0]?.id);
                     }}
                     className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
                       selectedPlan === "serenidad"
@@ -3149,7 +3148,7 @@ export default function ProfileForm({
                     type="button"
                     onClick={() => {
                       setCheckoutPlanType("empresa");
-                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                      setSelectedCardForPlan(activeCards.find(c => c.isDefault)?.id || activeCards[0]?.id);
                     }}
                     className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
                       selectedPlan === "empresa"
@@ -3195,7 +3194,7 @@ export default function ProfileForm({
                     type="button"
                     onClick={() => {
                       setCheckoutPlanType("nirvana");
-                      setSelectedCardForPlan(cards.find(c => c.isDefault)?.id || cards[0]?.id || "stripe_wallet");
+                      setSelectedCardForPlan(activeCards.find(c => c.isDefault)?.id || activeCards[0]?.id);
                     }}
                     className={`w-full text-xs font-black py-3 rounded-xl transition cursor-pointer text-center active:scale-98 ${
                       selectedPlan === "nirvana"
