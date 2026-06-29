@@ -2169,7 +2169,7 @@ app.post("/api/billing/checkout/stripe", authenticateFirebaseToken, async (req: 
     const stripeCustomerId = await resolveStripeCustomerId(userId, email, emailVerified);
 
     const stripeParams = new URLSearchParams({
-      "automatic_payment_methods[enabled]": "true",
+      "payment_method_types[0]": "card",
       "line_items[0][price_data][currency]": "mxn",
       "line_items[0][price_data][product_data][name]": title,
       "line_items[0][price_data][unit_amount]": Math.round(price * 100).toString(),
