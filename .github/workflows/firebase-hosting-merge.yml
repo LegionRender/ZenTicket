@@ -22,10 +22,15 @@ jobs:
 
       - name: Deploy to Firebase Hosting
         run: |
-          npx firebase-tools deploy --only hosting --project factubolt --debug > firebase-debug.log 2>&1
-          EXIT_CODE=$?
-          if [ $EXIT_CODE -ne 0 ]; then
-            LOG_CONTENT=$(tail -n 60 firebase-debug.log | tr '\n' '\r' | sed 's/\r/%0A/g')
-            echo "::error::Deploy failed with exit code $EXIT_CODE.%0ALast logs:%0A$LOG_CONTENT"
-          fi
-          exit $EXIT_CODE
+          node -e "
+          const { spawnSync } = require('child_process');
+          const result = spawnSync('npx', ['firebase-tools', 'deploy', '--only', 'hosting', '--project', 'factubolt', '--debug'], { encoding: 'utf8', shell: true });
+          
+          if (result.status !== 0) {
+            const logs = (result.stdout || '') + '\n' + (result.stderr || '');
+            const lastLines = logs.split('\n').slice(-60).join('\n');
+            const sanitized = lastLines.replace(/\r/g, '').replace(/\n/g, '%0A').replace(/:/g, '%3A').replace(/,/g, '%2C');
+            console.log('::error::Deploy failed with exit code ' + result.status + '.%0ALast logs:%0A' + sanitized);
+            process.exit(result.status || 1);
+          }
+          "
