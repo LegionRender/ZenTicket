@@ -1972,8 +1972,7 @@ app.post("/api/billing/setup/stripe", authenticateFirebaseToken, async (req: any
       success_url: setupSuccessUrl,
       cancel_url: setupCancelUrl,
       "metadata[holderName]": holderName || "",
-      "metadata[bankName]": bankName || "",
-      "wallet_options[link][enabled]": "false"
+      "metadata[bankName]": bankName || ""
     });
     const setupResponse = await axios.post(
       "https://api.stripe.com/v1/checkout/sessions",
@@ -2179,8 +2178,7 @@ app.post("/api/billing/checkout/stripe", authenticateFirebaseToken, async (req: 
       "success_url": successUrl,
       "cancel_url": process.env.BILLING_FAILURE_URL || `${baseUrl}/billing-failure.html?status=failure`,
       "client_reference_id": `${userId}:${planId}`,
-      "payment_intent_data[setup_future_usage]": "off_session",
-      "wallet_options[link][enabled]": "false"
+      "payment_intent_data[setup_future_usage]": "off_session"
     });
     
     if (stripeCustomerId) {
