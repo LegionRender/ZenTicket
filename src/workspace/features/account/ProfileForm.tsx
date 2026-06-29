@@ -577,7 +577,27 @@ export default function ProfileForm({
         const response = await fetch(getApiUrl(`/api/billing/payment-methods/${resolvedUserId}`));
         if (response.ok) {
           const data = await response.json();
-          setCards(data);
+          if (Array.isArray(data) && data.length > 0) {
+            setCards(data);
+          } else {
+            if (initialProfile?.paymentCards) {
+              const filtered = initialProfile.paymentCards.filter(
+                (card) =>
+                  card.last4 !== "Cuenta Vinculada" &&
+                  (card.stripePaymentMethodId || card.id)
+              );
+              const unique: PaymentCard[] = [];
+              const seen = new Set<string>();
+              for (const card of filtered) {
+                const key = `${card.brand}-${card.last4}-${card.expiry}`;
+                if (!seen.has(key)) {
+                  seen.add(key);
+                  unique.push(card);
+                }
+              }
+              setCards(unique);
+            }
+          }
         }
       } catch (err) {
         console.warn("Could not load Stripe payment methods:", err);
