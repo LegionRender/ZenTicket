@@ -104,6 +104,19 @@ const loadScript = (src: string): Promise<void> => {
 
 
 
+const parseFirestoreDate = (val: any): Date => {
+  if (!val) return new Date();
+  if (val instanceof Date) return val;
+  if (typeof val === "string") {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? new Date() : d;
+  }
+  if (typeof val === "number") return new Date(val);
+  if (val.seconds) return new Date(val.seconds * 1000);
+  if (typeof val.toDate === "function") return val.toDate();
+  return new Date();
+};
+
 const digitalWallets: any[] = [];
 
 const fetchWithAuth = async (path: string, options: RequestInit = {}) => {
@@ -910,8 +923,7 @@ export default function ProfileForm({
     const paymentStatus = initialProfile?.paymentStatus;
     const hasActivePaidPlan = currentPlan !== "gratuito" && (paymentStatus === "paid" || paymentStatus === "subscription_active" || paymentStatus === "active");
 
-    const planStartDateStr = initialProfile?.planStartDate;
-    const planStartDate = planStartDateStr ? new Date(planStartDateStr) : null;
+    const planStartDate = initialProfile?.planStartDate ? parseFirestoreDate(initialProfile.planStartDate) : null;
     const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
     const isPlanExpired = planStartDate ? (Date.now() - planStartDate.getTime()) >= oneMonthMs : false;
 
@@ -1133,8 +1145,7 @@ export default function ProfileForm({
   const [selectedDetailsCard, setSelectedDetailsCard] = useState<PaymentCard | null>(null);
 
   // Invoices cycle calculation
-  const planStartDateStr = initialProfile?.planStartDate || new Date().toISOString();
-  const planStartDate = new Date(planStartDateStr);
+  const planStartDate = parseFirestoreDate(initialProfile?.planStartDate);
   const cycleInvoices = invoices.filter(inv => {
     if (!inv.createdAt) return false;
     return new Date(inv.createdAt) >= planStartDate;
@@ -1150,7 +1161,7 @@ export default function ProfileForm({
 
   const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
   const isPlanExpired = initialProfile?.planStartDate
-    ? (Date.now() - new Date(initialProfile.planStartDate).getTime()) >= oneMonthMs
+    ? (Date.now() - parseFirestoreDate(initialProfile.planStartDate).getTime()) >= oneMonthMs
     : false;
   const isMonthlyQuotaExhausted = currentPlan !== "gratuito" && cycleInvoicesCount >= currentPlanLimit;
 
