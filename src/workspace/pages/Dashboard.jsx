@@ -1151,6 +1151,16 @@ export const Dashboard = () => {
     setLearningProgress(0);
     setLearningStatus("Iniciando motor cognitivo SAT...");
 
+    const trainingDocRef = doc(collection(db, "automation_trainings"));
+    await setDoc(trainingDocRef, {
+      userId: user.uid,
+      company: nombre.toUpperCase(),
+      progress: 0,
+      status: "Iniciando motor cognitivo SAT...",
+      userEmail: user?.email || "usuario@mail.com",
+      createdAt: new Date().toISOString()
+    });
+
     const steps = [
       { progress: 10, status: "Evaluando estructura del portal web..." },
       { progress: 28, status: "Estructurando grafo de navegación Playwright..." },
@@ -1168,6 +1178,10 @@ export const Dashboard = () => {
         });
         setLearningProgress(step.progress);
         setLearningStatus(step.status);
+        await setDoc(trainingDocRef, {
+          progress: step.progress,
+          status: step.status
+        }, { merge: true });
       }
 
       const fields = [

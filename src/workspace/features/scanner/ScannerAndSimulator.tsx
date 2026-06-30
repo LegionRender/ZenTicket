@@ -452,7 +452,7 @@ export default function ScannerAndSimulator({
   };
 
   // Helper for ultra-robust connector matching and deduplication
-  const matchConnector = (tEmisorName: string, tEmisorRfc: string): Connector | null => {
+  const matchConnector = (tEmisorName: string, tEmisorRfc: string, category?: string): Connector | null => {
     const cleanStr = (s: string) => 
       (s || "")
        .toLowerCase()
@@ -465,19 +465,38 @@ export default function ScannerAndSimulator({
     const tNombre = cleanStr(tEmisorName || "");
 
     const found = connectors.find((c) => {
+      // 1. Match by RFC
       const cRfc = (c.rfc || "").toLowerCase().trim();
       if (tRfc && cRfc && tRfc === cRfc) return true;
 
+      // 2. Match by exact or normalized name
       const cNombre = cleanStr(c.nombre || "");
-      if (!tNombre || !cNombre) return false;
+      if (tNombre && cNombre && (tNombre.includes(cNombre) || cNombre.includes(tNombre))) return true;
 
-      // Check if one contains the other
-      if (tNombre.includes(cNombre) || cNombre.includes(tNombre)) return true;
+      // 3. Match by aliases
+      if (c.aliases && c.aliases.length > 0) {
+        const matchingAlias = c.aliases.find(alias => {
+          const cleanAlias = cleanStr(alias);
+          return tNombre && cleanAlias && (tNombre.includes(cleanAlias) || cleanAlias.includes(tNombre));
+        });
+        if (matchingAlias) return true;
+      }
 
-      // Token word-matching: check if they share a significant word
-      const tWords = tNombre.split(/\s+/).filter(w => w.length > 2);
-      const cWords = cNombre.split(/\s+/).filter(w => w.length > 2);
-      return tWords.some(w => cWords.includes(w));
+      // 4. Match by Category (if provided)
+      if (category && c.nombre && getConnectorCategory(c.nombre) === category) {
+        const tWords = tNombre.split(/\s+/).filter(w => w.length > 2);
+        const cWords = cNombre.split(/\s+/).filter(w => w.length > 2);
+        if (tWords.some(w => cWords.includes(w))) return true;
+      }
+
+      // 5. Token word-matching
+      if (tNombre && cNombre) {
+        const tWords = tNombre.split(/\s+/).filter(w => w.length > 2);
+        const cWords = cNombre.split(/\s+/).filter(w => w.length > 2);
+        return tWords.some(w => cWords.includes(w));
+      }
+
+      return false;
     });
 
     return found || null;

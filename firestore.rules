@@ -64,9 +64,9 @@ service cloud.firestore {
     // Automation Trainings rules
     // Path: automation_trainings/{trainingId}
     match /automation_trainings/{trainingId} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid) || resource.data.userId == "guest";
-      allow create: if isAdmin() || (isSignedIn() && request.resource.data.userId == request.auth.uid) || request.resource.data.userId == "guest";
-      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid) || resource.data.userId == "guest";
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.userId == "guest" || isAdmin());
       allow delete: if isAdmin();
     }
 
