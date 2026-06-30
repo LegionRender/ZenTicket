@@ -684,19 +684,10 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
     // Etapa 2: QR detection
     let qrDetected = false;
     let qrValue = "";
-    // Check if the prompt output contains SAT QR format
-    const qrRegex = /\bhttps:\/\/verificacfdi\.facturaelectronica\.sat\.gob\.mx\/default\.aspx\?id=([^&]+)&re=([^&]+)&rr=([^&]+)&tt=([^&\s]+)/i;
-    const qrMatch = qrRegex.exec(textResult) || (extractedData && (qrRegex.exec(extractedData.folio) || qrRegex.exec(extractedData.sucursal)));
-    let qrParsed = null;
-    if (qrMatch) {
+    let qrParsed = parseSatQrUrl(textResult) || (extractedData && (parseSatQrUrl(extractedData.folio) || parseSatQrUrl(extractedData.sucursal)));
+    if (qrParsed) {
       qrDetected = true;
-      qrValue = qrMatch[0];
-      qrParsed = {
-        uuid: qrMatch[1].trim(),
-        rfcEmisor: qrMatch[2].trim(),
-        rfcReceptor: qrMatch[3].trim(),
-        total: parseFloat(qrMatch[4].trim())
-      };
+      qrValue = `https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?id=${qrParsed.uuid}&re=${qrParsed.rfcEmisor}&rr=${qrParsed.rfcReceptor}&tt=${qrParsed.total}`;
       pipelineLogs.push("Etapa 2: Código QR SAT detectado en la imagen. Priorizando datos del QR sobre OCR.");
     } else {
       pipelineLogs.push("Etapa 2: Escaneando códigos de barras y QR... No se localizaron códigos legibles.");
@@ -1604,6 +1595,27 @@ app.post("/api/connectors/learn", async (req: Request, res: Response): Promise<v
   }
 });
 
+function parseSatQrUrl(text: string): { uuid: string; rfcEmisor: string; rfcReceptor: string; total: number } | null {
+  if (!text) return null;
+  const idMatch = /[?&]id=([^&]+)/i.exec(text);
+  const reMatch = /[?&]re=([^&]+)/i.exec(text);
+  const rrMatch = /[?&]rr=([^&]+)/i.exec(text);
+  const ttMatch = /[?&]tt=([^&]+)/i.exec(text);
+
+  if (!idMatch || !reMatch || !rrMatch || !ttMatch) return null;
+
+  const uuid = idMatch[1].trim();
+  const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  if (!uuidRegex.test(uuid)) return null;
+
+  return {
+    uuid,
+    rfcEmisor: reMatch[1].trim(),
+    rfcReceptor: rrMatch[1].trim(),
+    total: parseFloat(ttMatch[1].trim()) || 0
+  };
+}
+
 function validateXmlStructure(xmlContent: string): boolean {
   if (!xmlContent) return false;
   const hasComprobante = /<cfdi:Comprobante\b/i.test(xmlContent) || /<Comprobante\b/i.test(xmlContent);
@@ -1645,6 +1657,9 @@ async function verifyCfdiWithSat(rfcEmisor: string, rfcReceptor: string, total: 
    </soapenv:Body>
 </soapenv:Envelope>`;
 
+  const maskUuid = (u: string) => u.length > 8 ? `${u.substring(0, 4)}...${u.substring(u.length - 4)}` : u;
+  const maskRfc = (r: string) => r.length > 6 ? `${r.substring(0, 3)}***${r.substring(r.length - 3)}` : r;
+
   try {
     const response = await fetch("https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc", {
       method: "POST",
@@ -1660,7 +1675,7 @@ async function verifyCfdiWithSat(rfcEmisor: string, rfcReceptor: string, total: 
     }
 
     const xmlResponse = await response.text();
-    console.log("[SAT Verify] Expression:", expression);
+    console.log(`[SAT Verify] Expression: ?re=${maskRfc(rfcEmisor)}&rr=${maskRfc(rfcReceptor)}&tt=${total}&id=${maskUuid(uuid)}`);
 
     const estadoMatch = /<a:Estado>([^<]+)<\/a:Estado>/i.exec(xmlResponse) || /<Estado>([^<]+)<\/Estado>/i.exec(xmlResponse);
     const codigoEstatusMatch = /<a:CodigoEstatus>([^<]+)<\/a:CodigoEstatus>/i.exec(xmlResponse) || /<CodigoEstatus>([^<]+)<\/CodigoEstatus>/i.exec(xmlResponse);
