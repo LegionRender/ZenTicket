@@ -1472,7 +1472,7 @@ export default function ScannerAndSimulator({
                   {/* Pendiente Card with live count */}
                   <div className="bg-white/10 backdrop-blur-xs border border-white/10 rounded-xl p-2.5 text-left">
                     <span className="text-[10px] text-white/70 font-semibold block uppercase tracking-wider">
-                      En Seguimiento
+                      En Proceso
                     </span>
                     <span className="text-base font-black text-white mt-0.5 block">
                       {tickets.filter(t => t.status !== "completed").length} {tickets.filter(t => t.status !== "completed").length === 1 ? "ticket" : "tickets"}
@@ -2897,8 +2897,8 @@ return list.map(n => {
           if (simulationProgress < 25) return "Estableciendo conexión segura y preparando lectura digital...";
           if (simulationProgress < 50) return "Analizando estructura visual del ticket y abstrayendo conceptos de consumo...";
           if (simulationProgress < 75) return "Validando la consistencia de importes, tasas de IVA y datos fiscales SAT...";
-          if (simulationProgress < 100) return "Enlazando con el PAC para timbrado oficial y generando archivos (PDF/XML)...";
-          return "¡Factura generada con éxito en el almacén digital ZenTicket!";
+          if (simulationProgress < 100) return "Sincronizando con el portal emisor para obtener y validar el CFDI (PDF/XML)...";
+          return "¡Factura obtenida y validada con éxito en tu buzón de ZenTicket!";
         };
 
         return (
@@ -3060,13 +3060,13 @@ return list.map(n => {
 
           <div className="text-center space-y-3">
             <h3 className="text-lg font-black text-slate-900 font-display tracking-tight uppercase">
-              Procesamiento en seguimiento
+              Facturación en proceso
             </h3>
             <p className="text-sm font-bold text-[#0B53F4]">
               El procesamiento continuará en segundo plano
             </p>
             <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed max-w-md mx-auto font-medium">
-              Estamos revisando la información del ticket. Puedes consultar su avance desde <span className="font-bold text-slate-800 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-150">Mis tickets &gt; En seguimiento</span>.
+              Estamos revisando la información del ticket. Puedes consultar su avance desde <span className="font-bold text-slate-800 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-150">Mis tickets &gt; En proceso</span>.
             </p>
           </div>
 
@@ -3081,7 +3081,7 @@ return list.map(n => {
               }}
               className="flex-1 py-3 px-4 bg-[#0B53F4] hover:bg-[#0941C4] text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-md shadow-blue-500/10 hover:shadow-lg transition cursor-pointer text-center"
             >
-              Ir a En seguimiento
+              Ir a En proceso
             </button>
             <button
               type="button"
@@ -3136,123 +3136,115 @@ return list.map(n => {
 
       {/* showOcrConfirmationModal Popup Overlay precisely as requested */}
       {showOcrConfirmationModal && extractedData && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0b0d19] rounded-3xl overflow-hidden max-w-lg w-full shadow-2xl border border-slate-200/80 dark:border-slate-800/80 flex flex-col max-h-[85vh] text-slate-800 dark:text-slate-200 animate-scale-up">
+        <div className="fixed inset-0 bg-[#070913]/90 backdrop-blur-md z-50 overflow-y-auto flex flex-col justify-end sm:justify-center p-0 sm:p-4">
+          <div className="bg-[#0f111a] sm:bg-[#121421] rounded-t-[28px] sm:rounded-[28px] overflow-hidden max-w-lg w-full shadow-2xl border-t sm:border border-slate-800/80 flex flex-col max-h-[90vh] sm:max-h-[85vh] text-slate-100 animate-scale-up my-0 sm:my-auto">
             {/* Header */}
-            <div className="p-6 border-b border-blue-50 dark:border-slate-800 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 dark:from-slate-900/40 dark:to-slate-900/60 flex items-center justify-between text-left">
+            <div className="p-6 border-b border-slate-800/60 flex items-center justify-between text-left">
               <div>
-                <span className="text-[10px] font-black text-[#0B53F4] dark:text-blue-400 tracking-widest block uppercase font-mono">Lectura Optimizada por IA</span>
-                <h3 className="text-base font-black text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                <h3 className="text-base font-black text-slate-100 flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-[#0B53F4] animate-pulse" />
-                  Corrobore los Datos Técnicos
+                  Revisa los datos del ticket
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowOcrConfirmationModal(false)}
-                className="text-slate-455 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700/80 p-1.5 rounded-full duration-150 cursor-pointer"
+                className="text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700/80 p-1.5 rounded-full duration-150 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Content */}
-            <div className="p-6 text-left space-y-5 overflow-y-auto flex-1 text-slate-800 dark:text-slate-200">
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
-                {extractedData.ocrFailed
-                  ? "El OCR no pudo leer con confianza este ticket. Por seguridad fiscal, dejamos los campos vacíos para que captures únicamente los datos reales impresos en el comprobante."
-                  : "Nuestra Inteligencia Artificial interpretó la transcripción del ticket. Por favor verifica que los datos primarios sean correctos antes de proceder."}
+            <div className="p-6 text-left space-y-5 overflow-y-auto flex-1 text-slate-100">
+              <p className="text-xs text-slate-400 font-semibold leading-relaxed">
+                Encontramos estos datos en tu ticket. Revísalos antes de continuar.
               </p>
 
               {/* Info Box */}
-              <div className="bg-slate-50 dark:bg-slate-900/30 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-4 space-y-3.5">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Establecimiento</span>
-                    <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200 uppercase block leading-tight mt-0.5">
+              <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 space-y-3.5">
+                <div className={canShowDebug ? "grid grid-cols-2 gap-4" : "grid grid-cols-1 sm:grid-cols-2 gap-4"}>
+                  <div className={canShowDebug ? "" : "sm:col-span-2"}>
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">Establecimiento</span>
+                    <span className="text-xs font-extrabold text-slate-200 uppercase block leading-tight mt-0.5">
                       {extractedData.nombreEmisor || "Establecimiento no identificado"}
                     </span>
                   </div>
 
-                  <div>
-                    <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">RFC Emisor</span>
-                    <span className="text-xs font-mono font-extrabold text-slate-800 dark:text-slate-200 block mt-0.5 select-all">
-                      {extractedData.rfcEmisor || "No detectado"}
-                    </span>
-                  </div>
+                  {canShowDebug && (
+                    <div>
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">RFC Emisor</span>
+                      <span className="text-xs font-mono font-extrabold text-slate-200 block mt-0.5 select-all">
+                        {extractedData.rfcEmisor || "No detectado"}
+                      </span>
+                    </div>
+                  )}
 
-                  <div className="border-t border-slate-205 dark:border-slate-800/60 pt-2.5">
-                    <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Fecha Compra</span>
-                    <span className="text-xs font-mono font-extrabold text-slate-800 dark:text-slate-200 block mt-0.5">
+                  <div className="border-t border-slate-800/60 pt-2.5">
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">Fecha Compra</span>
+                    <span className="text-xs font-mono font-extrabold text-slate-200 block mt-0.5">
                       {extractedData.fechaCompra || "No detectada"}
                     </span>
                   </div>
 
-                  <div className="border-t border-slate-205 dark:border-slate-800/60 pt-2.5">
-                    <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Total Pagado</span>
-                    <span className="text-xs font-mono font-extrabold text-[#0B53F4] dark:text-blue-400 block mt-0.5">
+                  <div className="border-t border-slate-800/60 pt-2.5">
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">Total Pagado</span>
+                    <span className="text-xs font-mono font-extrabold text-[#0B53F4] block mt-0.5">
                       ${extractedData.total ? extractedData.total.toFixed(2) : "0.00"} MXN
                     </span>
                   </div>
 
-                  <div className="border-t border-slate-205 dark:border-slate-800/60 pt-2.5 col-span-2">
-                    <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Folio del Ticket</span>
-                    <span className="text-xs font-mono font-extrabold text-slate-800 dark:text-slate-200 block mt-0.5 select-all">
+                  <div className="border-t border-slate-800/60 pt-2.5 col-span-1 sm:col-span-2">
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">Folio del Ticket</span>
+                    <span className="text-xs font-mono font-extrabold text-slate-200 block mt-0.5 select-all">
                       {extractedData.folio || "No detectado"}
                     </span>
                   </div>
                 </div>
               </div>
 
-              <div className={`flex items-start gap-3.5 p-4 border rounded-2xl ${
-                  extractedData.ocrFailed
-                    ? "bg-rose-500/5 border-rose-200 dark:border-rose-900/30 text-rose-800 dark:text-rose-300"
-                    : matchingConnector
-                      ? "bg-emerald-500/5 border-emerald-200 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-300"
-                      : "bg-[#FFFDF5] dark:bg-amber-950/10 border-amber-200 dark:border-amber-900/30 text-amber-900 dark:text-amber-300"
-                }`}>
-                  {extractedData.ocrFailed ? (
-                    <>
-                      <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center shrink-0 text-rose-600 mt-0.5">
-                        <AlertTriangle className="w-4.5 h-4.5" />
-                      </div>
-                      <div className="space-y-0.5">
-                        <span className="font-extrabold text-[10px] uppercase tracking-wider block text-rose-700">Captura manual requerida</span>
-                        <p className="font-medium text-[11px] text-rose-800 dark:text-rose-300 leading-relaxed">
-                          No se detectó información suficiente para facturar. Completa establecimiento, RFC, folio, fecha y total con los datos impresos en el ticket.
-                        </p>
-                      </div>
-                    </>
-                  ) : matchingConnector ? (
-                    <>
-                      <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-600 mt-0.5 animate-pulse">
-                        <CheckCircle className="w-4.5 h-4.5" />
-                      </div>
-                      <div className="space-y-0.5">
-                        <span className="font-extrabold text-[10px] uppercase tracking-wider block text-emerald-700">⚡ Facturación Automática Disponible</span>
-                        <p className="font-medium text-[11px] text-emerald-650 dark:text-emerald-400 leading-relaxed">
-                          Estamos revisando si este comercio puede procesarse automáticamente.
-                        </p>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 text-amber-600 mt-0.5 animate-pulse">
-                        <AlertTriangle className="w-4.5 h-4.5" />
-                      </div>
-                      <div className="space-y-0.5">
-                        <span className="font-extrabold text-[10px] uppercase tracking-wider block text-amber-800">⚠️ Comercio Sin Conector</span>
-                        <p className="font-medium text-[11px] text-amber-705 dark:text-amber-400 leading-relaxed">
-                          Este comercio aún requiere revisión manual. Puedes corregir los datos o enviar el ticket a revisión.
-                        </p>
-                      </div>
-                    </>
-                  )}
+              {/* Status Alert Box */}
+              {connectorStatus === "revisando" ? (
+                <div className="flex items-start gap-3.5 p-4 border border-blue-900/30 bg-blue-500/5 text-blue-300 rounded-2xl">
+                  <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0 text-blue-400 mt-0.5">
+                    <RefreshCw className="w-4.5 h-4.5 animate-spin" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <span className="font-extrabold text-[10px] uppercase tracking-wider block text-blue-400">Revisando disponibilidad</span>
+                    <p className="font-medium text-[11px] text-blue-300/90 leading-relaxed">
+                      Estamos comprobando si este comercio puede procesarse automáticamente.
+                    </p>
+                  </div>
                 </div>
+              ) : connectorStatus === "disponible" ? (
+                <div className="flex items-start gap-3.5 p-4 border border-emerald-900/30 bg-emerald-500/5 text-emerald-300 rounded-2xl">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-400 mt-0.5">
+                    <CheckCircle className="w-4.5 h-4.5" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <span className="font-extrabold text-[10px] uppercase tracking-wider block text-emerald-400">Proceso automático disponible</span>
+                    <p className="font-medium text-[11px] text-emerald-300/90 leading-relaxed">
+                      Puedes confirmar los datos para solicitar la factura en el portal del comercio.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-3.5 p-4 border border-amber-900/30 bg-amber-500/5 text-amber-300 rounded-2xl">
+                  <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 text-amber-400 mt-0.5">
+                    <AlertTriangle className="w-4.5 h-4.5" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <span className="font-extrabold text-[10px] uppercase tracking-wider block text-amber-400">Requiere revisión</span>
+                    <p className="font-medium text-[11px] text-amber-300/90 leading-relaxed">
+                      Este comercio aún requiere revisión manual. Puedes editar los datos o enviar el ticket a revisión.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Footer */}
-            <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 flex flex-col sm:flex-row gap-2 justify-end">
+            {/* Footer sticky bottom sheet */}
+            <div className="p-6 border-t border-slate-800 bg-[#161828]/50 flex flex-col sm:flex-row gap-2.5 justify-end pb-[calc(96px+env(safe-area-inset-bottom))] sm:pb-6">
               {getExistingInvoicedTicket(extractedData.rfcEmisor, extractedData.folio) && (
                 <button
                   type="button"
@@ -3271,11 +3263,23 @@ return list.map(n => {
                   setShowOcrConfirmationModal(false);
                   setIsEditing(true);
                 }}
-                className="text-xs font-bold text-slate-650 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-slate-350 dark:hover:border-slate-600 py-3 px-4 rounded-xl duration-150 cursor-pointer active:scale-98 text-center"
+                className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 border border-slate-700 hover:border-slate-600 py-3 px-4 rounded-xl duration-150 cursor-pointer active:scale-98 text-center"
               >
-                Corregir Datos del Ticket
+                Editar datos
               </button>
-              {matchingConnector ? (
+
+              {/* Show Confirmar y facturar visible but disabled during revisando, enabled during disponible, hidden during no_disponible */}
+              {connectorStatus === "revisando" && (
+                <button
+                  type="button"
+                  disabled={true}
+                  className="text-xs font-black uppercase tracking-wider text-white bg-[#0B53F4] opacity-55 py-3 px-6 rounded-xl duration-150 text-center"
+                >
+                  Confirmar y Facturar
+                </button>
+              )}
+
+              {connectorStatus === "disponible" && (
                 <button
                   type="button"
                   onClick={() => {
@@ -3283,11 +3287,13 @@ return list.map(n => {
                     handleTriggerAutomation();
                   }}
                   disabled={checkIsDataIncomplete(extractedData)}
-                  className="text-xs font-black uppercase tracking-wider text-white bg-[#0B53F4] hover:bg-blue-600 disabled:opacity-55 py-3 px-6 rounded-xl duration-150 cursor-pointer active:scale-98 text-center shadow-md shadow-[#0B53F4]/15"
+                  className="text-xs font-black uppercase tracking-wider text-white bg-[#0B53F4] hover:bg-blue-650 disabled:opacity-55 py-3 px-6 rounded-xl duration-150 cursor-pointer active:scale-98 text-center shadow-md shadow-[#0B53F4]/15"
                 >
                   Confirmar y Facturar
                 </button>
-              ) : (
+              )}
+
+              {connectorStatus === "no_disponible" && (
                 <button
                   type="button"
                   onClick={async () => {
@@ -3300,13 +3306,13 @@ return list.map(n => {
                   }}
                   className="text-xs font-black uppercase tracking-wider text-white bg-slate-600 hover:bg-slate-700 py-3 px-6 rounded-xl duration-150 cursor-pointer active:scale-98 text-center shadow-md shadow-slate-600/15"
                 >
-                  Enviar a Revisión Manual
+                  Enviar a Revisión
                 </button>
               )}
             </div>
           </div>
         </div>
-      )}
+            )}
     </div>
   );
 }

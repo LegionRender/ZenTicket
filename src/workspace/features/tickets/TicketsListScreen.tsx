@@ -1700,10 +1700,10 @@ export default function TicketsListScreen({
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer ${
             activeSubTab === "en-seguimiento"
               ? "bg-white text-[#0B53F4] shadow-[0_2px_10px_rgba(11,83,244,0.08)]"
-              : "text-slate-450 hover:text-slate-705"
+              : "text-slate-455 hover:text-slate-700"
           }`}
         >
-          En seguimiento
+          En proceso
         </button>
         
         <button
@@ -1712,10 +1712,10 @@ export default function TicketsListScreen({
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer ${
             activeSubTab === "cfdi-obtenidos"
               ? "bg-white text-slate-800 shadow-[0_2px_10px_rgba(15,23,42,0.06)]"
-              : "text-slate-450 hover:text-slate-705"
+              : "text-slate-455 hover:text-slate-700"
           }`}
         >
-          CFDI obtenidos
+          Listos
         </button>
       </div>
 
@@ -1726,7 +1726,7 @@ export default function TicketsListScreen({
         <div className={`space-y-4 lg:col-span-6 ${activeSubTab === "en-seguimiento" ? "block" : "hidden lg:block"}`}>
           <div className="flex items-center justify-between px-1 mb-2">
             <h2 className="font-display font-extrabold text-base text-slate-800 tracking-tight">
-              En seguimiento
+              En proceso
             </h2>
             <span className="bg-blue-100 text-blue-700 text-[10px] font-extrabold px-3 py-1 rounded-full uppercase leading-none tracking-wider font-display">
               {activeCount} ACTIVO{activeCount !== 1 ? "S" : ""}
@@ -1764,24 +1764,48 @@ export default function TicketsListScreen({
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                      <div className="flex items-center gap-3.5 min-w-0 w-full">
                         <div className={`w-10 h-10 ${brand.color} rounded-full flex items-center justify-center shrink-0`}>
                           <brand.IconComponent className="w-5 h-5 stroke-[2.2]" />
                         </div>
                         
-                        <div className="text-left leading-tight min-w-0">
-                          <span className="text-sm font-black text-slate-800 block truncate max-w-[170px] uppercase">
+                        <div className="text-left leading-tight min-w-0 flex-1">
+                          <span className="text-sm font-black text-slate-800 block truncate max-w-[220px] sm:max-w-[170px] uppercase">
                             {t.nombreEmisor || "Emisor"}
                           </span>
-                          <span className="text-[11px] text-slate-400 block mt-1 font-semibold">
-                            Ticket #{t.folio || "S/D"} • {t.fechaCompra || "S/F"}
-                          </span>
+                          
+                          {/* Mobile status badge directly below name */}
+                          <div className="sm:hidden mt-1.5 flex flex-wrap gap-1.5">
+                            {isNewlyAdded && (
+                              <span className="bg-[#EBF5FF] text-[#0B53F4] text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1 leading-none shadow-sm animate-pulse">
+                                <Sparkles className="w-2.5 h-2.5 fill-current" />
+                                RECIÉN AGREGADO
+                              </span>
+                            )}
+                            {t.status === "requires_manual_review" || t.status === "review" ? (
+                              <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
+                                Revisión Manual
+                              </span>
+                            ) : isFailed ? (
+                              <span className="bg-rose-100 text-rose-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
+                                Fallido
+                              </span>
+                            ) : t.status === "pending_portal_submission" || t.status === "submitted_to_merchant" ? (
+                              <span className="bg-blue-100 text-blue-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none font-bold">
+                                Facturando
+                              </span>
+                            ) : (
+                              <span className="bg-[#FEF3C7] text-[#D97706] text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
+                                Procesando
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
-                      {/* Highly polished active status state indicator badge with optional Recién Agregado flag */}
-                      <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      {/* Desktop only active status state indicator badge */}
+                      <div className="hidden sm:flex flex-col items-end gap-1.5 shrink-0">
                         {isNewlyAdded && (
                           <span className="bg-[#EBF5FF] text-[#0B53F4] text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1 leading-none shadow-sm animate-pulse">
                             <Sparkles className="w-2.5 h-2.5 fill-current" />
@@ -1808,6 +1832,13 @@ export default function TicketsListScreen({
                       </div>
                     </div>
 
+                    {/* Fila 2: Folio y fecha */}
+                    <div className="text-left pt-1 border-t border-slate-100/60 sm:border-t-0 sm:pt-0 sm:-mt-1">
+                      <span className="text-[11px] text-slate-500 block font-semibold font-mono">
+                        Ticket #{t.folio || "S/D"} • {t.fechaCompra || "S/F"}
+                      </span>
+                    </div>
+
                     {/* Escalation/Failure Reason Card Block */}
                     {(t.status === "review" || isFailed) && t.errorMsg && (
                       <div className={`text-[11px] p-3 rounded-2xl leading-relaxed font-sans ${
@@ -1829,12 +1860,12 @@ export default function TicketsListScreen({
                     <div className="border-t border-slate-100 my-0.5" />
 
                     {/* Lower cash amount indicator + interactive detail link */}
-                    <div className="flex justify-between items-center select-none pt-0.5">
-                      <span className="text-lg font-black text-slate-800 font-mono">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 select-none pt-0.5">
+                      <span className="text-lg font-black text-slate-800 font-mono text-left">
                         ${(t.total || 0).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
                         {/* Trash Delete Option for Users */}
                         {onDeleteTicket && (
                           ticketIdToDelete === t.id ? (
