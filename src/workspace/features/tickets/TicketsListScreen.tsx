@@ -608,9 +608,30 @@ export default function TicketsListScreen({
                             box-sizing: border-box;
                           }
                           @page {
-                            size: letter;
-                            margin: 10mm 15mm;
-                          }
+                             size: letter;
+                             margin: 0;
+                           }
+                           @media print {
+                             /* Hide browser default header (date/title) and footer (URL/pages) */
+                             @page {
+                               margin: 0;
+                             }
+                             body {
+                               margin: 0 !important;
+                               padding: 0 !important;
+                             }
+                             .page-wrapper {
+                               border: none !important;
+                               box-shadow: none !important;
+                               padding: 15mm 20mm !important;
+                               max-width: 100% !important;
+                               border-radius: 0 !important;
+                               margin: 0 !important;
+                               width: 100% !important;
+                               height: 100% !important;
+                               box-sizing: border-box !important;
+                             }
+                           }
                           body {
                             font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                             color: #1e293b;
@@ -626,20 +647,38 @@ export default function TicketsListScreen({
                             background-color: #ffffff;
                             border: 1px solid #e2e8f0;
                             border-radius: 24px;
-                            padding: 48px 35px 35px 35px;
+                            padding: 48px 45px 45px 45px;
                             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
                             position: relative;
                             overflow: hidden;
                           }
                           
                           .header-container {
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: flex-start;
-                            position: relative;
-                            z-index: 10;
-                            margin-bottom: 24px;
-                          }
+                             display: flex;
+                             flex-direction: column;
+                             justify-content: flex-start;
+                             align-items: flex-start;
+                             position: relative;
+                             z-index: 10;
+                             margin-bottom: 25px;
+                             width: 100%;
+                           }
+                           
+                           .header-logo-row {
+                             width: 100%;
+                             display: flex;
+                             justify-content: flex-start;
+                             align-items: center;
+                             margin-bottom: 30px;
+                           }
+
+                           .header-info-row {
+                             width: 100%;
+                             display: grid;
+                             grid-template-columns: 1fr 1fr;
+                             gap: 40px;
+                             align-items: flex-start;
+                           }
 
                           /* Logo and issuer section */
                           .issuer-box {
@@ -970,27 +1009,28 @@ export default function TicketsListScreen({
                             }
                           }
                         </style>
-                                     <div class="page-wrapper">
+                                      <div class="page-wrapper">
                           
                           <!-- Top Header info -->
                           <div class="header-container">
-                            <div class="issuer-box">
-                              <h1 style="color: #0072fc; font-size: 26px; font-weight: 900; text-transform: uppercase; margin: 0 0 6px 0; font-family: sans-serif; letter-spacing: 0.5px; line-height: 1;">FACTURA</h1>
-                              <div style="margin-top: 5px;">
-                                <h3 style="font-size: 13px; font-weight: 850; color: #0f172a; margin: 0 0 2px 0;">${emisorCorp}</h3>
+                            <div class="header-logo-row">
+                              <img src="${logoLight}" style="height: 52px; width: auto; object-fit: contain;" alt="ZenTicket" />
+                            </div>
+                            
+                            <div class="header-info-row">
+                              <!-- Left metadata column -->
+                              <div style="text-align: left;">
+                                <div class="invoice-meta-item" style="margin: 3px 0; font-size: 11px; text-align: left; color: #475569;">Fecha: <strong style="color: #0f172a;">${formattedDate}</strong></div>
+                                <div class="invoice-meta-item" style="margin: 3px 0; font-size: 11px; text-align: left; color: #475569;">Folio Fiscal (UUID): <strong style="color: #0f172a; word-break: break-all;">${uuidVal}</strong></div>
+                                <div class="invoice-meta-item" style="margin: 3px 0; font-size: 11px; text-align: left; color: #475569;">Lugar de Expedición: <strong style="color: #0f172a;">${lugarExpedicion}</strong></div>
+                              </div>
+                              
+                              <!-- Right emisor column -->
+                              <div class="issuer-box" style="text-align: left;">
+                                <h3 style="font-size: 13.5px; font-weight: 850; color: #0f172a; margin: 0 0 4px 0;">${emisorCorp}</h3>
                                 <p style="font-size: 11px; color: #475569; margin: 0;"><strong>RFC Emisor:</strong> ${rfcEmisorVal}</p>
                                 <p style="font-size: 11px; color: #475569; margin: 2px 0 0 0;"><strong>Régimen Fiscal Emisor:</strong> ${getRegimenLabel(activeInvoiceData.regimenFiscalEmisor || "601")}</p>
                               </div>
-                              
-                              <div style="margin-top: 15px; border-left: 2px solid #0072fc; padding-left: 10px; text-align: left;">
-                                <div class="invoice-meta-item" style="margin: 2px 0; font-size: 10px; text-align: left;">Fecha: <strong>${formattedDate}</strong></div>
-                                <div class="invoice-meta-item" style="margin: 2px 0; font-size: 10px; text-align: left;">Folio Fiscal (UUID): <strong style="word-break: break-all;">${uuidVal}</strong></div>
-                                <div class="invoice-meta-item" style="margin: 2px 0; font-size: 10px; text-align: left;">Lugar de Expedición: <strong>${lugarExpedicion}</strong></div>
-                              </div>
-                            </div>
-                            
-                            <div class="invoice-title-box" style="display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-start; margin-top: 4px;">
-                              <img src="${logoLight}" style="height: 48px; width: auto; margin-bottom: 0; object-fit: contain;" alt="ZenTicket" />
                             </div>
                           </div>
                           
