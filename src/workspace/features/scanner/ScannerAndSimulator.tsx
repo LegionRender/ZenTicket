@@ -48,7 +48,8 @@ export interface ReviewError {
     | "PORTAL_REQUIRES_LOGIN"
     | "PORTAL_REQUIRES_CAPTCHA"
     | "PORTAL_REQUIRES_EMAIL_VERIFICATION"
-    | "PORTAL_NO_DOWNLOAD_LINKS";
+    | "PORTAL_NO_DOWNLOAD_LINKS"
+    | "PORTAL_REJECTED_TICKET_DATA";
   reviewReasonMessage: string;
   lastAutomationStep: string;
   connectorAttempted: boolean;

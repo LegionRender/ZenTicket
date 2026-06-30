@@ -8,7 +8,7 @@ import { lockJob } from "./jobs/lockJob";
 import { executePortalMap } from "./executor/executePortalMap";
 import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiXml";
 import { validateSatStatus } from "./validators/validateSatStatus";
-import { createRunnerLog } from "./logging/createRunnerLog";
+import { createRunnerLog, setActiveJobContext } from "./logging/createRunnerLog";
 
 const workerId = `worker-node-${process.pid}`;
 const serviceAccountPath = path.join(__dirname, "../../serviceAccountKey.json");
@@ -36,6 +36,8 @@ async function processJob(jobId: string) {
   const ticketRef = db.collection("tickets").doc(ticketId);
   const jobRef = db.collection("invoice_jobs").doc(jobId);
   const bucket = getStorage().bucket();
+
+  setActiveJobContext(jobId, ticketId, lockedJob.connectorId, !!lockedJob.pilotMode, lockedJob.environment || null);
 
   let connector: any = null;
 
@@ -109,6 +111,7 @@ async function processJob(jobId: string) {
         });
 
         await createRunnerLog(jobId, ticketId, "WARNING", `Validación SAT indisponible en reintento ${attempts}/3. Reencolando para posterior consulta.`);
+        setActiveJobContext(null, null, null, false, null);
         return;
       }
 
@@ -155,6 +158,7 @@ async function processJob(jobId: string) {
       });
 
       await createRunnerLog(jobId, ticketId, "INFO", "Validación SAT tardía completada con éxito. Factura activada.");
+      setActiveJobContext(null, null, null, false, null);
       return;
     }
 
@@ -194,7 +198,13 @@ async function processJob(jobId: string) {
     );
 
     if (!result.success) {
-      throw { message: result.error || "Fallo en la navegación del portal.", code: result.errorCode || "UNKNOWN_RUNNER_ERROR" };
+      throw {
+        message: result.error || "Fallo en la navegación del portal.",
+        code: result.errorCode || "UNKNOWN_RUNNER_ERROR",
+        screenshotPath: result.screenshotPath,
+        stepIndex: result.stepIndex,
+        maskedReference: result.maskedReference
+      };
     }
 
     // 5. XML Structural validation
@@ -262,6 +272,7 @@ async function processJob(jobId: string) {
       });
 
       await createRunnerLog(jobId, ticketId, "WARNING", "Servicio del SAT no disponible. Job en espera de reintento.");
+      setActiveJobContext(null, null, null, false, null);
       return;
     }
 
@@ -308,32 +319,44 @@ async function processJob(jobId: string) {
     });
 
     await createRunnerLog(jobId, ticketId, "INFO", "Procesamiento y timbrado finalizado exitosamente.");
-
+    setActiveJobContext(null, null, null, false, null);
   } catch (err: any) {
     const errorCode = err.code || "UNKNOWN_RUNNER_ERROR";
     const errorMessage = err.message || "Error interno del runner.";
 
     await createRunnerLog(jobId, ticketId, "ERROR", `Procesamiento fallido: ${errorMessage} (Código: ${errorCode})`);
+    setActiveJobContext(null, null, null, false, null);
+
+    const isRejected = errorCode === "PORTAL_RETURNED_ERROR";
+    const finalJobStatus = isRejected ? "manual_review" : "failed";
+    const finalReviewReasonCode = isRejected ? "PORTAL_REJECTED_TICKET_DATA" : errorCode;
 
     await jobRef.update({
-      status: "failed",
+      status: finalJobStatus,
       lastError: errorMessage,
       lastErrorTime: new Date().toISOString(),
       attempts: FieldValue.increment(1),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      ...(err.screenshotPath && { screenshotPath: err.screenshotPath }),
+      ...(err.stepIndex !== undefined && { stepIndex: err.stepIndex }),
+      ...(err.maskedReference && { maskedReference: err.maskedReference })
     });
 
     await ticketRef.update({
       status: "requires_manual_review",
       errorMsg: errorMessage,
+      reviewReasonCode: finalReviewReasonCode,
       reviewError: {
-        reviewReasonCode: errorCode,
+        reviewReasonCode: finalReviewReasonCode,
         reviewReasonMessage: errorMessage,
         lastAutomationStep: "runner_processing",
         connectorAttempted: true,
         connectorId: lockedJob.connectorId,
         connectorName: connector?.nombre || null,
-        portalErrorMessage: errorMessage
+        portalErrorMessage: errorMessage,
+        ...(err.screenshotPath && { screenshotPath: err.screenshotPath }),
+        ...(err.stepIndex !== undefined && { stepIndex: err.stepIndex }),
+        ...(err.maskedReference && { maskedReference: err.maskedReference })
       },
       updatedAt: new Date().toISOString()
     });

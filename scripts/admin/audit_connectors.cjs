@@ -28,10 +28,10 @@ async function auditConnectors() {
     }
 
     console.log(`\nConectores encontrados: ${snapshot.size}\n`);
-    console.log("| ID | Nombre | RFC | Status | Prod Ready | Runner Avail | Fields Valid | Flow Valid |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- |");
+    console.log("| ID | Nombre | RFC | Status | Prod Ready | Runner Avail | Fields Valid | Flow Valid | Last Pilot Run | Last Pilot Result | Last Valid XML | Last SAT Status | Eligible For Production |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
 
-    snapshot.forEach(doc => {
+    for (const doc of snapshot.docs) {
       const data = doc.data();
       let fieldsValid = "No";
       try {
@@ -49,8 +49,37 @@ async function auditConnectors() {
         }
       } catch (e) {}
 
-      console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${data.status || "mock_only"} | ${data.isProductionReady || false} | ${data.runnerAvailable || false} | ${fieldsValid} | ${flowValid} |`);
-    });
+      // 1. Fetch portalMap
+      const pmSnap = await db.collection("portal_maps").where("connectorId", "==", doc.id).get();
+      const portalMapApproved = !pmSnap.empty && pmSnap.docs[0].data().isApproved === true;
+
+      // 2. Fetch pilot jobs and sort in memory
+      const jobsSnap = await db.collection("invoice_jobs")
+        .where("connectorId", "==", doc.id)
+        .where("pilotMode", "==", true)
+        .get();
+
+      let latestPilotJob = null;
+      if (!jobsSnap.empty) {
+        const jobs = [];
+        jobsSnap.forEach(jobDoc => {
+          jobs.push({ id: jobDoc.id, ...jobDoc.data() });
+        });
+        jobs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        latestPilotJob = jobs[0];
+      }
+
+      // 3. Map pilot values
+      const lastPilotRun = latestPilotJob ? new Date(latestPilotJob.createdAt).toLocaleString("es-MX") : "N/A";
+      const lastPilotResult = latestPilotJob ? latestPilotJob.status : "N/A";
+      const lastValidXml = (latestPilotJob && latestPilotJob.result) ? (latestPilotJob.result.uuid || "N/A") : "N/A";
+      const lastSatStatus = (latestPilotJob && latestPilotJob.result) ? (latestPilotJob.result.satStatus || "N/A") : "N/A";
+
+      // 4. Calculate Eligibility
+      const eligibleForProd = portalMapApproved && latestPilotJob && latestPilotJob.status === "succeeded" && latestPilotJob.result && latestPilotJob.result.satStatus === "valid" ? "Sí" : "No";
+
+      console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${data.status || "mock_only"} | ${data.isProductionReady || false} | ${data.runnerAvailable || false} | ${fieldsValid} | ${flowValid} | ${lastPilotRun} | ${lastPilotResult} | ${lastValidXml} | ${lastSatStatus} | ${eligibleForProd} |`);
+    }
   } catch (err) {
     console.error("Fallo al auditar conectores:", err.message);
   }

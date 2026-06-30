@@ -100,8 +100,28 @@ service cloud.firestore {
     // Invoice Jobs rules
     match /invoice_jobs/{jobId} {
       allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
+        && (
+          isAdmin() || (
+            !("pilotMode" in request.resource.data.keys()) &&
+            !("environment" in request.resource.data.keys()) &&
+            !("testRun" in request.resource.data.keys()) &&
+            !("triggeredBy" in request.resource.data.keys()) &&
+            !("triggeredAt" in request.resource.data.keys()) &&
+            !("connectorStatusAtRun" in request.resource.data.keys())
+          )
+        );
+      allow update: if isAdmin() || (
+        isSignedIn() && resource.data.userId == request.auth.uid
+        && (
+          !("pilotMode" in request.resource.data.keys()) &&
+          !("environment" in request.resource.data.keys()) &&
+          !("testRun" in request.resource.data.keys()) &&
+          !("triggeredBy" in request.resource.data.keys()) &&
+          !("triggeredAt" in request.resource.data.keys()) &&
+          !("connectorStatusAtRun" in request.resource.data.keys())
+        )
+      );
       allow delete: if isAdmin();
     }
 

@@ -13,6 +13,15 @@ export interface ExecutionResult {
   errorCode?: string;
   downloadedXmlPath?: string;
   downloadedPdfPath?: string;
+  screenshotPath?: string;
+  stepIndex?: number;
+  maskedReference?: string;
+}
+
+function maskString(str: string): string {
+  if (!str) return "";
+  if (str.length <= 6) return "***";
+  return str.substring(0, 3) + "*".repeat(str.length - 6) + str.substring(str.length - 3);
 }
 
 async function checkCaptcha(page: Page, captchaSelectors: string[]): Promise<boolean> {
@@ -63,6 +72,45 @@ async function checkPortalError(page: Page, errorSelectors: string[]): Promise<s
   return null;
 }
 
+async function waitForSelectorOrError(
+  page: Page,
+  selector: string,
+  iframeSelector: string | undefined,
+  captchaSelectors: string[],
+  errorSelectors: string[],
+  timeoutMs: number
+): Promise<void> {
+  const getLocator = (sel: string, iframeSel?: string) => {
+    if (iframeSel) return page.frameLocator(iframeSel).locator(sel);
+    return page.locator(sel);
+  };
+
+  const start = Date.now();
+  const targetLocator = getLocator(selector, iframeSelector);
+
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const count = await targetLocator.count();
+      if (count > 0 && await targetLocator.first().isVisible()) {
+        return;
+      }
+    } catch (e) {}
+
+    if (await checkCaptcha(page, captchaSelectors)) {
+      throw { message: "Se detectó un CAPTCHA en el portal del comercio.", code: "CAPTCHA_DETECTED" };
+    }
+
+    const portalError = await checkPortalError(page, errorSelectors);
+    if (portalError) {
+      throw { message: `Error devuelto por el portal: ${portalError}`, code: "PORTAL_RETURNED_ERROR" };
+    }
+
+    await page.waitForTimeout(400);
+  }
+
+  throw new Error(`Timeout de ${timeoutMs}ms excedido esperando al selector: ${selector}`);
+}
+
 export async function executePortalMap(
   jobId: string,
   ticketId: string,
@@ -108,6 +156,9 @@ export async function executePortalMap(
     return page.locator(selector);
   };
 
+  let lastScreenshotPath = "";
+  let currentStepIdx = 0;
+
   const uploadErrorScreenshot = async (reason: string) => {
     try {
       const screenshotPath = path.join(tmpDir, `error_${Date.now()}.png`);
@@ -118,6 +169,7 @@ export async function executePortalMap(
         destination: destPath,
         metadata: { contentType: "image/png" }
       });
+      lastScreenshotPath = destPath;
       await createRunnerLog(jobId, ticketId, "ERROR", `Captura de error guardada en Storage: ${destPath}`, { screenshotPath: destPath });
     } catch (e: any) {
       await createRunnerLog(jobId, ticketId, "WARNING", `Fallo al capturar/guardar captura de pantalla de error: ${e.message}`);
@@ -126,18 +178,33 @@ export async function executePortalMap(
 
   try {
     for (let i = 0; i < steps.length; i++) {
+      currentStepIdx = i;
       const step = steps[i];
-      await createRunnerLog(jobId, ticketId, "INFO", `Ejecutando paso ${i + 1}/${steps.length}: [${step.type}]`);
+      await createRunnerLog(jobId, ticketId, "INFO", `Ejecutando paso ${i + 1}/${steps.length}: [${step.type}]`, { stepIndex: i, stepType: step.type });
 
       // Pre-step Captcha and Portal Error checks
       if (await checkCaptcha(page, captchaSelectors)) {
         await uploadErrorScreenshot("CAPTCHA_DETECTED");
-        return { success: false, error: "Se detectó un CAPTCHA en el portal del comercio.", errorCode: "CAPTCHA_DETECTED" };
+        return {
+          success: false,
+          error: "Se detectó un CAPTCHA en el portal del comercio.",
+          errorCode: "CAPTCHA_DETECTED",
+          screenshotPath: lastScreenshotPath,
+          stepIndex: currentStepIdx,
+          maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
+        };
       }
       const portalError = await checkPortalError(page, errorSelectors);
       if (portalError) {
         await uploadErrorScreenshot("PORTAL_RETURNED_ERROR");
-        return { success: false, error: `Error devuelto por el portal: ${portalError}`, errorCode: "PORTAL_RETURNED_ERROR" };
+        return {
+          success: false,
+          error: `Error devuelto por el portal: ${portalError}`,
+          errorCode: "PORTAL_RETURNED_ERROR",
+          screenshotPath: lastScreenshotPath,
+          stepIndex: currentStepIdx,
+          maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
+        };
       }
 
       if (step.type === "goto") {
@@ -145,48 +212,47 @@ export async function executePortalMap(
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: step.timeout || 30000 });
       } else if (step.type === "fill") {
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
+        await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.waitFor({ state: "visible", timeout: step.timeout || 15000 });
         await locator.fill(value);
       } else if (step.type === "select") {
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
+        await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.waitFor({ state: "visible", timeout: step.timeout || 15000 });
         await locator.selectOption(value);
       } else if (step.type === "click") {
+        await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.waitFor({ state: "visible", timeout: step.timeout || 15000 });
         await locator.click();
       } else if (step.type === "check" || step.type === "radio") {
+        await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.waitFor({ state: "visible", timeout: step.timeout || 15000 });
         await locator.check();
       } else if (step.type === "waitForSelector") {
-        const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.waitFor({ state: "visible", timeout: step.timeout || 15000 });
+        await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
       } else if (step.type === "waitForNavigation") {
         await page.waitForNavigation({ waitUntil: "load", timeout: step.timeout || 20000 }).catch(() => null);
       } else if (step.type === "waitForTimeout") {
         await page.waitForTimeout(step.delay || 2000);
       } else if (step.type === "assertText") {
+        await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.waitFor({ state: "visible", timeout: step.timeout || 15000 });
         const text = await locator.innerText();
         const expected = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap);
         if (!text.includes(expected)) {
           throw new Error(`Assert text fallido: Se esperaba "${expected}" pero se obtuvo "${text}"`);
         }
       } else if (step.type === "extractText") {
+        await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.waitFor({ state: "visible", timeout: step.timeout || 15000 });
         const text = await locator.innerText();
-        await createRunnerLog(jobId, ticketId, "INFO", `Texto extraído del selector ${step.selector}: ${text}`);
+        await createRunnerLog(jobId, ticketId, "INFO", `Texto extraído del selector ${step.selector}: ${text}`, { stepIndex: i, stepType: step.type });
       } else if (step.type === "conditional") {
         const locator = page.locator(step.selector);
         const exists = await locator.count().then(c => c > 0).catch(() => false);
         const visible = exists && await locator.first().isVisible().catch(() => false);
         if (visible) {
-          await createRunnerLog(jobId, ticketId, "INFO", `Condición cumplida para el selector: ${step.selector}. Ejecutando subpasos.`);
+          await createRunnerLog(jobId, ticketId, "INFO", `Condición cumplida para el selector: ${step.selector}. Ejecutando subpasos.`, { stepIndex: i, stepType: step.type });
           // Execute nested steps
           const nestedSteps = step.steps || [];
           for (const ns of nestedSteps) {
@@ -199,12 +265,12 @@ export async function executePortalMap(
             }
           }
         } else {
-          await createRunnerLog(jobId, ticketId, "INFO", `Condición omitida (selector no visible): ${step.selector}`);
+          await createRunnerLog(jobId, ticketId, "INFO", `Condición omitida (selector no visible): ${step.selector}`, { stepIndex: i, stepType: step.type });
         }
       } else if (step.type === "waitForDownload") {
         // downloads are already listened globally and saved to tmp.
         // We wait up to 15 seconds to see if any download was completed.
-        await createRunnerLog(jobId, ticketId, "INFO", "Esperando a que finalice la descarga del archivo...");
+        await createRunnerLog(jobId, ticketId, "INFO", "Esperando a que finalice la descarga del archivo...", { stepIndex: i, stepType: step.type });
         let waited = 0;
         while (downloadedFiles.length === 0 && waited < 15000) {
           await page.waitForTimeout(500);
@@ -216,12 +282,26 @@ export async function executePortalMap(
     // Post-step error and captcha check
     if (await checkCaptcha(page, captchaSelectors)) {
       await uploadErrorScreenshot("CAPTCHA_DETECTED");
-      return { success: false, error: "Se detectó un CAPTCHA final en el portal.", errorCode: "CAPTCHA_DETECTED" };
+      return {
+        success: false,
+        error: "Se detectó un CAPTCHA final en el portal.",
+        errorCode: "CAPTCHA_DETECTED",
+        screenshotPath: lastScreenshotPath,
+        stepIndex: currentStepIdx,
+        maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
+      };
     }
     const finalError = await checkPortalError(page, errorSelectors);
     if (finalError) {
       await uploadErrorScreenshot("PORTAL_RETURNED_ERROR");
-      return { success: false, error: `Error final devuelto por el portal: ${finalError}`, errorCode: "PORTAL_RETURNED_ERROR" };
+      return {
+        success: false,
+        error: `Error final devuelto por el portal: ${finalError}`,
+        errorCode: "PORTAL_RETURNED_ERROR",
+        screenshotPath: lastScreenshotPath,
+        stepIndex: currentStepIdx,
+        maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
+      };
     }
 
     // Process downloaded files
@@ -230,13 +310,19 @@ export async function executePortalMap(
 
     if (!xmlFile) {
       await uploadErrorScreenshot("XML_NOT_DOWNLOADED");
-      return { success: false, error: "No se localizó la descarga del archivo XML de la factura.", errorCode: "XML_NOT_DOWNLOADED" };
+      return {
+        success: false,
+        error: "No se localizó la descarga del archivo XML de la factura.",
+        errorCode: "XML_NOT_DOWNLOADED",
+        screenshotPath: lastScreenshotPath,
+        stepIndex: currentStepIdx,
+        maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
+      };
     }
 
     const xmlContent = fs.readFileSync(xmlFile.path, "utf-8");
     let pdfHtml: string | undefined = undefined;
     if (pdfFile) {
-      // Just mock pdfHtml content or load base64 as buffer if needed
       pdfHtml = `CFDI_PDF_DOCUMENT_BINARY_PLACEHOLDER [Filename: ${pdfFile.filename}]`;
     }
 
@@ -252,12 +338,15 @@ export async function executePortalMap(
 
   } catch (err: any) {
     console.error("Runner error during execution:", err);
-    await uploadErrorScreenshot("PORTAL_CHANGED");
-    const isTimeout = err.message?.includes("timeout") || err.message?.includes("Timeout");
+    const code = err.code || (err.message?.includes("timeout") || err.message?.includes("Timeout") ? "PORTAL_TIMEOUT" : "PORTAL_CHANGED");
+    await uploadErrorScreenshot(code);
     return {
       success: false,
       error: err.message || "Fallo en la navegación del portal.",
-      errorCode: isTimeout ? "PORTAL_TIMEOUT" : "PORTAL_CHANGED"
+      errorCode: code,
+      screenshotPath: lastScreenshotPath,
+      stepIndex: currentStepIdx,
+      maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
     };
   } finally {
     await context.close();
