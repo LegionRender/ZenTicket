@@ -1709,20 +1709,23 @@ export default function ScannerAndSimulator({
         fechaCompra: editFecha.trim() || (extractedData?.fechaCompra || ""),
       };
 
-      // Save/update user's fiscal profile if fields were corrected
+      // Save/update user's fiscal profile if fields were corrected (ONLY IF THEY WERE EMPTY INITIALLY)
       const updatedProfile = { ...fiscalProfile };
       let profileChanged = false;
       
       const pFields = ["rfcReceptor", "razonSocial", "codigoPostal", "regimenFiscal", "usoCFDI", "email"];
       for (const k of pFields) {
-        if (customProfileFields[k]) {
+        if (customProfileFields[k]?.trim()) {
           let mappedKey = k;
           if (k === "rfcReceptor") mappedKey = "rfc";
           if (k === "email") mappedKey = "correoElectronico";
           
-          if (updatedProfile[mappedKey] !== customProfileFields[k]) {
-            updatedProfile[mappedKey] = customProfileFields[k];
-            profileChanged = true;
+          const originalVal = fiscalProfile?.[mappedKey];
+          if (!originalVal || !originalVal.toString().trim()) {
+            if (updatedProfile[mappedKey] !== customProfileFields[k]) {
+              updatedProfile[mappedKey] = customProfileFields[k];
+              profileChanged = true;
+            }
           }
         }
       }
