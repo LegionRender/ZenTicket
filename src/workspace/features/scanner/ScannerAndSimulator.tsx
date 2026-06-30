@@ -12,7 +12,7 @@ import {
 import { useToast } from "@/shared/feedback/Toast";
 import { db, auth } from "@/services/firebase/firebase";
 import { handleFirestoreError, OperationType } from "@/services/firebase/firestore-helper";
-import { doc, setDoc, updateDoc, collection, query, where, getDocs, addDoc } from "firebase/firestore";
+import { doc, setDoc, updateDoc, getDoc, collection, query, where, getDocs, addDoc } from "firebase/firestore";
 import { AnimatePresence, motion } from "motion/react";
 import { useAuth } from "@/auth/context/AuthContext";
 import logoLight from "@/assets/logos/logo-light.png";
@@ -1224,14 +1224,11 @@ export default function ScannerAndSimulator({
     const currentTicket = (tickets || []).find(t => t.id === activeTicketId);
     const tStatus = currentTicket?.status;
     const isAlreadyProcessing = [
-      "ticket_uploaded",
-      "extracting_data",
-      "connector_resolving",
-      "pending_portal_submission",
-      "submitting_to_portal",
-      "submitted_to_merchant",
-      "waiting_portal_result",
+      "queued_for_runner",
+      "runner_processing",
       "merchant_cfdi_downloaded",
+      "sat_validation_pending",
+      "cfdi_validated",
       "sat_verifying"
     ].includes(tStatus || "");
 
@@ -1272,8 +1269,6 @@ export default function ScannerAndSimulator({
     
     await addAutomationEvent("extracting_data", "success", "Datos principales detectados.");
 
-    // Pre-submit validations bypassed to guarantee direct automatic processing if critical fields exist
-
     // Check plan constraints before initiating SAT automation
     const currentPlanStr = fiscalProfile?.plan || "gratuito";
     
@@ -1299,7 +1294,6 @@ export default function ScannerAndSimulator({
     const isExpired = (new Date().getTime() - planStartDate.getTime()) >= 30 * 24 * 60 * 60 * 1000;
 
     if (cycleCount >= limit || isExpired) {
-      // Manual block - redirects user to their account/plans tab where they can upgrade/renew
       setBlockerReason(cycleCount >= limit ? "limit" : "month");
       setShowRenewalBlocker(true);
       return;
@@ -1310,9 +1304,8 @@ export default function ScannerAndSimulator({
     setSimulationLogs([]);
     setSimulationProgress(0);
 
-    const fieldsSchema = activeConn ? JSON.parse(activeConn.fieldsJson) : [];
+    const fieldsSchema = activeConn ? JSON.parse(activeConn.fieldsJson || "[]") : [];
 
-    // Full-fidelity step sequencer
     const addLog = (text: string, delay: number) => {
       return new Promise<void>((resolve) => {
         setTimeout(() => {
@@ -1323,7 +1316,7 @@ export default function ScannerAndSimulator({
     };
 
     try {
-      await addLog("📋 ETAPA 1: Iniciando lectura del ticket y validación...", 500);
+      await addLog("📋 ETAPA 1: Iniciando lectura del ticket and validación...", 500);
       
       const pLogs = (activeExtractedData as any).pipelineLogs || [
         "Etapa 1: Recibida imagen del ticket y decodificada.",
@@ -1377,15 +1370,13 @@ export default function ScannerAndSimulator({
       }
 
       // Scheme validation
-      let fieldsSchema = [];
       let flowSteps = [];
       try {
-        fieldsSchema = JSON.parse(activeConn.fieldsJson || "[]");
-        flowSteps = JSON.parse(activeConn.flowJson || "[]");
         const hasInvalidField = fieldsSchema.some((f: any) => !f.key || !f.name || !f.selector || !f.type || f.required === undefined || !f.source);
         if (hasInvalidField) {
           throw new Error("Esquema de campos inválido.");
         }
+        flowSteps = JSON.parse(activeConn.flowJson || "[]");
       } catch (e) {
         const schemaErr: ReviewError = {
           reviewReasonCode: "CONNECTOR_SCHEMA_INVALID",
@@ -1508,28 +1499,70 @@ export default function ScannerAndSimulator({
       await addAutomationEvent("connector_resolving", "success", `Portal oficial de facturación del comercio identificado como: ${activeConn.nombre}`);
       await addLog(`✅ Mapa de navegación verificado y aprobado.`, 400);
 
-      // Validate required fields
-      await addLog("⚙️ Validando campos requeridos del ticket y perfil fiscal...", 400);
-      const missingFields: string[] = [];
+      // GUARDA PORTAL FIELDS EN FIRESTORE ANTES DE LEER TICKET
+      const ticketDocRef = doc(db, "tickets", activeTicketId);
+      const currentTicketDoc = await getDoc(ticketDocRef);
+      if (!currentTicketDoc.exists()) {
+        throw new Error("El ticket no existe en la base de datos.");
+      }
+      const currentTicketData = currentTicketDoc.data();
+      
+      let pFields = currentTicketData.portalFields;
+      if (!pFields) {
+        pFields = {
+          billingReference: activeExtractedData.folio || "",
+          total: parseFloat((activeExtractedData.total || 0).toString()),
+          ticketNumber: activeExtractedData.folio || "",
+          date: activeExtractedData.fechaCompra || ""
+        };
+        await updateDoc(ticketDocRef, {
+          portalFields: pFields
+        });
+      }
 
+      // LEER DE NUEVO TICKET DESDE FIRESTORE (Snapshot real e inmutable)
+      await addLog("⚙️ Validando campos persistidos en la base de datos (Firestore)...", 400);
+      const freshTicketDoc = await getDoc(ticketDocRef);
+      const freshTicketData = freshTicketDoc.data()!;
+      pFields = freshTicketData.portalFields || {};
+
+      // Validate required fields from database snapshot
+      const missingFields: string[] = [];
       for (const field of fieldsSchema) {
         if (field.required) {
           if (field.source === "ticket") {
             let val = "";
-            if (field.key === "referenciaFacturacion" || field.key === "folio") val = editFolio || activeExtractedData.folio || "";
-            else if (field.key === "total") val = (editTotal || activeExtractedData.total || "").toString();
-            else if (field.key === "fecha") val = editFecha || activeExtractedData.fechaCompra || "";
+            if (field.key === "referenciaFacturacion" || field.key === "folio") {
+              val = pFields.billingReference || "";
+            } else if (field.key === "total") {
+              val = (pFields.total || "").toString();
+            } else if (field.key === "fecha" || field.key === "date") {
+              val = pFields.date || "";
+            } else if (field.key === "ticketNumber") {
+              val = pFields.ticketNumber || "";
+            }
+            
             if (!val.trim()) {
               missingFields.push(field.key);
             }
           } else if (field.source === "fiscalProfile") {
             let val = "";
-            if (field.key === "rfcReceptor" || field.key === "rfc") val = fiscalProfile.rfc || "";
-            else if (field.key === "razonSocial") val = fiscalProfile.razonSocial || "";
-            else if (field.key === "codigoPostal") val = fiscalProfile.codigoPostal || "";
-            else if (field.key === "regimenFiscal") val = fiscalProfile.regimenFiscal || "";
-            else if (field.key === "usoCFDI") val = fiscalProfile.usoCFDI || "";
-            else if (field.key === "email") val = fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || "";
+            if (field.key === "rfcReceptor" || field.key === "rfc") {
+              val = fiscalProfile.rfc || "";
+              if (val.trim().length < 12) val = "";
+            } else if (field.key === "razonSocial") {
+              val = fiscalProfile.razonSocial || "";
+            } else if (field.key === "codigoPostal") {
+              val = fiscalProfile.codigoPostal || "";
+              if (val.trim().length !== 5) val = "";
+            } else if (field.key === "regimenFiscal") {
+              val = fiscalProfile.regimenFiscal || "";
+            } else if (field.key === "usoCFDI") {
+              val = fiscalProfile.usoCFDI || "";
+            } else if (field.key === "email") {
+              val = fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || "";
+              if (!val.includes("@")) val = "";
+            }
             
             if (!val.trim()) {
               missingFields.push(field.key);
@@ -1550,19 +1583,21 @@ export default function ScannerAndSimulator({
         return;
       }
 
-      await addLog("✅ Todos los campos requeridos validados.", 300);
+      await addLog("✅ Todos los campos requeridos validados desde Firestore.", 300);
       setSimulationProgress(40);
 
-      // Create snapshots
+      // Create snapshots using ONLY Firestore data (No fallbacks to internal UUIDs)
       await addLog("📥 Creando ticketDataSnapshot y fiscalProfileSnapshot...", 300);
-      const ticketDataSnapshot: ExtractedTicketData = {
-        rfcEmisor: activeExtractedData.rfcEmisor || "",
-        nombreEmisor: activeExtractedData.nombreEmisor || "",
-        fechaCompra: editFecha || activeExtractedData.fechaCompra || "",
-        folio: editFolio || activeExtractedData.folio || "",
-        total: parseFloat((editTotal || activeExtractedData.total || 0).toString()),
-        sucursal: editSucursal || activeExtractedData.sucursal || "",
-        items: activeExtractedData.items || []
+      const ticketDataSnapshot = {
+        merchantName: freshTicketData.nombreEmisor || "",
+        billingReference: pFields.billingReference || freshTicketData.folio || "",
+        total: parseFloat(pFields.total || freshTicketData.total || 0),
+        ticketNumber: pFields.ticketNumber || freshTicketData.folio || "",
+        date: pFields.date || freshTicketData.fechaCompra || "",
+        barcode: freshTicketData.barcode || "",
+        rawOcrText: freshTicketData.rawOcrText || "",
+        folio: pFields.billingReference || freshTicketData.folio || "",
+        fechaCompra: pFields.date || freshTicketData.fechaCompra || "",
       };
 
       const fiscalProfileSnapshot: FiscalProfile = {
@@ -1601,7 +1636,6 @@ export default function ScannerAndSimulator({
       await addLog("🎉 ¡Ticket encolado con éxito para procesamiento automático!", 400);
       setSimulationProgress(100);
 
-      // Redirect immediately to tickets tab and trigger the highlight
       if (onTabChange && onSetNewlyAddedTicketId) {
         onSetNewlyAddedTicketId(activeTicketId);
         onTabChange("tickets");
@@ -1738,7 +1772,7 @@ export default function ScannerAndSimulator({
 
     if (isCustomConnector) {
       // Validate dynamic fields
-      const hasFolioField = fieldsSchema.some(f => f.key === "referenciaFacturacion" || f.key === "folio");
+      const hasFolioField = fieldsSchema.some(f => f.key === "referenciaFacturacion" || f.key === "folio" || f.key === "ticketNumber");
       if (hasFolioField && !editFolio.trim()) {
         setValidationError("La referencia de facturación o folio es obligatorio.");
         return;
@@ -1749,9 +1783,31 @@ export default function ScannerAndSimulator({
         setValidationError("El importe total es obligatorio y debe ser mayor a cero.");
         return;
       }
-      const hasFechaField = fieldsSchema.some(f => f.key === "fecha");
+      const hasFechaField = fieldsSchema.some(f => f.key === "fecha" || f.key === "date");
       if (hasFechaField && !editFecha.trim()) {
         setValidationError("La fecha es obligatoria.");
+        return;
+      }
+
+      // Check required fiscal fields in the form state
+      const missingProfileFields: string[] = [];
+      for (const field of fieldsSchema) {
+        if (field.source === "fiscalProfile" && field.required) {
+          const val = customProfileFields[field.key] || "";
+          if (field.key === "rfcReceptor" || field.key === "rfc") {
+            if (val.trim().length < 12) missingProfileFields.push(field.name);
+          } else if (field.key === "codigoPostal") {
+            if (val.trim().length !== 5) missingProfileFields.push(field.name);
+          } else if (field.key === "email") {
+            if (!val.includes("@")) missingProfileFields.push(field.name);
+          } else {
+            if (!val.trim()) missingProfileFields.push(field.name);
+          }
+        }
+      }
+
+      if (missingProfileFields.length > 0) {
+        setValidationError(`Faltan datos fiscales requeridos: ${missingProfileFields.join(", ")}`);
         return;
       }
 
@@ -1763,9 +1819,10 @@ export default function ScannerAndSimulator({
         folio: editFolio.trim(),
         total: !isNaN(totalNum) ? totalNum : (extractedData?.total || 0),
         fechaCompra: editFecha.trim() || (extractedData?.fechaCompra || ""),
+        sucursal: editSucursal.trim(),
       };
 
-      // Save/update user's fiscal profile if fields were corrected (ONLY IF THEY WERE EMPTY INITIALLY)
+      // Save/update user's fiscal profile if fields were corrected
       const updatedProfile = { ...fiscalProfile };
       let profileChanged = false;
       
@@ -1776,22 +1833,22 @@ export default function ScannerAndSimulator({
           if (k === "rfcReceptor") mappedKey = "rfc";
           if (k === "email") mappedKey = "correoElectronico";
           
-          const originalVal = fiscalProfile?.[mappedKey];
-          if (!originalVal || !originalVal.toString().trim()) {
-            if (updatedProfile[mappedKey] !== customProfileFields[k]) {
-              updatedProfile[mappedKey] = customProfileFields[k];
-              profileChanged = true;
-            }
+          if (updatedProfile[mappedKey] !== customProfileFields[k]) {
+            updatedProfile[mappedKey] = customProfileFields[k];
+            profileChanged = true;
           }
         }
       }
       
       if (profileChanged && onSaveProfile) {
-        try {
-          await onSaveProfile(updatedProfile);
-          toast.success("Se actualizó tu perfil fiscal con los datos corregidos.");
-        } catch (e) {
-          console.error("Error saving updated profile:", e);
+        const confirmSave = window.confirm("¿Deseas guardar los cambios fiscales editados en tu Perfil Fiscal para futuras facturas?");
+        if (confirmSave) {
+          try {
+            await onSaveProfile(updatedProfile);
+            toast.success("Se actualizó tu perfil fiscal con los datos corregidos.");
+          } catch (e) {
+            console.error("Error saving updated profile:", e);
+          }
         }
       }
     } else {
@@ -1842,6 +1899,13 @@ export default function ScannerAndSimulator({
     // Save/update in DB
     if (ticketId) {
       try {
+        const portalFields = {
+          billingReference: updatedData.folio || "",
+          total: updatedData.total || 0,
+          ticketNumber: updatedData.folio || "",
+          date: updatedData.fechaCompra || ""
+        };
+
         await onUpdateTicketInDb(ticketId, {
           rfcEmisor: updatedData.rfcEmisor || "",
           nombreEmisor: updatedData.nombreEmisor || "",
@@ -1849,7 +1913,9 @@ export default function ScannerAndSimulator({
           folio: updatedData.folio || "",
           total: updatedData.total || 0,
           sucursal: updatedData.sucursal || "",
+          portalFields: portalFields
         });
+        toast.success("Datos del ticket y portal persistidos en base de datos.");
       } catch (err) {
         console.error("Error saving corrected ticket inside Firestore", err);
       }
@@ -1863,6 +1929,11 @@ export default function ScannerAndSimulator({
         c.nombre.toLowerCase().includes(updatedData.nombreEmisor.toLowerCase())
     );
     setMatchingConnector(found || null);
+
+    // Immediately trigger automation (Guardar y continuar behavior)
+    if (found && found.runnerAvailable) {
+      await handleTriggerAutomation(found, ticketId, updatedData);
+    }
   };
 
   const resetAll = () => {
@@ -3058,78 +3129,104 @@ return list.map(n => {
                       const isCustomConnector = fieldsSchema.length > 0;
 
                       if (isCustomConnector) {
+                        const ticketFields = fieldsSchema.filter((f: any) => f.source === "ticket");
+                        const profileFields = fieldsSchema.filter((f: any) => f.source === "fiscalProfile");
+
                         return (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {fieldsSchema.map((field: any) => {
-                              const isTicketSource = field.source === "ticket";
-                              const isProfileSource = field.source === "fiscalProfile";
-
-                              if (isTicketSource) {
-                                if (field.key === "referenciaFacturacion" || field.key === "folio") {
+                          <div className="space-y-5 text-left">
+                            {/* Block A: Datos para facturar en el portal */}
+                            <div className="bg-[#121421] p-4.5 rounded-2xl border border-slate-800 space-y-3.5">
+                              <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800/80 pb-2 flex items-center gap-1.5 font-mono">
+                                <Building2 className="w-4.5 h-4.5 text-[#0B53F4]" />
+                                A) Datos para facturar en el portal
+                              </h6>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                {ticketFields.map((field: any) => {
+                                  if (field.key === "referenciaFacturacion" || field.key === "folio") {
+                                    return (
+                                      <div key={field.key}>
+                                        <label className="text-[9px] text-slate-450 font-black uppercase tracking-wider block mb-1 font-mono">{field.name} *</label>
+                                        <input
+                                          type="text"
+                                          value={editFolio}
+                                          onChange={(e) => setEditFolio(e.target.value)}
+                                          placeholder={`Ej. ${field.name}`}
+                                          className={getInputClass(!editFolio.trim(), false)}
+                                        />
+                                      </div>
+                                    );
+                                  }
+                                  if (field.key === "total") {
+                                    return (
+                                      <div key={field.key}>
+                                        <label className="text-[9px] text-slate-450 font-black uppercase tracking-wider block mb-1 font-mono">{field.name} *</label>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          value={editTotal || ""}
+                                          onChange={(e) => setEditTotal(parseFloat(e.target.value) || 0)}
+                                          placeholder="0.00"
+                                          className={getInputClass(!editTotal || editTotal <= 0, false, true)}
+                                        />
+                                      </div>
+                                    );
+                                  }
+                                  if (field.key === "fecha" || field.key === "date") {
+                                    return (
+                                      <div key={field.key}>
+                                        <label className="text-[9px] text-slate-455 font-black uppercase tracking-wider block mb-1 font-mono">{field.name} *</label>
+                                        <input
+                                          type="text"
+                                          value={editFecha}
+                                          onChange={(e) => setEditFecha(e.target.value)}
+                                          placeholder="DD/MM/AAAA o YYYY-MM-DD"
+                                          className={getInputClass(!editFecha.trim(), false)}
+                                        />
+                                      </div>
+                                    );
+                                  }
                                   return (
                                     <div key={field.key}>
-                                      <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">{field.name} *</label>
+                                      <label className="text-[9px] text-slate-455 font-black uppercase tracking-wider block mb-1 font-mono">{field.name} *</label>
                                       <input
                                         type="text"
-                                        value={editFolio}
-                                        onChange={(e) => setEditFolio(e.target.value)}
+                                        value={editSucursal}
+                                        onChange={(e) => setEditSucursal(e.target.value)}
                                         placeholder={`Ej. ${field.name}`}
-                                        className={getInputClass(!editFolio.trim(), false)}
+                                        className={getInputClass(!editSucursal.trim(), false)}
                                       />
                                     </div>
                                   );
-                                }
-                                if (field.key === "total") {
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Block B: Datos fiscales del receptor */}
+                            <div className="bg-[#121421] p-4.5 rounded-2xl border border-slate-800 space-y-3.5">
+                              <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800/80 pb-2 flex items-center gap-1.5 font-mono">
+                                <Users className="w-4.5 h-4.5 text-emerald-500" />
+                                B) Datos fiscales del receptor
+                              </h6>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                {profileFields.map((field: any) => {
+                                  const curVal = customProfileFields[field.key] || "";
+                                  const isValid = curVal.trim().length > 0;
+                                  
                                   return (
                                     <div key={field.key}>
-                                      <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">{field.name} *</label>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        value={editTotal || ""}
-                                        onChange={(e) => setEditTotal(parseFloat(e.target.value) || 0)}
-                                        placeholder="0.00"
-                                        className={getInputClass(!editTotal || editTotal <= 0, false, true)}
-                                      />
-                                    </div>
-                                  );
-                                }
-                                if (field.key === "fecha") {
-                                  return (
-                                    <div key={field.key}>
-                                      <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">{field.name} *</label>
+                                      <label className="text-[9px] text-slate-455 font-black uppercase tracking-wider block mb-1 font-mono">{field.name} *</label>
                                       <input
                                         type="text"
-                                        value={editFecha}
-                                        onChange={(e) => setEditFecha(e.target.value)}
-                                        placeholder="DD/MM/AAAA"
-                                        className={getInputClass(!editFecha.trim(), false)}
+                                        value={curVal}
+                                        onChange={(e) => setCustomProfileFields({ ...customProfileFields, [field.key]: e.target.value })}
+                                        placeholder={`Completa ${field.name}`}
+                                        className={getInputClass(!isValid, false)}
                                       />
                                     </div>
                                   );
-                                }
-                              }
-
-                              if (isProfileSource && isFiscalFieldInvalid(field.key)) {
-                                return (
-                                  <div key={field.key}>
-                                    <div className="flex justify-between items-center mb-1">
-                                      <label className="text-[9px] text-[#0B53F4] font-black uppercase tracking-wider block">{field.name} (Perfil Fiscal) *</label>
-                                      <span className="text-[8px] text-rose-500 font-bold uppercase tracking-wider">Faltante o Inválido</span>
-                                    </div>
-                                    <input
-                                      type="text"
-                                      value={customProfileFields[field.key] || ""}
-                                      onChange={(e) => setCustomProfileFields({ ...customProfileFields, [field.key]: e.target.value })}
-                                      placeholder={`Completa ${field.name}`}
-                                      className={getInputClass(!customProfileFields[field.key]?.trim(), false)}
-                                    />
-                                  </div>
-                                );
-                              }
-
-                              return null;
-                            })}
+                                })}
+                              </div>
+                            </div>
                           </div>
                         );
                       }
