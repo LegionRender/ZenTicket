@@ -153,26 +153,12 @@ function isInternalIdLike(value: string | undefined | null, rawOcrText?: string)
   const val = value.trim();
   if (!val) return true;
 
-  // 1. UUID v4 / standard UUID format: 8-4-4-4-12 characters
-  const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-  if (uuidRegex.test(val)) {
-    // Si se provee rawOcrText, permitimos el UUID únicamente si está impreso en el ticket físico
-    if (rawOcrText) {
-      const cleanOcr = rawOcrText.toLowerCase();
-      const cleanVal = val.toLowerCase();
-      if (cleanOcr.includes(cleanVal)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  // 2. Starts with ticket_ or job_ or similar internal prefixes
+  // 1. Starts with ticket_ or job_ or similar internal prefixes
   if (val.startsWith("ticket_") || val.startsWith("job_") || val.startsWith("pilot-") || val.startsWith("OFFLINE-")) {
     return true;
   }
 
-  // 3. If rawOcrText is provided, check if the value is in the raw OCR text.
+  // 2. If rawOcrText is provided, check if the value is in the raw OCR text.
   // If it's a generated ID or UUID not present in the original OCR text, reject it.
   if (rawOcrText) {
     const cleanOcr = rawOcrText.toLowerCase();
