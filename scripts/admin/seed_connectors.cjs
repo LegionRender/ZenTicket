@@ -1,4 +1,5 @@
 const admin = require("firebase-admin");
+const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const fs = require("fs");
 const path = require("path");
@@ -6,11 +7,11 @@ const path = require("path");
 const serviceAccountPath = path.join(__dirname, "../../serviceAccountKey.json");
 
 if (fs.existsSync(serviceAccountPath)) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccountPath)
+  initializeApp({
+    credential: cert(serviceAccountPath)
   });
 } else {
-  admin.initializeApp({
+  initializeApp({
     projectId: "factubolt"
   });
 }
@@ -177,27 +178,59 @@ async function seedConnectors() {
       // Oxxo & Walmart -> Approved
       // Starbucks -> Unapproved
       // Farmacias Similares -> No portal map seeded (to test not found)
-      if (item.rfc !== "FSI120304XYZ" && item.rfc !== "SOR990805111") {
+      if (item.rfc !== "SOR990805111") {
         const isApproved = item.rfc !== "SHE190630TX1"; // Starbucks unapproved
         const portalMapSnapshot = await db.collection("portal_maps")
           .where("connectorId", "==", connectorId)
           .get();
 
+        let steps = [];
+        if (item.rfc === "FSI120304XYZ") {
+          // Farmacias Similares real flow steps
+          steps = [
+            { type: "goto", url: "{{portalMap.entryUrl}}" },
+            { type: "fill", selector: "input#ref_simi", value: "{{ticket.billingReference}}", transform: "trim" },
+            { type: "fill", selector: "input#total_simi", value: "{{ticket.total}}", transform: "fixed2" },
+            { type: "click", selector: "button#btnBuscar" },
+            { type: "waitForSelector", selector: "input#rfc_simi" },
+            { type: "fill", selector: "input#rfc_simi", value: "{{fiscalProfile.rfc}}", transform: "uppercase" },
+            { type: "fill", selector: "input#razon_simi", value: "{{fiscalProfile.businessName}}", transform: "uppercase" },
+            { type: "fill", selector: "input#cp_simi", value: "{{fiscalProfile.postalCode}}", transform: "trim" },
+            { type: "select", selector: "select#regimen_simi", value: "{{fiscalProfile.taxRegime}}" },
+            { type: "select", selector: "select#uso_simi", value: "{{fiscalProfile.cfdiUse}}" },
+            { type: "fill", selector: "input#email_simi", value: "{{fiscalProfile.email}}", transform: "lowercase" },
+            { type: "click", selector: "button#btnGenerar" },
+            { type: "waitForDownload" }
+          ];
+        } else {
+          // Oxxo, Starbucks, Walmart
+          steps = [
+            { type: "goto", url: "{{portalMap.entryUrl}}" },
+            { type: "fill", selector: "input#rfc", value: "{{fiscalProfile.rfc}}", transform: "uppercase" },
+            { type: "click", selector: "button#submit" }
+          ];
+        }
+
         const portalMapData = {
           connectorId,
+          entryUrl: item.portalUrl,
           url: item.portalUrl,
-          selectorsJson: JSON.stringify({
-            txtRfc: "input#rfc",
-            btnSubmit: "button#submit"
-          }),
+          requiredFields: ["ticket.billingReference", "ticket.total"],
+          fiscalFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"],
+          captchaSelectorsJson: JSON.stringify(["iframe[src*='recaptcha']", ".g-recaptcha", "#captcha"]),
+          errorSelectorsJson: JSON.stringify([".alert-danger", "#error-msg", ".text-danger"]),
+          successSelectorsJson: JSON.stringify([".success-msg", "#download-area"]),
+          downloadRulesJson: JSON.stringify({ xmlRequired: true, pdfRequired: false }),
+          stepsJson: JSON.stringify(steps),
           isApproved,
+          status: isApproved ? "approved" : "pending_approval",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
 
         if (!portalMapSnapshot.empty) {
           await portalMapSnapshot.docs[0].ref.update({
-            isApproved,
+            ...portalMapData,
             updatedAt: new Date().toISOString()
           });
           console.log(`Updated portal map for: ${item.nombre} (Approved: ${isApproved})`);

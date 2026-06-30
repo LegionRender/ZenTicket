@@ -18,8 +18,8 @@ export async function lockJob(jobId: string, workerId: string): Promise<any | nu
       const data = docSnap.data();
       if (!data) return null;
 
-      // Only lock if status is pending or failed (retry) and not locked
-      if (data.status !== "pending" && data.status !== "failed") {
+      // Only lock if status is pending, validating_sat, or failed (retry) and not locked
+      if (data.status !== "pending" && data.status !== "failed" && data.status !== "validating_sat") {
         return null;
       }
 

@@ -1,4 +1,5 @@
 const admin = require("firebase-admin");
+const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const fs = require("fs");
 const path = require("path");
@@ -6,11 +7,11 @@ const path = require("path");
 const serviceAccountPath = path.join(__dirname, "../../serviceAccountKey.json");
 
 if (fs.existsSync(serviceAccountPath)) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccountPath)
+  initializeApp({
+    credential: cert(serviceAccountPath)
   });
 } else {
-  admin.initializeApp({
+  initializeApp({
     projectId: "factubolt"
   });
 }

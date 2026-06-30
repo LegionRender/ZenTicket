@@ -1,11 +1,12 @@
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 import * as fs from "fs";
 import * as path from "path";
 import { pollJobs } from "./jobs/pollJobs";
 import { lockJob } from "./jobs/lockJob";
 import { executePortalMap } from "./executor/executePortalMap";
-import { validateCfdiXml } from "./validators/validateCfdiXml";
+import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiXml";
 import { validateSatStatus } from "./validators/validateSatStatus";
 import { createRunnerLog } from "./logging/createRunnerLog";
 
@@ -32,10 +33,132 @@ async function processJob(jobId: string) {
   const ticketId = lockedJob.ticketId;
   const ticketRef = db.collection("tickets").doc(ticketId);
   const jobRef = db.collection("invoice_jobs").doc(jobId);
+  const bucket = getStorage().bucket();
+
   let connector: any = null;
 
   try {
-    // 1. Transition job to running and ticket to runner_processing
+    // 2. Fetch connector
+    const connDoc = await db.collection("connectors").doc(lockedJob.connectorId).get();
+    if (!connDoc.exists) {
+      throw { message: "Conector no encontrado.", code: "CONNECTOR_NOT_FOUND" };
+    }
+    connector = connDoc.data();
+    if (!connector) {
+      throw { message: "Datos del conector vacíos.", code: "CONNECTOR_NOT_FOUND" };
+    }
+
+    // ----------------------------------------------------
+    // FLOW A: Retrying SAT check for an already-downloaded XML
+    // ----------------------------------------------------
+    if (lockedJob.status === "validating_sat") {
+      await jobRef.update({
+        status: "running",
+        updatedAt: new Date().toISOString()
+      });
+      await createRunnerLog(jobId, ticketId, "INFO", "Reintentando validación ante el SAT para XML ya descargado.");
+
+      const xmlDest = `users/${lockedJob.userId}/tickets/${ticketId}/cfdi.xml`;
+      const xmlFileRef = bucket.file(xmlDest);
+      const exists = await xmlFileRef.exists().then(r => r[0]);
+      if (!exists) {
+        throw { message: "El XML de la factura no se localizó en Storage para reintentar la validación SAT.", code: "XML_NOT_DOWNLOADED" };
+      }
+
+      const [xmlBuffer] = await xmlFileRef.download();
+      const xmlContent = xmlBuffer.toString("utf-8");
+
+      const xmlResult = validateCfdiXml(
+        xmlContent,
+        connector.rfc,
+        lockedJob.fiscalProfileSnapshot.rfc,
+        lockedJob.ticketDataSnapshot.total
+      );
+
+      if (!xmlResult.isValid) {
+        throw { message: "El XML almacenado en Storage no pasó las pruebas estructurales.", code: xmlResult.error || "XML_STRUCTURE_INVALID" };
+      }
+
+      await createRunnerLog(jobId, ticketId, "INFO", `Consultando estatus SAT (Intento: ${(lockedJob.satValidationAttempts || 0) + 1}).`);
+      const satResult = await validateSatStatus(
+        xmlResult.rfcEmisor || "",
+        xmlResult.rfcReceptor || "",
+        xmlResult.total || 0,
+        xmlResult.uuid || ""
+      );
+
+      if (satResult.status === "unavailable") {
+        const attempts = (lockedJob.satValidationAttempts || 0) + 1;
+        if (attempts >= 3) {
+          throw { message: "Se superó el límite de 3 reintentos de validación ante el SAT. El servicio del SAT no está disponible.", code: "SAT_VALIDATION_UNAVAILABLE" };
+        }
+
+        await jobRef.update({
+          status: "validating_sat",
+          satValidationAttempts: attempts,
+          lockedBy: null,
+          lockedAt: null,
+          updatedAt: new Date().toISOString()
+        });
+
+        await ticketRef.update({
+          status: "sat_validation_pending",
+          updatedAt: new Date().toISOString()
+        });
+
+        await createRunnerLog(jobId, ticketId, "WARNING", `Validación SAT indisponible en reintento ${attempts}/3. Reencolando para posterior consulta.`);
+        return;
+      }
+
+      if (satResult.status !== "valid") {
+        throw {
+          message: `El comprobante no es válido ante el SAT. Estatus: ${satResult.status}`,
+          code: satResult.status === "cancelled" ? "SAT_STATUS_CANCELLED" : "SAT_STATUS_NOT_FOUND"
+        };
+      }
+
+      // Succeeded on SAT retry!
+      const invRef = db.collection("invoices").doc();
+      const invoiceId = xmlResult.uuid || invRef.id;
+      await invRef.set({
+        userId: lockedJob.userId,
+        ticketId,
+        xmlContent,
+        pdfHtml: lockedJob.pdfHtml || null,
+        folioFiscal: xmlResult.uuid,
+        rfcEmisor: xmlResult.rfcEmisor,
+        nombreEmisor: connector.nombre,
+        rfcReceptor: xmlResult.rfcReceptor,
+        nombreReceptor: lockedJob.fiscalProfileSnapshot.razonSocial,
+        total: xmlResult.total,
+        createdAt: new Date().toISOString()
+      });
+
+      await jobRef.update({
+        status: "succeeded",
+        result: {
+          xmlStoragePath: xmlDest,
+          pdfStoragePath: lockedJob.pdfHtml ? `users/${lockedJob.userId}/tickets/${ticketId}/cfdi.pdf` : null,
+          uuid: xmlResult.uuid,
+          satStatus: "valid"
+        },
+        finishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+
+      await ticketRef.update({
+        status: "cfdi_validated",
+        invoiceId,
+        updatedAt: new Date().toISOString()
+      });
+
+      await createRunnerLog(jobId, ticketId, "INFO", "Validación SAT tardía completada con éxito. Factura activada.");
+      return;
+    }
+
+    // ----------------------------------------------------
+    // FLOW B: Standard execution mapping (first time download)
+    // ----------------------------------------------------
     await jobRef.update({
       status: "running",
       startedAt: new Date().toISOString(),
@@ -47,17 +170,7 @@ async function processJob(jobId: string) {
       updatedAt: new Date().toISOString()
     });
 
-    await createRunnerLog(jobId, ticketId, "INFO", "Iniciando procesamiento de ticket.");
-
-    // 2. Fetch connector
-    const connDoc = await db.collection("connectors").doc(lockedJob.connectorId).get();
-    if (!connDoc.exists) {
-      throw { message: "Conector no encontrado.", code: "CONNECTOR_NOT_FOUND" };
-    }
-    connector = connDoc.data();
-    if (!connector) {
-      throw { message: "Datos del conector vacíos.", code: "CONNECTOR_NOT_FOUND" };
-    }
+    await createRunnerLog(jobId, ticketId, "INFO", "Iniciando descarga y navegación en el portal.");
 
     // 3. Fetch portalMap
     const portalMapsSnap = await db.collection("portal_maps")
@@ -82,7 +195,7 @@ async function processJob(jobId: string) {
       throw { message: result.error || "Fallo en la navegación del portal.", code: result.errorCode || "UNKNOWN_RUNNER_ERROR" };
     }
 
-    // 5. XML Validation
+    // 5. XML Structural validation
     await createRunnerLog(jobId, ticketId, "INFO", "Validando estructura del XML descargado.");
     const xmlResult = validateCfdiXml(
       result.xmlContent || "",
@@ -92,11 +205,37 @@ async function processJob(jobId: string) {
     );
 
     if (!xmlResult.isValid) {
-      throw { message: "XML inválido o discrepancia de datos.", code: xmlResult.error || "XML_STRUCTURE_INVALID" };
+      throw { message: "El XML descargado no pasó las pruebas de integridad o no pertenece a esta transacción.", code: xmlResult.error || "XML_STRUCTURE_INVALID" };
     }
 
-    // 6. SAT status check
-    await createRunnerLog(jobId, ticketId, "INFO", `Validando estatus del comprobante fiscal (UUID: ${xmlResult.uuid}) ante el SAT.`);
+    // 6. Upload XML/PDF to Storage
+    const xmlDest = `users/${lockedJob.userId}/tickets/${ticketId}/cfdi.xml`;
+    const tempXmlPath = result.downloadedXmlPath || "";
+    await bucket.upload(tempXmlPath, {
+      destination: xmlDest,
+      metadata: { contentType: "text/xml" }
+    });
+    await createRunnerLog(jobId, ticketId, "INFO", `XML subido de forma segura a Storage: ${xmlDest}`);
+
+    let pdfDest: string | null = null;
+    const tempPdfPath = result.downloadedPdfPath || "";
+    if (tempPdfPath && fs.existsSync(tempPdfPath)) {
+      pdfDest = `users/${lockedJob.userId}/tickets/${ticketId}/cfdi.pdf`;
+      await bucket.upload(tempPdfPath, {
+        destination: pdfDest,
+        metadata: { contentType: "application/pdf" }
+      });
+      await createRunnerLog(jobId, ticketId, "INFO", `PDF subido de forma segura a Storage: ${pdfDest}`);
+    }
+
+    // Clean up temporary local directory
+    try {
+      const tmpDir = path.join(__dirname, `../../tmp/${jobId}`);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch (e) {}
+
+    // 7. SAT status check
+    await createRunnerLog(jobId, ticketId, "INFO", `Consultando estatus fiscal en el webservice del SAT.`);
     const satResult = await validateSatStatus(
       xmlResult.rfcEmisor || "",
       xmlResult.rfcReceptor || "",
@@ -108,6 +247,10 @@ async function processJob(jobId: string) {
       // Transition to validation pending
       await jobRef.update({
         status: "validating_sat",
+        satValidationAttempts: 0,
+        pdfHtml: result.pdfHtml || null,
+        lockedBy: null,
+        lockedAt: null,
         updatedAt: new Date().toISOString()
       });
 
@@ -116,7 +259,7 @@ async function processJob(jobId: string) {
         updatedAt: new Date().toISOString()
       });
 
-      await createRunnerLog(jobId, ticketId, "WARNING", "Validación ante el SAT no disponible temporalmente. Job en espera.");
+      await createRunnerLog(jobId, ticketId, "WARNING", "Servicio del SAT no disponible. Job en espera de reintento.");
       return;
     }
 
@@ -127,7 +270,7 @@ async function processJob(jobId: string) {
       };
     }
 
-    // 7. Succeeded! (Only run if SAT is validated)
+    // Succeeded!
     const invRef = db.collection("invoices").doc();
     const invoiceId = xmlResult.uuid || invRef.id;
     await invRef.set({
@@ -146,6 +289,12 @@ async function processJob(jobId: string) {
 
     await jobRef.update({
       status: "succeeded",
+      result: {
+        xmlStoragePath: xmlDest,
+        pdfStoragePath: pdfDest,
+        uuid: xmlResult.uuid,
+        satStatus: "valid"
+      },
       finishedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
