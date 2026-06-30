@@ -556,6 +556,117 @@ export default function ScannerAndSimulator({
     onClearPreselectedTicket();
   }, [preselectedTicketId, tickets, connectors, onClearPreselectedTicket]);
 
+  // Real-time synchronization with Firestore ticket state
+  useEffect(() => {
+    if (activeStep !== "automating" || !ticketId || !tickets) return;
+
+    const currentTicket = tickets.find(t => t.id === ticketId);
+    if (!currentTicket) return;
+
+    const tStatus = currentTicket.status;
+
+    if (tStatus === "requires_user_correction") {
+      setIsAutomatingLoading(false);
+      if (currentTicket.correctionError) {
+        try {
+          const corrObj = typeof currentTicket.correctionError === "string"
+            ? JSON.parse(currentTicket.correctionError)
+            : currentTicket.correctionError;
+          setCorrectionError(corrObj);
+        } catch (e) {
+          setCorrectionError({
+            reasonCode: "MISSING_FOLIO",
+            reasonMessage: currentTicket.errorMsg || "Dato inválido o faltante.",
+            fieldToCorrect: "folio",
+            detectedValue: currentTicket.folio || "",
+            suggestedValues: []
+          });
+        }
+      } else {
+        setCorrectionError({
+          reasonCode: "MISSING_FOLIO",
+          reasonMessage: currentTicket.errorMsg || "Dato inválido o faltante.",
+          fieldToCorrect: "folio",
+          detectedValue: currentTicket.folio || "",
+          suggestedValues: []
+        });
+      }
+      setIsEditing(false);
+      setActiveStep("correction");
+    } else if (tStatus === "cfdi_validated") {
+      setIsAutomatingLoading(false);
+      setSimulationProgress(100);
+      setActiveStep("success");
+    }
+  }, [ticketId, tickets, activeStep]);
+
+  // Loader timeout protection
+  useEffect(() => {
+    if (activeStep !== "automating" || !ticketId || !tickets) return;
+
+    const currentTicket = tickets.find(t => t.id === ticketId);
+    if (!currentTicket) return;
+
+    const tStatus = currentTicket.status;
+    const isProcessing = [
+      "ticket_uploaded",
+      "extracting_data",
+      "connector_resolving",
+      "pending_portal_submission",
+      "submitting_to_portal",
+      "submitted_to_merchant",
+      "waiting_portal_result",
+      "merchant_cfdi_downloaded",
+      "sat_verifying"
+    ].includes(tStatus);
+
+    if (!isProcessing) return;
+
+    // Timeouts limits: extracting_data: 30s, connector_resolving: 45s, submitting_to_portal: 90s, waiting_portal_result: 120s, sat_verifying: 45s
+    let timeoutLimit = 30000;
+    let timeoutCode: "CONNECTOR_TIMEOUT" | "PORTAL_TIMEOUT" | "SAT_TIMEOUT" = "PORTAL_TIMEOUT";
+
+    if (tStatus === "ticket_uploaded" || tStatus === "extracting_data") {
+      timeoutLimit = 30000;
+      timeoutCode = "PORTAL_TIMEOUT";
+    } else if (tStatus === "connector_resolving") {
+      timeoutLimit = 45000;
+      timeoutCode = "CONNECTOR_TIMEOUT";
+    } else if (["pending_portal_submission", "submitting_to_portal", "submitted_to_merchant"].includes(tStatus)) {
+      timeoutLimit = 90000;
+      timeoutCode = "PORTAL_TIMEOUT";
+    } else if (tStatus === "waiting_portal_result") {
+      timeoutLimit = 120000;
+      timeoutCode = "PORTAL_TIMEOUT";
+    } else if (tStatus === "sat_verifying" || tStatus === "merchant_cfdi_downloaded") {
+      timeoutLimit = 45000;
+      timeoutCode = "SAT_TIMEOUT";
+    }
+
+    const timer = setTimeout(async () => {
+      console.warn(`Timeout exceeded for status ${tStatus}. Moving to requires_manual_review.`);
+      const reviewErr = {
+        reviewReasonCode: timeoutCode,
+        reviewReasonMessage: "El proceso tardó más de lo esperado. Tu ticket quedó en revisión.",
+        lastAutomationStep: tStatus,
+        connectorAttempted: true,
+        connectorId: matchingConnector?.id || null,
+        connectorName: matchingConnector?.nombre || null,
+        portalErrorMessage: `Timeout of ${timeoutLimit}ms exceeded on step ${tStatus}`
+      };
+
+      await onUpdateTicketInDb(ticketId, {
+        status: "requires_manual_review",
+        errorMsg: "El proceso tardó más de lo esperado. Tu ticket quedó en revisión.",
+        reviewError: reviewErr as any
+      });
+      setIsAutomatingLoading(false);
+      setActiveStep("tracking");
+    }, timeoutLimit);
+
+    return () => clearTimeout(timer);
+  }, [ticketId, tickets, activeStep, matchingConnector]);
+
   useEffect(() => {
     if (logsEndRef.current) {
       logsEndRef.current.scrollIntoView({ behavior: "smooth" });
@@ -1004,6 +1115,57 @@ export default function ScannerAndSimulator({
 
     if (!activeExtractedData || !fiscalProfile || !activeTicketId) return;
 
+    const currentTicket = (tickets || []).find(t => t.id === activeTicketId);
+    const tStatus = currentTicket?.status;
+    const isAlreadyProcessing = [
+      "ticket_uploaded",
+      "extracting_data",
+      "connector_resolving",
+      "pending_portal_submission",
+      "submitting_to_portal",
+      "submitted_to_merchant",
+      "waiting_portal_result",
+      "merchant_cfdi_downloaded",
+      "sat_verifying"
+    ].includes(tStatus || "");
+
+    if (isAlreadyProcessing) {
+      toast.info("Ya estamos procesando este ticket de forma automática.");
+      setActiveStep("automating");
+      return;
+    }
+
+    const addAutomationEvent = async (
+      step: "extracting_data" | "connector_resolving" | "submitting_to_portal" | "waiting_portal_result" | "sat_verifying" | "cfdi_validated",
+      status: "success" | "failed" | "processing",
+      message: string,
+      reasonCode?: string,
+      reviewReasonCode?: string
+    ) => {
+      const currentT = (tickets || []).find(t => t.id === activeTicketId);
+      const prevEvents = currentT?.automationEvents || [];
+      const newEvent = {
+        step,
+        status,
+        message,
+        timestamp: new Date().toISOString(),
+        reasonCode: reasonCode || null,
+        reviewReasonCode: reviewReasonCode || null
+      };
+      
+      await onUpdateTicketInDb(activeTicketId, {
+        automationEvents: [...prevEvents, newEvent]
+      });
+    };
+
+    // Initialize startedAt and reset events
+    await onUpdateTicketInDb(activeTicketId, {
+      startedAt: new Date().toISOString(),
+      automationEvents: []
+    });
+    
+    await addAutomationEvent("extracting_data", "success", "Datos principales detectados.");
+
     // Pre-submit validations bypassed to guarantee direct automatic processing if critical fields exist
 
     // Check plan constraints before initiating SAT automation
@@ -1080,6 +1242,7 @@ export default function ScannerAndSimulator({
       // Transition to Extracción stage -> connector_resolving in Firestore!
       setSimulationProgress(15);
       await onUpdateTicketInDb(activeTicketId, { status: "connector_resolving" });
+      await addAutomationEvent("connector_resolving", "processing", "Buscando conector oficial para el portal del comercio...");
       await addLog("🔌 Buscando conector oficial para el portal del comercio...", 800);
 
       if (!activeConn) {
@@ -1087,7 +1250,7 @@ export default function ScannerAndSimulator({
         
         const reviewErr: ReviewError = {
           reviewReasonCode: "CONNECTOR_NOT_FOUND",
-          reviewReasonMessage: "Este comercio aún requiere revisión. Estamos revisando si puede procesarse automáticamente.",
+          reviewReasonMessage: "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.",
           lastAutomationStep: "connector_resolving",
           connectorAttempted: false,
           connectorId: null,
@@ -1097,16 +1260,21 @@ export default function ScannerAndSimulator({
         
         await onUpdateTicketInDb(activeTicketId, {
           status: "requires_manual_review",
-          errorMsg: "Este comercio aún requiere revisión. Estamos revisando si puede procesarse automáticamente.",
+          errorMsg: "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.",
           reviewError: reviewErr as any
         });
+        
+        await addAutomationEvent("connector_resolving", "failed", "No existe conector disponible para este comercio.", undefined, "CONNECTOR_NOT_FOUND");
         
         setIsAutomatingLoading(false);
         return;
       }
 
+      await addAutomationEvent("connector_resolving", "success", `Portal oficial de facturación del comercio identificado como: ${activeConn.nombre}`);
+
       setSimulationProgress(20);
       await onUpdateTicketInDb(activeTicketId, { status: "pending_portal_submission" });
+      await addAutomationEvent("submitting_to_portal", "processing", `Enviando datos al portal oficial de ${activeConn.nombre}...`);
       await addLog("🌐 Abriendo puerto seguro proxy para ingresar al portal", 800);
       await addLog(`🌍 Conectando de forma segura con: ${activeConn.portalUrl}`, 1200);
       setSimulationProgress(30);
@@ -1128,6 +1296,7 @@ export default function ScannerAndSimulator({
       }
       setSimulationProgress(50);
       await onUpdateTicketInDb(activeTicketId, { status: "submitted_to_merchant" });
+      await addAutomationEvent("waiting_portal_result", "processing", "Esperando respuesta y descarga de archivos desde el portal...");
 
       await addLog(`🚀 Presionando botón de consulta en el portal...`, 1200);
       await addLog(`✅ Registro de Ticket validado en el portal corporativo exitosamente.`, 900);
@@ -1176,6 +1345,7 @@ export default function ScannerAndSimulator({
         status: "merchant_cfdi_downloaded",
         invoiceId: invoiceData.folioFiscal,
       });
+      await addAutomationEvent("sat_verifying", "processing", "Factura obtenida. Validando autenticidad y vigencia ante el SAT...");
 
       await addLog("CFDI obtenido desde el portal del comercio.", 800);
       await addLog(`📥 Archivos PDF & XML descargados en almacén virtual de ZenTicket.`, 500);
@@ -1226,6 +1396,7 @@ export default function ScannerAndSimulator({
       };
 
       if (activeTicketId) {
+        await addAutomationEvent("waiting_portal_result", "failed", reviewErr.reviewReasonMessage, undefined, reasonCode);
         await onUpdateTicketInDb(activeTicketId, {
           status: "requires_manual_review",
           errorMsg: reviewErr.reviewReasonMessage,
@@ -3038,43 +3209,98 @@ return list.map(n => {
         )} 
       {/* STEP 3: REDESIGNED TIMELINE ACTIVE PROCESSING PANEL */}
       {activeStep === "automating" && (() => {
-        const getStepStatus = (stepIndex: number) => {
-          const currentTicket = (tickets || []).find(t => t.id === ticketId);
-          const tStatus = currentTicket?.status || "";
+        const currentTicket = (tickets || []).find(t => t.id === ticketId);
 
-          if (stepIndex === 1) {
-            if (tStatus && tStatus !== "ticket_uploaded" && tStatus !== "extracting_data" && tStatus !== "extracted") return "completed";
-            return simulationProgress >= 25 ? "completed" : "active";
+        const getDetailedReasonMsg = (ticket: any): string => {
+          if (!ticket) return "Error desconocido.";
+          const revErr = ticket.reviewError;
+          const corrErr = ticket.correctionError;
+
+          if (revErr) {
+            const code = revErr.reviewReasonCode;
+            if (code === "CONNECTOR_NOT_FOUND") return "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.";
+            if (code === "PORTAL_NO_XML") return "El portal no entregó el XML necesario para validar tu CFDI.";
+            if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
+            if (code === "PORTAL_REJECTED_TOTAL") return "El portal no reconoció el total detectado.";
+            if (code === "SAT_NOT_FOUND") return "El CFDI no fue localizado en los controles del SAT.";
+            if (code === "SAT_CANCELED") return "El CFDI aparece cancelado ante el SAT.";
+            if (code === "SAT_TIMEOUT") return "No pudimos verificar el CFDI ante el SAT en este momento.";
+            if (code === "USER_REQUESTED_REVIEW") return "El usuario solicitó revisión manual del ticket.";
+            if (code === "CONNECTOR_TIMEOUT") return "El conector del comercio tardó más de lo esperado en responder.";
+            if (code === "PORTAL_ERROR") return revErr.reviewReasonMessage || "Ocurrió un error en el portal del comercio.";
           }
-          if (stepIndex === 2) {
-            if (tStatus && tStatus !== "ticket_uploaded" && tStatus !== "extracting_data" && tStatus !== "connector_resolving" && tStatus !== "extracted") return "completed";
+
+          if (corrErr) {
+            const code = corrErr.reasonCode;
+            if (code === "MISSING_FOLIO") return "No detectamos el folio del ticket. Por favor ingrésalo.";
+            if (code === "MISSING_DATE") return "No detectamos la fecha del ticket. Por favor ingrésala.";
+            if (code === "MISSING_TOTAL") return "No detectamos el importe total. Por favor ingrésalo.";
+            if (code === "MISSING_MERCHANT") return "No detectamos un establecimiento válido.";
+            if (code === "PORTAL_REJECTED_RFC") return "El RFC del receptor no tiene un formato válido ante el SAT.";
+            if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
+          }
+
+          return ticket.errorMsg || "Este ticket requiere revisión manual de un agente.";
+        };
+
+        const getStepStatus = (stepIndex: number) => {
+          const tStatus = currentTicket?.status || "";
+          const isFinished = ["cfdi_validated", "completed"].includes(tStatus);
+
+          if (stepIndex === 1) { // Lectura
+            if (["ticket_uploaded", "extracting_data"].includes(tStatus)) return "active";
+            if (tStatus) return "completed";
+            return "active";
+          }
+          if (stepIndex === 2) { // Extracción
+            if (["ticket_uploaded", "extracting_data"].includes(tStatus)) return "pending";
             if (tStatus === "connector_resolving") return "active";
-            if (simulationProgress >= 50) return "completed";
-            if (simulationProgress >= 25) return "active";
+            if (tStatus) return "completed";
             return "pending";
           }
-          if (stepIndex === 3) {
-            if (tStatus === "cfdi_validated" || tStatus === "completed") return "completed";
+          if (stepIndex === 3) { // Validación
             if (["submitting_to_portal", "waiting_portal_result", "merchant_cfdi_downloaded", "sat_verifying", "pending_portal_submission", "submitted_to_merchant"].includes(tStatus)) return "active";
-            if (simulationProgress >= 100) return "completed";
-            if (simulationProgress >= 50) return "active";
+            if (isFinished) return "completed";
             return "pending";
           }
-          if (stepIndex === 4) {
-            if (tStatus === "cfdi_validated" || tStatus === "completed") return "completed";
-            if (simulationProgress >= 100) return "completed";
+          if (stepIndex === 4) { // Listo
+            if (isFinished) return "completed";
             return "pending";
           }
           return "pending";
         };
 
         const getDynamicStatusMsg = () => {
-          if (simulationProgress === 0) return "Leyendo el ticket...";
-          if (simulationProgress < 25) return "Extrayendo los datos principales...";
-          if (simulationProgress < 50) return "Buscando el portal oficial de facturación del comercio...";
-          if (simulationProgress < 75) return "Preparando la solicitud...";
-          if (simulationProgress < 100) return "Validando el resultado...";
-          return "¡Factura obtenida y validada con éxito!";
+          const tStatus = currentTicket?.status || "";
+          
+          if (tStatus === "ticket_uploaded" || tStatus === "extracting_data") {
+            return "Leyendo el ticket...";
+          }
+          if (tStatus === "connector_resolving") {
+            return "Buscando el portal oficial de facturación del comercio...";
+          }
+          if (["pending_portal_submission", "submitting_to_portal"].includes(tStatus)) {
+            return "Preparando solicitud de facturación...";
+          }
+          if (["submitted_to_merchant", "waiting_portal_result", "merchant_cfdi_downloaded"].includes(tStatus)) {
+            return "Esperando respuesta del portal oficial del comercio...";
+          }
+          if (tStatus === "sat_verifying") {
+            return "Validando CFDI ante los servidores oficiales del SAT...";
+          }
+          if (tStatus === "cfdi_validated" || tStatus === "completed") {
+            return "¡Factura obtenida y validada con éxito!";
+          }
+          if (tStatus === "requires_manual_review") {
+            return "El proceso requiere revisión manual.";
+          }
+          if (tStatus === "requires_user_correction") {
+            return "Necesitamos corregir un dato.";
+          }
+          if (tStatus === "failed") {
+            return "No se pudo completar el proceso.";
+          }
+          return "Iniciando procesamiento...";
         };
 
         return (
@@ -3196,14 +3422,58 @@ return list.map(n => {
             </div>
 
             {/* A single line of dynamic text explaining the currently executed action */}
-            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 mb-5 text-center mt-4">
-              <div className="flex items-center justify-center gap-2">
-                <Loader2 className="w-4 h-4 text-[#0B53F4] animate-spin shrink-0 animate-duration-1000" />
-                <span className="text-xs sm:text-[13px] font-semibold text-slate-600 font-sans tracking-tight leading-normal">
-                  {getDynamicStatusMsg()}
-                </span>
+            {currentTicket?.status === "requires_manual_review" || currentTicket?.status === "review" ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5 text-left mt-4 animate-fade-in">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold block text-amber-800 uppercase mb-0.5 tracking-wide text-xs">
+                      Revisión manual requerida
+                    </span>
+                    <p className="opacity-95 text-amber-700 text-[11.5px] leading-normal font-semibold font-sans">
+                      {getDetailedReasonMsg(currentTicket)}
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : currentTicket?.status === "requires_user_correction" ? (
+              <div className="bg-orange-50/50 border border-orange-200 rounded-2xl p-4 mb-5 text-left mt-4 animate-fade-in">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold block text-orange-850 uppercase mb-0.5 tracking-wide text-xs">
+                      Necesitamos corregir un dato
+                    </span>
+                    <p className="opacity-95 text-orange-700 text-[11.5px] leading-normal font-semibold font-sans">
+                      {getDetailedReasonMsg(currentTicket)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : currentTicket?.status === "failed" ? (
+              <div className="bg-rose-50 border border-rose-250 rounded-2xl p-4 mb-5 text-left mt-4 animate-fade-in">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold block text-rose-800 uppercase mb-0.5 tracking-wide text-xs">
+                      No se pudo completar
+                    </span>
+                    <p className="opacity-95 text-rose-700 text-[11.5px] leading-normal font-semibold font-sans">
+                      {currentTicket?.errorMsg || "Ocurrió un error inesperado al procesar el ticket."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 mb-5 text-center mt-4">
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 text-[#0B53F4] animate-spin shrink-0 animate-duration-1000" />
+                  <span className="text-xs sm:text-[13px] font-semibold text-slate-600 font-sans tracking-tight leading-normal">
+                    {getDynamicStatusMsg()}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Standard actions footer / backup background run option */}
             <div className="flex flex-col sm:flex-row gap-4 justify-between sm:items-center border-t border-slate-100 pt-5 mt-2">

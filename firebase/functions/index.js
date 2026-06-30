@@ -699,6 +699,22 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
   };
 }
 
+app.post("/api/automation/run", async (req, res) => {
+  const { ticket, profile, connector } = req.body || {};
+
+  if (!ticket || !profile || !connector) {
+    res.status(400).json({ error: "Missing ticket, profile, or connector data for automation" });
+    return;
+  }
+
+  // Under strict production rules, ZenTicket does not generate simulated invoices.
+  // Since there is no live portal robot connected in the backend environment, we fail closed
+  // and return the required error message.
+  res.status(502).json({
+    error: "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual."
+  });
+});
+
 app.post("/api/tickets/analyze", async (req, res) => {
   const { image, mimeType, userId } = req.body || {};
 

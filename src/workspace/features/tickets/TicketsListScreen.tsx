@@ -348,33 +348,106 @@ export default function TicketsListScreen({
         const data = await res.json();
         if (data.status === "valid") {
           if (associatedTicket.status !== "cfdi_validated" && onUpdateTicketInDb) {
-            await onUpdateTicketInDb(associatedTicket.id, { status: "cfdi_validated", errorMsg: "" });
+            const prevEvents = associatedTicket.automationEvents || [];
+            const newEvent = {
+              step: "cfdi_validated",
+              status: "success",
+              message: "Factura validada y registrada correctamente.",
+              timestamp: new Date().toISOString(),
+              reasonCode: null,
+              reviewReasonCode: null
+            };
+            await onUpdateTicketInDb(associatedTicket.id, {
+              status: "cfdi_validated",
+              errorMsg: "",
+              automationEvents: [...prevEvents, newEvent]
+            });
           }
         } else if (data.status === "canceled") {
           const errMsg = "El XML obtenido se encuentra CANCELADO ante el SAT. Requiere revisión manual.";
           setVerificationError(errMsg);
           if (associatedTicket.status !== "requires_manual_review" && onUpdateTicketInDb) {
+            const prevEvents = associatedTicket.automationEvents || [];
+            const newEvent = {
+              step: "sat_verifying",
+              status: "failed",
+              message: "El XML se encuentra cancelado ante el SAT.",
+              timestamp: new Date().toISOString(),
+              reasonCode: null,
+              reviewReasonCode: "SAT_CANCELED"
+            };
+            const reviewErr = {
+              reviewReasonCode: "SAT_CANCELED",
+              reviewReasonMessage: "El CFDI aparece cancelado ante el SAT.",
+              lastAutomationStep: "sat_verifying",
+              connectorAttempted: true,
+              connectorId: associatedTicket.connectorId || null,
+              connectorName: null,
+              portalErrorMessage: "SAT status: canceled"
+            };
             await onUpdateTicketInDb(associatedTicket.id, {
               status: "requires_manual_review",
-              errorMsg: "El XML se encuentra cancelado ante el SAT."
+              errorMsg: "El XML se encuentra cancelado ante el SAT.",
+              reviewError: reviewErr as any,
+              automationEvents: [...prevEvents, newEvent]
             });
           }
         } else if (data.status === "error" || data.status === "timeout") {
-          const errMsg = "Error de conexión o timeout con los controles del SAT. Requiere revisión manual.";
+          const errMsg = "No pudimos verificar el CFDI ante el SAT en este momento. Requiere revisión manual.";
           setVerificationError(errMsg);
           if (associatedTicket.status !== "requires_manual_review" && onUpdateTicketInDb) {
+            const prevEvents = associatedTicket.automationEvents || [];
+            const newEvent = {
+              step: "sat_verifying",
+              status: "failed",
+              message: "No pudimos verificar el CFDI ante el SAT en este momento.",
+              timestamp: new Date().toISOString(),
+              reasonCode: null,
+              reviewReasonCode: "SAT_TIMEOUT"
+            };
+            const reviewErr = {
+              reviewReasonCode: "SAT_TIMEOUT",
+              reviewReasonMessage: "No pudimos verificar el CFDI ante el SAT en este momento.",
+              lastAutomationStep: "sat_verifying",
+              connectorAttempted: true,
+              connectorId: associatedTicket.connectorId || null,
+              connectorName: null,
+              portalErrorMessage: "SAT verification connection error or timeout"
+            };
             await onUpdateTicketInDb(associatedTicket.id, {
               status: "requires_manual_review",
-              errorMsg: errMsg
+              errorMsg: errMsg,
+              reviewError: reviewErr as any,
+              automationEvents: [...prevEvents, newEvent]
             });
           }
         } else {
           const errMsg = "El XML obtenido no fue localizado en los controles del SAT. Requiere revisión manual.";
           setVerificationError(errMsg);
           if (associatedTicket.status !== "requires_manual_review" && onUpdateTicketInDb) {
+            const prevEvents = associatedTicket.automationEvents || [];
+            const newEvent = {
+              step: "sat_verifying",
+              status: "failed",
+              message: "El XML no fue localizado en los controles del SAT.",
+              timestamp: new Date().toISOString(),
+              reasonCode: null,
+              reviewReasonCode: "SAT_NOT_FOUND"
+            };
+            const reviewErr = {
+              reviewReasonCode: "SAT_NOT_FOUND",
+              reviewReasonMessage: "El CFDI no fue localizado en los controles del SAT.",
+              lastAutomationStep: "sat_verifying",
+              connectorAttempted: true,
+              connectorId: associatedTicket.connectorId || null,
+              connectorName: null,
+              portalErrorMessage: "SAT status: not found"
+            };
             await onUpdateTicketInDb(associatedTicket.id, {
               status: "requires_manual_review",
-              errorMsg: "El XML no fue localizado en los controles del SAT."
+              errorMsg: "El XML no fue localizado en los controles del SAT.",
+              reviewError: reviewErr as any,
+              automationEvents: [...prevEvents, newEvent]
             });
           }
         }
@@ -389,6 +462,38 @@ export default function TicketsListScreen({
 
     runSatVerification();
   }, [selectedInvoiceId, activeInvoiceData, tickets, onUpdateTicketInDb]);
+
+  const getDetailedReasonMsg = (ticket: any): string => {
+    if (!ticket) return "Error desconocido.";
+    const revErr = ticket.reviewError;
+    const corrErr = ticket.correctionError;
+
+    if (revErr) {
+      const code = revErr.reviewReasonCode;
+      if (code === "CONNECTOR_NOT_FOUND") return "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.";
+      if (code === "PORTAL_NO_XML") return "El portal no entregó el XML necesario para validar tu CFDI.";
+      if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
+      if (code === "PORTAL_REJECTED_TOTAL") return "El portal no reconoció el total detectado.";
+      if (code === "SAT_NOT_FOUND") return "El CFDI no fue localizado en los controles del SAT.";
+      if (code === "SAT_CANCELED") return "El CFDI aparece cancelado ante el SAT.";
+      if (code === "SAT_TIMEOUT") return "No pudimos verificar el CFDI ante el SAT en este momento.";
+      if (code === "USER_REQUESTED_REVIEW") return "El usuario solicitó revisión manual del ticket.";
+      if (code === "CONNECTOR_TIMEOUT") return "El conector del comercio tardó más de lo esperado en responder.";
+      if (code === "PORTAL_ERROR") return revErr.reviewReasonMessage || "Ocurrió un error en el portal del comercio.";
+    }
+
+    if (corrErr) {
+      const code = corrErr.reasonCode;
+      if (code === "MISSING_FOLIO") return "No detectamos el folio del ticket. Por favor ingrésalo.";
+      if (code === "MISSING_DATE") return "No detectamos la fecha del ticket. Por favor ingrésala.";
+      if (code === "MISSING_TOTAL") return "No detectamos el importe total. Por favor ingrésalo.";
+      if (code === "MISSING_MERCHANT") return "No detectamos un establecimiento válido.";
+      if (code === "PORTAL_REJECTED_RFC") return "El RFC del receptor no tiene un formato válido ante el SAT.";
+      if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
+    }
+
+    return ticket.errorMsg || "Este ticket requiere revisión manual de un agente.";
+  };
 
   // ----------------------------------------------------
   // THIRD VIEW SCREEN: VER PDF - DETALLE DE FACTURA
@@ -414,7 +519,7 @@ export default function TicketsListScreen({
     }
 
     if (!canRenderPdf) {
-      const displayMsg = (isManualReview && associatedTicket?.errorMsg) || verificationError || "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.";
+      const displayMsg = (associatedTicket ? getDetailedReasonMsg(associatedTicket) : null) || verificationError || "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.";
       return (
         <div className="max-w-xl mx-auto py-12 px-6 text-center animate-fade-in">
           <div className="flex items-center gap-3 mb-8">
@@ -1860,19 +1965,22 @@ export default function TicketsListScreen({
                     </div>
 
                     {/* Escalation/Failure Reason Card Block */}
-                    {(t.status === "review" || isFailed) && t.errorMsg && (
+                    {(t.status === "review" || t.status === "requires_manual_review" || t.status === "requires_user_correction" || isFailed) && (
                       <div className={`text-[11px] p-3 rounded-2xl leading-relaxed font-sans ${
-                        t.status === "review" ? "bg-amber-500/10 text-amber-900 border border-amber-200/45" : "bg-rose-50 text-rose-800 border border-rose-100/60"
+                        t.status === "requires_user_correction"
+                          ? "bg-orange-500/10 text-orange-950 border border-orange-200/45"
+                          : t.status === "requires_manual_review" || t.status === "review"
+                            ? "bg-amber-500/10 text-amber-900 border border-amber-200/45"
+                            : "bg-rose-50 text-rose-855 border border-rose-100/60"
                       }`}>
                         <span className="font-bold block uppercase text-[9px] mb-1 tracking-wider">
-                          {t.status === "review" ? "Límite de Presupuesto Excedido:" : "Error de Automatización:"}
+                          {t.status === "requires_user_correction"
+                            ? "Requiere Corrección:"
+                            : t.status === "requires_manual_review" || t.status === "review"
+                              ? "Revisión Requerida:"
+                              : "Error de Automatización:"}
                         </span>
-                        {t.errorMsg}
-                        {t.status === "review" && (
-                          <p className="text-[10px] text-amber-600 font-semibold mt-1 leading-normal">
-                            El conector requiere aprendizaje, pero supera el tope configurado de costo. El Administrador ya recibió la solicitud en su bandeja de alertas.
-                          </p>
-                        )}
+                        {getDetailedReasonMsg(t)}
                       </div>
                     )}
 

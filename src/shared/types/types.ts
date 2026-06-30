@@ -89,7 +89,7 @@ export interface Ticket {
   id?: string;
   userId: string;
   imageUrl: string;
-  status: "extracted" | "processing" | "completed" | "failed" | "review";
+  status: "extracted" | "processing" | "completed" | "failed" | "review" | "requires_user_correction" | "requires_manual_review" | "cfdi_validated" | "cancelled_by_user";
   rfcEmisor?: string;
   nombreEmisor?: string;
   fechaCompra?: string;
@@ -106,6 +106,13 @@ export interface Ticket {
   learningApprovedByAdmin?: boolean;
   isOfflinePending?: boolean;
   wasProcessedOffline?: boolean;
+  correctionError?: any;
+  reviewError?: any;
+  automationEvents?: any[];
+  processingMessage?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt?: string;
 }
 
 export interface ConnectorField {
