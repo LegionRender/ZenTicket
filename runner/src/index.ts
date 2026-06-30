@@ -123,8 +123,8 @@ async function processJob(jobId: string) {
       }
 
       // Succeeded on SAT retry!
-      const invRef = db.collection("invoices").doc();
-      const invoiceId = xmlResult.uuid || invRef.id;
+      const invoiceId = xmlResult.uuid || db.collection("users").doc(lockedJob.userId).collection("invoices").doc().id;
+      const invRef = db.collection("users").doc(lockedJob.userId).collection("invoices").doc(invoiceId);
       await invRef.set({
         userId: lockedJob.userId,
         ticketId,
@@ -284,8 +284,8 @@ async function processJob(jobId: string) {
     }
 
     // Succeeded!
-    const invRef = db.collection("invoices").doc();
-    const invoiceId = xmlResult.uuid || invRef.id;
+    const invoiceId = xmlResult.uuid || db.collection("users").doc(lockedJob.userId).collection("invoices").doc().id;
+    const invRef = db.collection("users").doc(lockedJob.userId).collection("invoices").doc(invoiceId);
     await invRef.set({
       userId: lockedJob.userId,
       ticketId,
