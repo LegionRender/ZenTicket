@@ -1828,7 +1828,7 @@ export default function ProfileForm({
             <button
               type="button"
               onClick={() => setIsAccordionExpanded(!isAccordionExpanded)}
-              className="flex-grow flex items-center justify-between p-4.5 bg-slate-50 border border-slate-200/80 hover:bg-slate-100/70 rounded-2xl transition cursor-pointer text-left font-black text-xs text-slate-600 uppercase tracking-wider"
+              className="flex-grow flex items-center justify-between p-4.5 bg-slate-50 hover:bg-slate-100/80 dark:bg-[#0d1226]/50 dark:hover:bg-[#0d1226]/80 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl transition-all duration-200 cursor-pointer text-left font-black text-xs text-slate-600 dark:text-slate-350 uppercase tracking-wider hover:border-slate-300 dark:hover:border-slate-700 active:scale-[0.99] select-none"
             >
               <span>Cambiar método de pago / Ver opciones</span>
               <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${isAccordionExpanded ? "rotate-180" : ""}`} />
@@ -1873,16 +1873,20 @@ export default function ProfileForm({
                 key={card.id}
                 type="button"
                 onClick={() => setSelectedCardForPlan(card.id)}
-                className="w-full flex items-center gap-4.5 p-4.5 border border-slate-200 bg-slate-50 hover:bg-slate-100/70 hover:border-[#0B53F4]/50 rounded-2xl text-left transition cursor-pointer group"
+                className="w-full flex items-center gap-4.5 p-4.5 border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-[#0d1226]/30 hover:bg-slate-100/70 dark:hover:bg-[#0d1226]/70 hover:border-[#0B53F4]/50 dark:hover:border-[#0072fc]/50 rounded-2xl text-left transition duration-200 cursor-pointer group"
               >
                 {renderVisualBrandBlock(card, "md")}
                 <div className="min-w-0">
-                  <span className="text-sm font-black text-slate-800 block">
+                  <span className="text-sm font-black text-slate-800 dark:text-slate-200 block">
                     {card.bankName || (card.brand === "VISA" ? "Tarjeta Visa" : "Mastercard")}
                   </span>
-                  <span className="text-xs text-slate-500 font-semibold block mt-1 truncate">Titular: {card.holderName}</span>
-                  <span className="text-xs text-slate-400 font-mono block mt-0.5">•••• {card.last4}</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold block mt-1 truncate">Titular: {card.holderName}</span>
+                  <span className="text-xs text-slate-400 dark:text-slate-500 font-mono block mt-0.5">•••• {card.last4}</span>
                 </div>
+
+                <span className="ml-auto text-[10px] font-black uppercase tracking-wider text-[#0B53F4] dark:text-[#5B8CFF] opacity-0 group-hover:opacity-100 transition-all duration-200 transform translate-x-2 group-hover:translate-x-0 whitespace-nowrap bg-[#EBF1FF] dark:bg-[#0B53F4]/10 border border-[#0B53F4]/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1 select-none">
+                  Cambiar tarjeta →
+                </span>
               </button>
             ))}
 
@@ -1892,15 +1896,19 @@ export default function ProfileForm({
                 key={wallet.id}
                 type="button"
                 onClick={() => setSelectedCardForPlan(wallet.id)}
-                className="w-full flex items-center gap-4.5 p-4.5 border border-slate-200 bg-slate-50 hover:bg-slate-100/70 hover:border-[#0B53F4]/50 rounded-2xl text-left transition cursor-pointer group"
+                className="w-full flex items-center gap-4.5 p-4.5 border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-[#0d1226]/30 hover:bg-slate-100/70 dark:hover:bg-[#0d1226]/70 hover:border-[#0B53F4]/50 dark:hover:border-[#0072fc]/50 rounded-2xl text-left transition duration-200 cursor-pointer group"
               >
-                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 flex items-center justify-center shrink-0 p-2 shadow-3xs">
+                <div style={{ backgroundColor: '#ffffff' }} className="w-14 h-14 rounded-xl border border-slate-200 dark:border-slate-800/80 flex items-center justify-center shrink-0 p-2 shadow-3xs">
                   <img src={wallet.logo} className="w-full h-full object-contain" alt={wallet.name} />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-sm font-black text-slate-800 block">{wallet.displayName}</span>
-                  <span className="text-xs text-slate-400 font-semibold block mt-1">{wallet.sub}</span>
+                  <span className="text-sm font-black text-slate-800 dark:text-slate-200 block">{wallet.displayName}</span>
+                  <span className="text-xs text-slate-400 dark:text-slate-500 font-semibold block mt-1">{wallet.sub}</span>
                 </div>
+
+                <span className="ml-auto text-[10px] font-black uppercase tracking-wider text-[#0B53F4] dark:text-[#5B8CFF] opacity-0 group-hover:opacity-100 transition-all duration-200 transform translate-x-2 group-hover:translate-x-0 whitespace-nowrap bg-[#EBF1FF] dark:bg-[#0B53F4]/10 border border-[#0B53F4]/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1 select-none">
+                  Cambiar tarjeta →
+                </span>
               </button>
             ))}
             </>
