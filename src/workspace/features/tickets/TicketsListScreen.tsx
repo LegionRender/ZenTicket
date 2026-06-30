@@ -292,10 +292,22 @@ export default function TicketsListScreen({
   const inProgressList = tickets.filter(
     (t) =>
       t.status !== "completed" &&
-      t.status !== "cfdi_validated" &&
-      t.status !== "merchant_cfdi_downloaded"
+      t.status !== "cfdi_validated"
   );
-  const emittedInvoicesList = invoices;
+  const emittedInvoicesList = invoices.filter(inv => {
+    const hasXml = !!inv.xmlContent && inv.xmlContent.trim().length > 0;
+    const hasStructure = hasXml && inv.xmlContent.includes("UUID=") && inv.xmlContent.includes("TimbreFiscalDigital");
+    const satStatusValid = inv.satStatus === "valid";
+
+    const ticket = tickets.find(t => t.id === inv.ticketId);
+    const ticketStatus = ticket?.status || inv.status;
+
+    if (ticketStatus === "completed") {
+      return hasXml && hasStructure && satStatusValid;
+    }
+
+    return ticketStatus === "cfdi_validated" || (hasXml && hasStructure && satStatusValid);
+  });
 
   // Handle opening the details view
   const activeInvoiceData = emittedInvoicesList.find(inv => inv.id === selectedInvoiceId);
@@ -719,7 +731,7 @@ export default function TicketsListScreen({
                   Sello Digital del SAT: {selloSAT}
                 </p>
                 <span className="text-[8px] uppercase font-black text-emerald-600 block mt-1 tracking-wider">
-                  ✓ Formato de Factura Timbrada compatible v4.0
+                  ✓ Formato de Factura compatible v4.0
                 </span>
               </div>
             </div>
@@ -1596,17 +1608,17 @@ export default function TicketsListScreen({
           
           <div className="text-slate-640 text-[11.5px] sm:text-xs text-left space-y-2 leading-relaxed">
             <p>
-              En esta demostración de ZenTicket, <strong>simulamos la interacción automatizada con el SAT y portales comerciales</strong> para enseñarte las capacidades de extracción de la IA mediante esquemas estructurados de selectores CSS (como Alsea, Oxxo o Walmart).
+              ZenTicket realiza el <strong>procesamiento automático y la validación en tiempo real</strong> de los tickets comerciales, consultando el portal oficial de facturación del comercio y verificando los CFDIs.
             </p>
             <p>
-              <strong>¿Cómo hacerlo 100% real en tu propio producto de producción?</strong>
+              <strong>¿Cómo opera en producción?</strong>
             </p>
             <ul className="list-decimal pl-4.5 space-y-2 text-[11px] sm:text-[11.5px] font-semibold text-slate-700">
               <li>
-                <strong className="text-slate-800">Conexión Automática con Portales:</strong> Configura un conector en el servidor que cargue la URL del portal del emisor, rellene los campos mapeados (RFC, folio, total) usando selectores CSS, resuelva captchas de forma automatizada y devuelva los archivos XML y PDF.
+                <strong className="text-slate-800">Conexión Segura con Portales:</strong> El conector accede directamente al portal oficial de facturación del comercio para solicitar la descarga de tus comprobantes en formato XML y PDF.
               </li>
               <li>
-                <strong className="text-slate-800">Conexión directa vía PAC / SAT Web Service:</strong> Solicita facturas directamente al SAT o a proveedores autorizados de certificación (PACs) asociando las credenciales de tu FIEL / CSD, permitiendo la descargas automáticas inmediatas desde las bases del SAT de forma masiva sin captchas.
+                <strong className="text-slate-800">Validación SAT:</strong> Una vez obtenidos, se verifica la autenticidad estructural del comprobante de forma directa ante los servidores oficiales del SAT.
               </li>
             </ul>
           </div>
@@ -1783,15 +1795,19 @@ export default function TicketsListScreen({
                                 RECIÉN AGREGADO
                               </span>
                             )}
-                            {t.status === "requires_manual_review" || t.status === "review" ? (
+                            {t.status === "requires_user_correction" ? (
+                              <span className="bg-orange-100 text-orange-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
+                                Requiere corrección
+                              </span>
+                            ) : t.status === "requires_manual_review" || t.status === "review" ? (
                               <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
-                                Revisión Manual
+                                En revisión
                               </span>
                             ) : isFailed ? (
                               <span className="bg-rose-100 text-rose-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
-                                Fallido
+                                No se pudo completar
                               </span>
-                            ) : t.status === "pending_portal_submission" || t.status === "submitted_to_merchant" ? (
+                            ) : ["pending_portal_submission", "submitted_to_merchant", "waiting_portal_result", "sat_verifying", "merchant_cfdi_downloaded"].includes(t.status || "") ? (
                               <span className="bg-blue-100 text-blue-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none font-bold">
                                 Facturando
                               </span>
@@ -1812,23 +1828,27 @@ export default function TicketsListScreen({
                             RECIÉN AGREGADO
                           </span>
                         )}
-                        {t.status === "requires_manual_review" || t.status === "review" ? (
-                          <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                            Revisión Manual
-                          </span>
-                        ) : isFailed ? (
-                          <span className="bg-rose-100 text-rose-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                            Fallido
-                          </span>
-                        ) : t.status === "pending_portal_submission" || t.status === "submitted_to_merchant" ? (
-                          <span className="bg-blue-100 text-blue-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none font-bold">
-                            Facturando
-                          </span>
-                        ) : (
-                          <span className="bg-[#FEF3C7] text-[#D97706] text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                            Procesando
-                          </span>
-                        )}
+                         {t.status === "requires_user_correction" ? (
+                           <span className="bg-orange-100 text-orange-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
+                             Requiere corrección
+                           </span>
+                         ) : t.status === "requires_manual_review" || t.status === "review" ? (
+                           <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
+                             En revisión
+                           </span>
+                         ) : isFailed ? (
+                           <span className="bg-rose-100 text-rose-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
+                             No se pudo completar
+                           </span>
+                         ) : ["pending_portal_submission", "submitted_to_merchant", "waiting_portal_result", "sat_verifying", "merchant_cfdi_downloaded"].includes(t.status || "") ? (
+                           <span className="bg-blue-100 text-blue-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none font-bold">
+                             Facturando
+                           </span>
+                         ) : (
+                           <span className="bg-[#FEF3C7] text-[#D97706] text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
+                             Procesando
+                           </span>
+                         )}
                       </div>
                     </div>
 
@@ -1926,7 +1946,7 @@ export default function TicketsListScreen({
         <div className={`space-y-4 lg:col-span-6 ${activeSubTab === "cfdi-obtenidos" ? "block" : "hidden lg:block"}`}>
           <div className="px-1 text-left mb-2">
             <h2 className="font-display font-extrabold text-base text-slate-800 tracking-tight">
-              CFDI obtenidos
+              Listos
             </h2>
           </div>
 

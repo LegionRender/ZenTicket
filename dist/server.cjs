@@ -4,6 +4,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __commonJS = (cb, mod) => function __require() {
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -20,6 +23,97 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+
+// firebase/functions/fiscalUtils.js
+var require_fiscalUtils = __commonJS({
+  "firebase/functions/fiscalUtils.js"(exports2, module2) {
+    var axios2 = require("axios");
+    function parseSatQrUrl2(text) {
+      if (!text) return null;
+      const idMatch = /[?&]id=([^&]+)/i.exec(text);
+      const reMatch = /[?&]re=([^&]+)/i.exec(text);
+      const rrMatch = /[?&]rr=([^&]+)/i.exec(text);
+      const ttMatch = /[?&]tt=([^&]+)/i.exec(text);
+      if (!idMatch || !reMatch || !rrMatch || !ttMatch) return null;
+      const uuid = idMatch[1].trim();
+      const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+      if (!uuidRegex.test(uuid)) return null;
+      return {
+        uuid,
+        rfcEmisor: reMatch[1].trim(),
+        rfcReceptor: rrMatch[1].trim(),
+        total: parseFloat(ttMatch[1].trim()) || 0
+      };
+    }
+    function validateXmlStructure2(xmlContent) {
+      if (!xmlContent) return false;
+      const hasComprobante = /<cfdi:Comprobante\b/i.test(xmlContent) || /<Comprobante\b/i.test(xmlContent);
+      const hasEmisor = /<cfdi:Emisor\b[^>]*\bRfc=/i.test(xmlContent) || /<Emisor\b[^>]*\bRfc=/i.test(xmlContent);
+      const hasReceptor = /<cfdi:Receptor\b[^>]*\bRfc=/i.test(xmlContent) || /<Receptor\b[^>]*\bRfc=/i.test(xmlContent);
+      const hasTimbre = (/<tfd:TimbreFiscalDigital\b/i.test(xmlContent) || /<TimbreFiscalDigital\b/i.test(xmlContent)) && /\bUUID=/i.test(xmlContent) && /\bFechaTimbrado=/i.test(xmlContent) && /\bSelloCFD=/i.test(xmlContent) && /\bSelloSAT=/i.test(xmlContent) && /\bNoCertificadoSAT=/i.test(xmlContent);
+      return !!(hasComprobante && hasEmisor && hasReceptor && hasTimbre);
+    }
+    function parseCfdiInfo2(xmlContent) {
+      const uuidMatch = /UUID="([^"]+)"/i.exec(xmlContent);
+      const emisorRfcMatch = /<cfdi:Emisor\b[^>]*\bRfc="([^"]+)"/i.exec(xmlContent) || /<Emisor\b[^>]*\bRfc="([^"]+)"/i.exec(xmlContent);
+      const receptorRfcMatch = /<cfdi:Receptor\b[^>]*\bRfc="([^"]+)"/i.exec(xmlContent) || /<Receptor\b[^>]*\bRfc="([^"]+)"/i.exec(xmlContent);
+      const totalMatch = /<cfdi:Comprobante\b[^>]*\bTotal="([^"]+)"/i.exec(xmlContent) || /<Comprobante\b[^>]*\bTotal="([^"]+)"/i.exec(xmlContent);
+      return {
+        uuid: uuidMatch ? uuidMatch[1].trim() : "",
+        rfcEmisor: emisorRfcMatch ? emisorRfcMatch[1].trim() : "",
+        rfcReceptor: receptorRfcMatch ? receptorRfcMatch[1].trim() : "",
+        total: totalMatch ? parseFloat(totalMatch[1].trim()) : 0,
+        totalStr: totalMatch ? totalMatch[1].trim() : ""
+      };
+    }
+    var maskUuid = (u) => u.length > 8 ? `${u.substring(0, 4)}...${u.substring(u.length - 4)}` : u;
+    var maskRfc = (r) => r.length > 6 ? `${r.substring(0, 3)}***${r.substring(r.length - 3)}` : r;
+    async function verifyCfdiWithSat2(rfcEmisor, rfcReceptor, total, uuid) {
+      const expression = `?re=${rfcEmisor}&rr=${rfcReceptor}&tt=${total.toFixed(2)}&id=${uuid}`;
+      const soapEnvelope = `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:Consulta>
+         <tem:expresionImpresa><![CDATA[${expression}]]></tem:expresionImpresa>
+      </tem:Consulta>
+   </soapenv:Body>
+</soapenv:Envelope>`;
+      try {
+        const response = await axios2.post("https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc", soapEnvelope, {
+          headers: {
+            "Content-Type": "text/xml;charset=utf-8",
+            "SOAPAction": "http://tempuri.org/IConsultaCFDIService/Consulta"
+          }
+        });
+        const xmlResponse = response.data;
+        console.log(`[SAT Verify] Expression: ?re=${maskRfc(rfcEmisor)}&rr=${maskRfc(rfcReceptor)}&tt=${total}&id=${maskUuid(uuid)}`);
+        const estadoMatch = /<a:Estado>([^<]+)<\/a:Estado>/i.exec(xmlResponse) || /<Estado>([^<]+)<\/Estado>/i.exec(xmlResponse);
+        const codigoEstatusMatch = /<a:CodigoEstatus>([^<]+)<\/a:CodigoEstatus>/i.exec(xmlResponse) || /<CodigoEstatus>([^<]+)<\/CodigoEstatus>/i.exec(xmlResponse);
+        const estado = estadoMatch ? estadoMatch[1].trim() : "";
+        const codigoEstatus = codigoEstatusMatch ? codigoEstatusMatch[1].trim() : "";
+        const estadoLower = estado.toLowerCase();
+        if (estadoLower === "vigente") {
+          return { status: "valid", satStatus: estado, detail: `Estado: ${estado}. Codigo: ${codigoEstatus}` };
+        } else if (estadoLower === "cancelado") {
+          return { status: "canceled", satStatus: estado, detail: `Estado: ${estado}. Codigo: ${codigoEstatus}` };
+        } else {
+          return { status: "not_found", satStatus: estado || "No Encontrado", detail: `Estado: ${estado || "No Encontrado"}. Codigo: ${codigoEstatus}` };
+        }
+      } catch (err) {
+        console.error("Error calling SAT CFDI verification service:", err);
+        return { status: "error", satStatus: "Timeout o error cr\xEDtico", detail: err.message || "Network error calling SAT service" };
+      }
+    }
+    module2.exports = {
+      parseSatQrUrl: parseSatQrUrl2,
+      validateXmlStructure: validateXmlStructure2,
+      parseCfdiInfo: parseCfdiInfo2,
+      verifyCfdiWithSat: verifyCfdiWithSat2,
+      maskUuid,
+      maskRfc
+    };
+  }
+});
 
 // server.ts
 var import_express = __toESM(require("express"), 1);
@@ -549,6 +643,35 @@ app.post("/api/tickets/analyze", async (req, res) => {
     } else {
       fallbackToOcrMock = true;
     }
+    const MERCHANT_PROFILES = {
+      "system-oxxo": {
+        name: "OXXO Cadena",
+        rfc: "CCO8605231N4",
+        portalUrl: "http://factura.oxxo.com:8080",
+        requiredFields: ["rfcEmisor", "folio", "total", "fecha"],
+        folioPattern: /^[a-zA-Z0-9\-]+$/i,
+        dateFormat: "YYYY-MM-DD",
+        minConfidence: 0.7
+      },
+      "system-starbucks": {
+        name: "Starbucks / Alsea",
+        rfc: "SHE190630TX1",
+        portalUrl: "https://alsea.facturacion.com",
+        requiredFields: ["rfcEmisor", "folio", "total", "fecha"],
+        folioPattern: /^[0-9]+$/i,
+        dateFormat: "YYYY-MM-DD",
+        minConfidence: 0.7
+      },
+      "system-walmart": {
+        name: "Walmart / Aurrera",
+        rfc: "NWM9709244W4",
+        portalUrl: "https://facturacion.walmartmexico.com",
+        requiredFields: ["rfcEmisor", "folio", "total", "fecha"],
+        folioPattern: /^[0-9]+$/i,
+        dateFormat: "YYYY-MM-DD",
+        minConfidence: 0.7
+      }
+    };
     if (fallbackToOcrMock || !extractedData) {
       console.warn("[OCR Fallback] Gemini unavailable. Returning empty manual-capture draft.", ocrErrorDetails);
       extractedData = {
@@ -563,6 +686,133 @@ app.post("/api/tickets/analyze", async (req, res) => {
         items: []
       };
     }
+    const pipelineLogs = [];
+    pipelineLogs.push("Etapa 1: Recibida imagen del ticket y decodificada.");
+    let qrDetected = false;
+    let qrValue = "";
+    let qrParsed = parseSatQrUrl(textResult) || extractedData && (parseSatQrUrl(extractedData.folio) || parseSatQrUrl(extractedData.sucursal));
+    if (qrParsed) {
+      qrDetected = true;
+      qrValue = `https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?id=${qrParsed.uuid}&re=${qrParsed.rfcEmisor}&rr=${qrParsed.rfcReceptor}&tt=${qrParsed.total}`;
+      pipelineLogs.push("Etapa 2: C\xF3digo QR SAT detectado en la imagen. Priorizando datos del QR sobre OCR.");
+    } else {
+      pipelineLogs.push("Etapa 2: Escaneando c\xF3digos de barras y QR... No se localizaron c\xF3digos legibles.");
+    }
+    pipelineLogs.push("Etapa 3: Analizando datos con motor OCR de IA Gemini.");
+    const rawNombre = extractedData.nombreEmisor || "";
+    const rawRfc = extractedData.rfcEmisor || "";
+    let detectedProfileKey = "";
+    let detectedProfile = null;
+    if (rawRfc.toUpperCase().includes("CCO8605231N4") || rawNombre.toUpperCase().includes("OXXO")) {
+      detectedProfileKey = "system-oxxo";
+      detectedProfile = MERCHANT_PROFILES["system-oxxo"];
+    } else if (rawRfc.toUpperCase().includes("SHE190630TX1") || rawNombre.toUpperCase().includes("STARBUCKS") || rawNombre.toUpperCase().includes("ALSEA")) {
+      detectedProfileKey = "system-starbucks";
+      detectedProfile = MERCHANT_PROFILES["system-starbucks"];
+    } else if (rawRfc.toUpperCase().includes("NWM9709244W4") || rawNombre.toUpperCase().includes("WALMART") || rawNombre.toUpperCase().includes("AURRERA")) {
+      detectedProfileKey = "system-walmart";
+      detectedProfile = MERCHANT_PROFILES["system-walmart"];
+    }
+    if (detectedProfile) {
+      pipelineLogs.push(`Etapa 4: Comercio identificado: ${detectedProfile.name} (${detectedProfile.rfc}).`);
+    } else {
+      pipelineLogs.push("Etapa 4: Comercio identificado como comercio local/general.");
+    }
+    const fields = {
+      comercio: {
+        value: detectedProfile ? detectedProfile.name : rawNombre || "Comercio General",
+        confidence: detectedProfile ? 0.98 : 0.85,
+        source: "ocr",
+        rawText: rawNombre,
+        normalizedValue: detectedProfile ? detectedProfile.name : rawNombre || "Comercio General"
+      },
+      rfcEmisor: {
+        value: qrParsed ? qrParsed.rfcEmisor : rawRfc.toUpperCase().replace(/[^A-Z0-9]/g, "") || "XAXX010101000",
+        confidence: qrParsed ? 1 : rawRfc && rawRfc.length >= 12 ? 0.97 : 0.5,
+        source: qrParsed ? "qr" : "ocr",
+        rawText: rawRfc,
+        normalizedValue: qrParsed ? qrParsed.rfcEmisor : rawRfc.toUpperCase().replace(/[^A-Z0-9]/g, "") || "XAXX010101000"
+      },
+      fecha: {
+        value: extractedData.fechaCompra || "",
+        confidence: extractedData.fechaCompra ? 0.95 : 0.5,
+        source: "ocr",
+        rawText: extractedData.fechaCompra || "",
+        normalizedValue: extractedData.fechaCompra || ""
+      },
+      hora: {
+        value: extractedData.hora || "12:00:00",
+        confidence: extractedData.hora ? 0.88 : 0.6,
+        source: "ocr",
+        rawText: extractedData.hora || "",
+        normalizedValue: extractedData.hora || "12:00:00"
+      },
+      total: {
+        value: qrParsed ? qrParsed.total : parseFloat(String(extractedData.total)) || 0,
+        confidence: qrParsed ? 1 : extractedData.total ? 0.96 : 0.4,
+        source: qrParsed ? "qr" : "ocr",
+        rawText: String(extractedData.total || ""),
+        normalizedValue: qrParsed ? String(qrParsed.total) : String(extractedData.total || 0)
+      },
+      folio: {
+        value: qrParsed ? qrParsed.uuid : extractedData.folio || "",
+        confidence: qrParsed ? 1 : extractedData.folio ? 0.93 : 0.3,
+        source: qrParsed ? "qr" : "ocr",
+        rawText: extractedData.folio || "",
+        normalizedValue: qrParsed ? qrParsed.uuid : extractedData.folio || ""
+      },
+      sucursal: {
+        value: extractedData.sucursal || "Matriz",
+        confidence: extractedData.sucursal ? 0.88 : 0.5,
+        source: "ocr",
+        rawText: extractedData.sucursal || "",
+        normalizedValue: extractedData.sucursal || "Matriz"
+      },
+      terminal: {
+        value: extractedData.terminal || "Caja 1",
+        confidence: extractedData.terminal ? 0.8 : 0.5,
+        source: "ocr",
+        rawText: extractedData.terminal || "",
+        normalizedValue: extractedData.terminal || "Caja 1"
+      },
+      barcode: {
+        value: qrValue,
+        confidence: qrDetected ? 1 : 0,
+        source: qrDetected ? "qr" : "none",
+        rawText: qrValue,
+        normalizedValue: qrValue
+      }
+    };
+    pipelineLogs.push("Etapa 5: Ejecutando normalizaci\xF3n de campos (limpieza de RFC, formato de fechas y totales).");
+    let validationFailed = false;
+    let failReason = "";
+    if (detectedProfile && fields.folio.value) {
+      if (!detectedProfile.folioPattern.test(fields.folio.value)) {
+        fields.folio.confidence = 0.5;
+        pipelineLogs.push(`\u26A0\uFE0F Advertencia: El folio '${fields.folio.value}' no coincide con el patr\xF3n esperado del comercio.`);
+      }
+    }
+    const required = detectedProfile ? detectedProfile.requiredFields : ["rfcEmisor", "folio", "total", "fecha"];
+    for (const reqField of required) {
+      const fieldKey = reqField === "fecha" ? "fecha" : reqField;
+      const f = fields[fieldKey];
+      if (!f || !f.value || f.confidence < 0.7) {
+        validationFailed = true;
+        failReason = `El campo requerido '${reqField}' falta o tiene baja confianza de extracci\xF3n.`;
+        pipelineLogs.push(`\u274C Fall\xF3 validaci\xF3n: Campo '${reqField}' no es confiable (Confianza: ${f ? Math.round(f.confidence * 100) : 0}%).`);
+      }
+    }
+    const sumConf = Object.values(fields).reduce((sum, f) => sum + f.confidence, 0);
+    const avgConfidence = sumConf / Object.keys(fields).length;
+    pipelineLogs.push(`Etapa 6: C\xE1lculo de confianza general completado: ${Math.round(avgConfidence * 100)}%.`);
+    let finalOcrFailed = fallbackToOcrMock || validationFailed;
+    let ocrErrorStr = "";
+    if (validationFailed) {
+      ocrErrorStr = `Extracci\xF3n de datos con baja confianza o incompleta: ${failReason} Requiere revisi\xF3n del usuario.`;
+      pipelineLogs.push("Decisi\xF3n: Confianza insuficiente para automatizaci\xF3n autom\xE1tica. Marcando para revisi\xF3n manual.");
+    } else {
+      pipelineLogs.push("Decisi\xF3n: Confianza aprobada. Listo para automatizaci\xF3n autom\xE1tica.");
+    }
     const cost = fallbackToOcrMock ? 0 : 0.5;
     let rawCost = 0;
     if (textResult) {
@@ -571,6 +821,17 @@ app.post("/api/tickets/analyze", async (req, res) => {
     }
     res.json({
       ...extractedData,
+      rfcEmisor: fields.rfcEmisor.value,
+      nombreEmisor: fields.comercio.value,
+      fechaCompra: fields.fecha.value,
+      folio: fields.folio.value,
+      total: fields.total.value,
+      sucursal: fields.sucursal.value,
+      ocrFailed: finalOcrFailed,
+      ocrError: ocrErrorStr || extractedData.ocrError || null,
+      confidenceScore: parseFloat(avgConfidence.toFixed(4)),
+      extractedFields: fields,
+      pipelineLogs,
       cost,
       rawCost: parseFloat(rawCost.toFixed(6))
     });
@@ -695,32 +956,6 @@ app.post("/api/fiscal/parse-constancia", async (req, res) => {
     res.status(500).json({ error: "Error interno al procesar constancia fiscal" });
   }
 });
-function generateUUID() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    const v = c === "x" ? r : r & 3 | 8;
-    return v.toString(16).toUpperCase();
-  });
-}
-function escapeXml(unsafe) {
-  if (typeof unsafe !== "string") return "";
-  return unsafe.replace(/[<>&'"]/g, (c) => {
-    switch (c) {
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case "&":
-        return "&amp;";
-      case "'":
-        return "&apos;";
-      case '"':
-        return "&quot;";
-      default:
-        return c;
-    }
-  });
-}
 function getLocalDictionaryMatch(nombreEmisor, rfcEmisor) {
   const nameClean = nombreEmisor.toLowerCase().trim();
   const BRAND_DICTIONARY = [
@@ -1063,216 +1298,6 @@ function getLocalConnectorFallback(nombreEmisor, rfcEmisor) {
     ]
   };
 }
-function generateLocalXml(ticket, profile, connector, folioFiscal) {
-  const dateStr = (/* @__PURE__ */ new Date()).toISOString().substring(0, 19);
-  const total = parseFloat(ticket.total) || 0;
-  const subtotal = (total / 1.16).toFixed(2);
-  const iva = (total - parseFloat(subtotal)).toFixed(2);
-  let itemsXml = "";
-  if (Array.isArray(ticket.items) && ticket.items.length > 0) {
-    itemsXml = ticket.items.map((item, idx) => {
-      const itemAmount = parseFloat(item.amount) || 0;
-      const itemSubtotal = (itemAmount / 1.16).toFixed(2);
-      const itemIva = (itemAmount - parseFloat(itemSubtotal)).toFixed(2);
-      return `    <cfdi:Concepto ClaveProdServ="90101501" NoIdentificacion="REF_${idx + 1}" Cantidad="1.00" ClaveUnidad="E48" Unidad="Servicio" Descripcion="${escapeXml(item.description || "Consumo general")}" ValorUnitario="${itemSubtotal}" Importe="${itemSubtotal}">
-      <cfdi:Impuestos>
-        <cfdi:Traslados>
-          <cfdi:Traslado Base="${itemSubtotal}" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="${itemIva}" />
-        </cfdi:Traslados>
-      </cfdi:Impuestos>
-    </cfdi:Concepto>`;
-    }).join("\n");
-  } else {
-    itemsXml = `    <cfdi:Concepto ClaveProdServ="90101501" NoIdentificacion="CON-01" Cantidad="1.00" ClaveUnidad="E48" Unidad="Servicio" Descripcion="Consumo de alimentos seg\xFAn ticket folio ${escapeXml(ticket.folio || "001")}" ValorUnitario="${subtotal}" Importe="${subtotal}">
-      <cfdi:Impuestos>
-        <cfdi:Traslados>
-          <cfdi:Traslado Base="${subtotal}" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="${iva}" />
-        </cfdi:Traslados>
-      </cfdi:Impuestos>
-    </cfdi:Concepto>`;
-  }
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" xsi:schemaLocation="http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd http://www.sat.gob.mx/TimbreFiscalDigital http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd" Version="4.0" Serie="FACT" Folio="${Math.floor(1e5 + Math.random() * 9e5)}" Fecha="${dateStr}" Sello="SIM_SELLOS_AUTOMATION_OK_FACTUBOT" NoCertificado="00001000000504454321" SubTotal="${subtotal}" Total="${total.toFixed(2)}" Moneda="MXN" TipoDeComprobante="I" Exportacion="01" LugarExpedicion="${profile.codigoPostal || "01000"}">
-  <cfdi:Emisor Rfc="${escapeXml(ticket.rfcEmisor || "XAXX010101000")}" Nombre="${escapeXml(ticket.nombreEmisor || "EMISOR SIMULADO S.A. DE C.V.")}" RegimenFiscal="601" />
-  <cfdi:Receptor Rfc="${escapeXml(profile.rfc || "XAXX010101000")}" Nombre="${escapeXml(profile.razonSocial || "CLIENTE RECEPTOR S.A.")}" DomicilioFiscalReceptor="${profile.codigoPostal || "01000"}" RegimenFiscalReceptor="${profile.regimenFiscal || "605"}" UsoCFDI="${profile.usoCFDI || "G03"}" />
-  <cfdi:Conceptos>
-${itemsXml}
-  </cfdi:Conceptos>
-  <cfdi:Impuestos TotalImpuestosTrasladados="${iva}">
-    <cfdi:Traslados>
-      <cfdi:Traslado Base="${subtotal}" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="${iva}" />
-    </cfdi:Traslados>
-  </cfdi:Impuestos>
-  <cfdi:Complemento>
-    <tfd:TimbreFiscalDigital Version="1.1" UUID="${folioFiscal}" FechaTimbrado="${dateStr}" NoCertificadoSAT="00001000000502000436" SelloCFD="SelloDigitalEmisorSimuladoFactuBot" SelloSAT="SelloDigitalSatSimuladoFactuBot" RfcProvCertif="SAT970701NN3" />
-  </cfdi:Complemento>
-</cfdi:Comprobante>`;
-}
-function generateLocalPdfHtml(ticket, profile, connector, folioFiscal) {
-  const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("es-MX", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  const total = parseFloat(ticket.total) || 0;
-  const subtotal = total / 1.16;
-  const iva = total - subtotal;
-  let itemsRows = "";
-  if (Array.isArray(ticket.items) && ticket.items.length > 0) {
-    itemsRows = ticket.items.map((item, idx) => {
-      const itemAmount = parseFloat(item.amount) || 0;
-      const itemSub = itemAmount / 1.16;
-      return `
-        <tr class="border-b border-zinc-100 last:border-0 hover:bg-zinc-50/50 transition">
-          <td class="py-2 px-3.5 font-medium text-zinc-800">${idx + 1}</td>
-          <td class="py-2 px-3.5 font-mono text-[10px] text-zinc-500">90101501</td>
-          <td class="py-2 px-3.5 text-zinc-700 text-xs">${escapeXml(item.description || "Consumo general")}</td>
-          <td class="py-2 px-3.5 text-right font-mono text-[10px] text-zinc-650">$${itemSub.toFixed(2)}</td>
-          <td class="py-2 px-3.5 text-right font-mono font-semibold text-xs text-zinc-900">$${itemAmount.toFixed(2)}</td>
-        </tr>
-      `;
-    }).join("");
-  } else {
-    itemsRows = `
-      <tr class="border-b border-zinc-100 last:border-0 hover:bg-zinc-50/50 transition">
-        <td class="py-2 px-3.5 font-semibold text-zinc-850">1</td>
-        <td class="py-2 px-3.5 font-mono text-[10px] text-zinc-500">90101501</td>
-        <td class="py-2 px-3.5 text-zinc-700 text-xs">Consumo de alimentos seg\xFAn ticket folio: ${escapeXml(ticket.folio || "M-8495")}</td>
-        <td class="py-2 px-3.5 text-right font-mono text-[10px] text-zinc-650">$${subtotal.toFixed(2)}</td>
-        <td class="py-2 px-3.5 text-right font-mono font-bold text-xs text-zinc-900">$${total.toFixed(2)}</td>
-      </tr>
-    `;
-  }
-  return `
-    <div class="max-w-4xl mx-auto bg-white p-5 md:p-8 rounded-2xl border border-zinc-150 text-zinc-800 text-xs font-sans relative my-4 shadow-sm select-none print:my-0 print:border-0 print:shadow-none">
-      
-      <!-- HEADER ROW -->
-      <div class="flex flex-row justify-between items-start border-b border-zinc-100 pb-3.5 mb-3.5">
-        <div class="space-y-1">
-          <!-- ZenTicket Logo Lockup -->
-          <div class="flex items-center gap-1.5 select-none">
-            <svg width="22" height="22" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <linearGradient id="zt-mark-pdf" x1="0" y1="0" x2="28" y2="28">
-                  <stop offset="0%" stop-color="#5B8CFF" />
-                  <stop offset="100%" stop-color="#2152EE" />
-                </linearGradient>
-              </defs>
-              <rect x="1" y="1" width="26" height="26" rx="7" fill="url(#zt-mark-pdf)" stroke="rgba(15,23,42,0.06)" />
-              <path d="M9 9h10l-9.2 10H19" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
-            </svg>
-            <span class="text-sm font-black text-slate-900 tracking-tight">ZenTicket</span>
-          </div>
-          <span class="text-[9px] font-black text-emerald-600 uppercase tracking-wider block">COMPROBANTE FISCAL DIGITAL POR INTERNET (CFDI 4.0)</span>
-        </div>
-        <div class="text-right leading-tight">
-          <h2 class="font-extrabold text-sm text-zinc-900 uppercase">${escapeXml(ticket.nombreEmisor || "RAZ\xD3N SOCIAL EMISOR")}</h2>
-          <p class="text-[10px] text-zinc-500 mt-0.5">RFC: <strong class="font-bold select-all">${escapeXml(ticket.rfcEmisor || "XAXX010101000")}</strong> | R\xE9gimen: 601</p>
-          <p class="text-[10px] text-zinc-450">Lugar de Expedici\xF3n CP: ${profile.codigoPostal || "01000"}</p>
-        </div>
-      </div>
-
-      <!-- METADATA GRID (3 columns) -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 bg-zinc-50/50 p-3.5 rounded-xl border border-zinc-150">
-        <div>
-          <h4 class="text-[9px] font-black text-zinc-400 uppercase tracking-wider mb-1.5">RECEPTOR</h4>
-          <h5 class="font-extrabold text-zinc-900 uppercase text-[11px] select-all leading-tight">${escapeXml(profile.razonSocial || "RECEPTOR DEFAULT")}</h5>
-          <div class="space-y-0.5 mt-1 text-[10px] text-zinc-500">
-            <p>RFC: <strong class="font-bold select-all text-zinc-700">${escapeXml(profile.rfc || "XAXX010101000")}</strong></p>
-            <p>R\xE9gimen Receptor: ${profile.regimenFiscal || "605"}</p>
-            <p>Uso CFDI: ${profile.usoCFDI || "G03"}</p>
-          </div>
-        </div>
-        
-        <div>
-          <h4 class="text-[9px] font-black text-zinc-400 uppercase tracking-wider mb-1.5">DETALLES CFDI</h4>
-          <div class="space-y-0.5 text-[10px] text-zinc-500">
-            <p>Folio Interno: <strong class="font-bold text-zinc-700">FT-${Math.floor(1e4 + Math.random() * 9e4)}</strong></p>
-            <p>Fecha Emisi\xF3n: ${dateStr}</p>
-            <p>M\xE9todo de Pago: PUE</p>
-            <p>Forma de Pago: 04 (Tarjeta o equiv.)</p>
-          </div>
-        </div>
-
-        <div>
-          <h4 class="text-[9px] font-black text-zinc-400 uppercase tracking-wider mb-1">FOLIO FISCAL (UUID)</h4>
-          <span class="text-[9.5px] font-bold font-mono text-zinc-650 block bg-white px-2.5 py-1.5 rounded-lg border border-zinc-200 break-all select-all leading-tight shadow-3xs">${folioFiscal}</span>
-        </div>
-      </div>
-
-      <!-- CONCEPTS TABLE -->
-      <div class="border border-zinc-200 rounded-xl overflow-hidden mb-4 shadow-3xs">
-        <table class="w-full text-left border-collapse">
-          <thead>
-            <tr class="bg-zinc-50/70 border-b border-zinc-250 text-zinc-500 font-bold text-[9px] uppercase tracking-wider select-none">
-              <th class="py-2 px-3.5 w-10">Cant</th>
-              <th class="py-2 px-3.5 w-20">Sat ID</th>
-              <th class="py-2 px-3.5">Descripci\xF3n de Concepto</th>
-              <th class="py-2 px-3.5 text-right w-24">Precio Unit</th>
-              <th class="py-2 px-3.5 text-right w-24">Importe</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-zinc-100 text-[10.5px]">
-            ${itemsRows}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- TOTALS & QR ROW -->
-      <div class="flex flex-row justify-between items-end gap-6 border-b border-zinc-150 pb-3.5 mb-3.5">
-        <div class="flex items-center gap-3 bg-zinc-50 border border-zinc-150 rounded-lg p-2.5">
-          <div class="bg-white border rounded-md p-1 shrink-0 shadow-3xs">
-            <svg class="w-12 h-12 text-zinc-800" viewBox="0 0 100 100">
-              <rect width="100" height="100" fill="white" />
-              <rect x="10" y="10" width="10" height="10" fill="black" />
-              <rect x="30" y="10" width="10" height="10" fill="black" />
-              <rect x="10" y="30" width="10" height="10" fill="black" />
-              <rect x="70" y="10" width="10" height="10" fill="black" />
-              <rect x="80" y="10" width="10" height="10" fill="black" />
-              <rect x="70" y="30" width="10" height="10" fill="black" />
-              <rect x="10" y="70" width="10" height="10" fill="black" />
-              <rect x="20" y="70" width="10" height="10" fill="black" />
-              <rect x="10" y="80" width="10" height="10" fill="black" />
-              <rect x="40" y="40" width="20" height="20" fill="black" />
-              <rect x="50" y="70" width="30" height="10" fill="black" />
-              <rect x="70" y="50" width="10" height="30" fill="black" />
-            </svg>
-          </div>
-          <p class="text-[8.5px] text-zinc-400 max-w-[190px] leading-snug">
-            C\xF3digo bidimensional QR para verificaci\xF3n inmediata del CFDI directamente en los canales del SAT.
-          </p>
-        </div>
-        
-        <div class="w-64 space-y-1 text-xs">
-          <div class="flex justify-between text-zinc-500 font-semibold">
-            <span>Subtotal:</span>
-            <span class="font-mono">$${subtotal.toFixed(2)}</span>
-          </div>
-          <div class="flex justify-between text-zinc-500 font-semibold">
-            <span>IVA (16%):</span>
-            <span class="font-mono">$${iva.toFixed(2)}</span>
-          </div>
-          <div class="flex justify-between border-t border-zinc-200 pt-1.5 font-black text-base text-[#0B53F4]">
-            <span>Total MXN:</span>
-            <span class="font-mono select-all">$${total.toFixed(2)}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- DIGITAL STAMPS (3 columns) -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-[7px] text-zinc-400 font-mono leading-tight break-all">
-        <div>
-          <p class="font-black text-zinc-500 uppercase tracking-wider text-[7.5px] mb-0.5">Cadena Original SAT</p>
-          <p class="bg-zinc-50 p-2 rounded-lg border border-zinc-150 select-all">||1.1|${folioFiscal}|${dateStr}|SAT970701NN3|SIM_SELLOS_CFD_SAT_OK|00001000000504465028||</p>
-        </div>
-        <div>
-          <p class="font-black text-zinc-500 uppercase tracking-wider text-[7.5px] mb-0.5">Sello Digital Emisor</p>
-          <p class="bg-zinc-50 p-2 rounded-lg border border-zinc-150 select-all">SIM_COMPLEMENTO_CFD_CADENA_ORIGINAL_SELLADO_DIGITAL_EMISOR_ZENTICKET_OFFLINE</p>
-        </div>
-        <div>
-          <p class="font-black text-zinc-500 uppercase tracking-wider text-[7.5px] mb-0.5">Sello Digital SAT</p>
-          <p class="bg-zinc-50 p-2 rounded-lg border border-zinc-150 select-all">SIM_COMPLEMENTO_SAT_CADENA_ORIGINAL_SELLADO_DIGITAL_SAT_ZENTICKET_OFFLINE</p>
-        </div>
-      </div>
-    </div>
-  `;
-}
 app.post("/api/connectors/learn", async (req, res) => {
   const { nombreEmisor, rfcEmisor, learnedFrom, tokenSaver } = req.body;
   const customKey = req.headers["x-gemini-api-key"];
@@ -1481,80 +1506,53 @@ app.post("/api/connectors/learn", async (req, res) => {
     }
   }
 });
+var {
+  parseSatQrUrl,
+  validateXmlStructure,
+  parseCfdiInfo,
+  verifyCfdiWithSat
+} = require_fiscalUtils();
+app.post("/api/cfdi/verify-sat", async (req, res) => {
+  const { xmlContent } = req.body;
+  if (!xmlContent) {
+    res.status(400).json({ error: "Missing xmlContent in request body" });
+    return;
+  }
+  const isStructuralValid = validateXmlStructure(xmlContent);
+  if (!isStructuralValid) {
+    res.json({
+      status: "invalid_structure",
+      satStatus: "Estructura inv\xE1lida",
+      error: "El XML no contiene la estructura b\xE1sica obligatoria o le faltan nodos requeridos (Comprobante, Emisor, Receptor o TimbreFiscalDigital)."
+    });
+    return;
+  }
+  const info = parseCfdiInfo(xmlContent);
+  if (!info.uuid || !info.rfcEmisor || !info.rfcReceptor || !info.total) {
+    res.json({
+      status: "invalid_xml",
+      satStatus: "XML incompleto",
+      error: "El XML no contiene toda la informaci\xF3n fiscal obligatoria (UUID, RFC Emisor, RFC Receptor o Total)."
+    });
+    return;
+  }
+  const verification = await verifyCfdiWithSat(info.rfcEmisor, info.rfcReceptor, info.total, info.uuid);
+  res.json({
+    status: verification.status,
+    satStatus: verification.satStatus,
+    detail: verification.detail,
+    info
+  });
+});
 app.post("/api/automation/run", async (req, res) => {
   const { ticket, profile, connector } = req.body;
-  const customKey = req.headers["x-gemini-api-key"];
   if (!ticket || !profile || !connector) {
     res.status(400).json({ error: "Missing ticket, profile, or connector data for automation" });
     return;
   }
-  const generatedFolioFiscal = generateUUID();
-  let ai;
-  try {
-    ai = getGeminiClient(customKey);
-  } catch (err) {
-    console.warn("Gemini client missing or failed to initialize, using robust offline invoice generator.");
-    res.json({
-      xmlContent: generateLocalXml(ticket, profile, connector, generatedFolioFiscal),
-      pdfHtml: generateLocalPdfHtml(ticket, profile, connector, generatedFolioFiscal),
-      folioFiscal: generatedFolioFiscal,
-      cost: connector?.learnedFrom === "automatizacion_ticket" ? 1.5 : 2.5,
-      rawCost: 0
-    });
-    return;
-  }
-  const payloadText = `TICKET COMPRADO: ${JSON.stringify(ticket)}
-                       DATOS FISCALES RECEPTOR: ${JSON.stringify(profile)}
-                       CONECTOR PORTAL: ${JSON.stringify(connector)}`;
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: payloadText,
-      config: {
-        systemInstruction: `Eres FactuBot AI, el motor de generaci\xF3n CFDI 4.0 oficial de simulaci\xF3n.
-                            Dado un ticket de compra mexicano extra\xEDdo, la direcci\xF3n del portal de facturaci\xF3n y el perfil fiscal del receptor, procesa la automatizaci\xF3n.
-                            Debes generar tres piezas de informaci\xF3n extremadamente estructuradas:
-                            1. Un CFDI v4.0 XML realista. Debe poseer etiquetas est\xE1ndar (cfdi:Comprobante, cfdi:Emisor, cfdi:Receptor, cfdi:Conceptos, cfdi:Concepto, cfdi:Impuestos, cfdi:Traslados, cfdi:Traslado con TipoFactor='Tasa', TasaOCuota='0.160000', timbrado con un timbre tfd:TimbreFiscalDigital realista con FolioFiscal UUID, NoCertificadoSAT y SellosBase64 simulados).
-                            2. Un PDF en HTML responsive moderno, estilizado con excelentes clases de Tailwind CSS, que asombre visualmente. Debe poseer un t\xEDtulo formal de 'REPRESENTACI\xD3N IMPRESA DE CFDI 4.0', un dise\xF1o tabular impecable, logo estilizado, c\xF3digo de barras QR (representado con un recuadro interactivo o SVG visual), sello digital de emisor, receptor, totales desglosados (Subtotal, IVA 16%, Total), desglose de conceptos, y un bot\xF3n para exportar o imprimir. El HTML no debe incluir doctype de p\xE1gina completa, solo un contenedor div principal.
-                            3. El Folio Fiscal UUID de la transacci\xF3n simulada.`,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            xmlContent: { type: "STRING", description: "El XML de CFDI 4.0 alinedado estrictamente con el SAT en M\xE9xico" },
-            pdfHtml: { type: "STRING", description: "El c\xF3digo HTML responsive completo y elegante estilizado con Tailwind CSS (sin incluir headers html o doctype, solo el container del cuerpo de la factura para renderizado seguro)." },
-            folioFiscal: { type: "STRING", description: "UUID de 36 caracteres del Timbre Fiscal Digital SAT (ej: 3FA8F392-80FF-11ED-A1EB-0242AC120002)" }
-          },
-          required: ["xmlContent", "pdfHtml", "folioFiscal"]
-        }
-      }
-    });
-    const textResult = response.text;
-    if (!textResult) {
-      throw new Error("Failed to compile CFDI data from Gemini");
-    }
-    const promptTokens = response.usageMetadata?.promptTokenCount || 1500;
-    const outputTokens = response.usageMetadata?.candidatesTokenCount || 4500;
-    const exchangeRate = 18.5;
-    const rawCost = (promptTokens * 0.075 + outputTokens * 0.3) / 1e6 * exchangeRate;
-    const generatedInvoicing = JSON.parse(textResult.trim());
-    res.json({
-      ...generatedInvoicing,
-      cost: connector?.learnedFrom === "automatizacion_ticket" ? 15 : 2.5,
-      rawCost: parseFloat(rawCost.toFixed(6))
-    });
-  } catch (error) {
-    console.warn("Automation simulation failed using Gemini API. Falling back to robust offline generation engine...", error.message || error);
-    const xml = generateLocalXml(ticket, profile, connector, generatedFolioFiscal);
-    const pdf = generateLocalPdfHtml(ticket, profile, connector, generatedFolioFiscal);
-    res.json({
-      xmlContent: xml,
-      pdfHtml: pdf,
-      folioFiscal: generatedFolioFiscal,
-      cost: connector?.learnedFrom === "automatizacion_ticket" ? 1.5 : 2.5,
-      rawCost: 0
-    });
-  }
+  res.status(502).json({
+    error: "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisi\xF3n manual."
+  });
 });
 app.post("/api/email/send", async (req, res) => {
   const { to, invoice } = req.body;

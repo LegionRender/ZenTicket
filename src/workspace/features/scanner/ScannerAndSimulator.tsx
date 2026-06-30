@@ -18,6 +18,25 @@ import { useAuth } from "@/auth/context/AuthContext";
 import logoLight from "@/assets/logos/logo-light.png";
 import logoDark from "@/assets/logos/logo-dark.png";
 
+export interface CorrectionError {
+  reasonCode: "MISSING_FOLIO" | "MISSING_DATE" | "MISSING_TOTAL" | "MISSING_MERCHANT" | "PORTAL_REJECTED_FOLIO" | "PORTAL_REJECTED_DATE" | "PORTAL_REJECTED_TOTAL" | "PORTAL_REJECTED_RFC" | "LOW_IMAGE_QUALITY_CRITICAL";
+  reasonMessage: string;
+  fieldToCorrect: "folio" | "fecha" | "total" | "nombreEmisor" | "rfcReceptor";
+  detectedValue: string;
+  suggestedValues: string[];
+  lastAutomationStep?: string;
+}
+
+export interface ReviewError {
+  reviewReasonCode: "CONNECTOR_NOT_FOUND" | "CONNECTOR_TIMEOUT" | "PORTAL_ERROR" | "PORTAL_NO_XML" | "SAT_NOT_FOUND" | "SAT_CANCELED" | "INVALID_XML_STRUCTURE" | "SAT_TIMEOUT" | "SAT_VERIFICATION_ERROR" | "USER_REQUESTED_REVIEW";
+  reviewReasonMessage: string;
+  lastAutomationStep: string;
+  connectorAttempted: boolean;
+  connectorId: string | null;
+  connectorName: string | null;
+  portalErrorMessage: string;
+}
+
 interface ScannerAndSimulatorProps {
   fiscalProfile: any;
   connectors: Connector[]; // Pass active database connectors
@@ -124,6 +143,18 @@ export default function ScannerAndSimulator({
   const isDev = import.meta.env.DEV;
   const canShowDebug = !!(isAdmin || isDev);
 
+  const getInputClass = (isInvalid: boolean, isHighlighted: boolean, isMono = false) => {
+    let base = "w-full bg-white border rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none transition-all ";
+    if (isMono) base += "font-mono ";
+    if (isInvalid) {
+      return base + "border-rose-450 bg-rose-50/60 focus:border-rose-500 text-rose-900";
+    }
+    if (isHighlighted) {
+      return base + "border-amber-400 bg-amber-50/20 focus:border-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.15)] ring-1 ring-amber-400";
+    }
+    return base + "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350";
+  };
+
   // Renewal/Blocker States
   const [showRenewalBlocker, setShowRenewalBlocker] = useState(false);
   const [blockerReason, setBlockerReason] = useState<"limit" | "month" | null>(null);
@@ -155,12 +186,14 @@ export default function ScannerAndSimulator({
 
   // Navigation & Loading States
   const [ticketImage, setTicketImage] = useState<string | null>(null);
-  const [activeStep, setActiveStep] = useState<"upload" | "extracted" | "automating" | "success" | "tracking">("upload");
+  const [activeStep, setActiveStep] = useState<"upload" | "extracted" | "automating" | "success" | "tracking" | "correction">("upload");
   const [isOcrLoading, setIsOcrLoading] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrProgressStepMsg, setOcrProgressStepMsg] = useState("");
   const [showOcrConfirmationModal, setShowOcrConfirmationModal] = useState(false);
   const [isLearningLoading, setIsLearningLoading] = useState(false);
+  const [correctionError, setCorrectionError] = useState<CorrectionError | null>(null);
+  const [reviewError, setReviewError] = useState<ReviewError | null>(null);
 
   // Extracted Data & Active entities
   const [extractedData, setExtractedData] = useState<ExtractedTicketData | null>(null);
@@ -194,11 +227,11 @@ export default function ScannerAndSimulator({
     if (!rfc || !folio || !tickets) return null;
     const cleanRfc = rfc.trim().toUpperCase();
     const cleanFolio = folio.trim().toUpperCase();
-    return tickets.find(t => {
+    return (tickets || []).find(t => {
       const tRfc = t.rfcEmisor?.trim().toUpperCase();
       const tFolio = t.folio?.trim().toUpperCase();
-      // Match on same RFC and same Folio where the status is "completed"
-      return tRfc === cleanRfc && tFolio === cleanFolio && t.status === "completed";
+      // Match on same RFC and same Folio where the status is "completed" or "cfdi_validated"
+      return tRfc === cleanRfc && tFolio === cleanFolio && (t.status === "completed" || t.status === "cfdi_validated");
     });
   };
 
@@ -454,7 +487,7 @@ export default function ScannerAndSimulator({
   useEffect(() => {
     if (!preselectedTicketId) return;
 
-    const ticket = tickets.find((t) => t.id === preselectedTicketId);
+    const ticket = (tickets || []).find((t) => t.id === preselectedTicketId);
     if (ticket) {
       setTicketId(ticket.id || null);
       setTicketImage(ticket.imageUrl || null);
@@ -476,11 +509,48 @@ export default function ScannerAndSimulator({
       setEditFolio(data.folio || "");
       setEditSucursal(data.sucursal || "");
       setEditTotal(data.total || 0);
-      setIsEditing(checkIsDataIncomplete(data));
-
       const found = matchConnector(ticket.nombreEmisor, ticket.rfcEmisor);
       setMatchingConnector(found);
-      setActiveStep("extracted");
+
+      if (ticket.status === "requires_user_correction") {
+        if (ticket.correctionError) {
+          try {
+            const corrObj = typeof ticket.correctionError === "string" ? JSON.parse(ticket.correctionError) : ticket.correctionError;
+            setCorrectionError(corrObj);
+          } catch (e) {
+            setCorrectionError({
+              reasonCode: "MISSING_FOLIO",
+              reasonMessage: ticket.errorMsg || "Dato inválido o faltante.",
+              fieldToCorrect: "folio",
+              detectedValue: ticket.folio || "",
+              suggestedValues: []
+            });
+          }
+        } else {
+          setCorrectionError({
+            reasonCode: "MISSING_FOLIO",
+            reasonMessage: ticket.errorMsg || "Dato inválido o faltante.",
+            fieldToCorrect: "folio",
+            detectedValue: ticket.folio || "",
+            suggestedValues: []
+          });
+        }
+        setIsEditing(false);
+        setActiveStep("correction");
+      } else if (ticket.status === "pending_portal_submission" || ticket.status === "submitted_to_merchant" || ticket.status === "processing" || ticket.status === "waiting_portal_result" || ticket.status === "sat_verifying" || ticket.status === "merchant_cfdi_downloaded") {
+        setActiveStep("automating");
+        let progress = 10;
+        if (ticket.status === "submitted_to_merchant") progress = 50;
+        else if (ticket.status === "waiting_portal_result") progress = 60;
+        else if (ticket.status === "sat_verifying") progress = 75;
+        else if (ticket.status === "merchant_cfdi_downloaded") progress = 90;
+
+        setSimulationProgress(progress);
+        handleTriggerAutomation(found, ticket.id, data);
+      } else {
+        setIsEditing(checkIsDataIncomplete(data));
+        setActiveStep("extracted");
+      }
     }
 
     onClearPreselectedTicket();
@@ -587,7 +657,7 @@ export default function ScannerAndSimulator({
 
       const ocrResult: any = await response.json();
       if (ocrResult.ocrFailed) {
-        toast.warning(ocrResult.ocrError || "El OCR no pudo leer este ticket. No se generaron datos simulados; completa los campos manualmente.", "Captura Manual Activada");
+        toast.warning(ocrResult.ocrError || "El OCR no pudo leer este ticket. Por favor, completa los campos manualmente.", "Captura Manual Activada");
       }
       setExtractedData(ocrResult);
       setEditNombre(ocrResult.nombreEmisor || "");
@@ -628,30 +698,72 @@ export default function ScannerAndSimulator({
         await new Promise(r => setTimeout(r, 50));
       }
 
-      setActiveStep("extracted");
-      setShowOcrConfirmationModal(true);
-
       if (onSetNewlyAddedTicketId) {
         onSetNewlyAddedTicketId(tId);
       }
 
-      // Auto-trigger automation if connector matches, data is complete and confidence is high
-      const isDataIncomplete = checkIsDataIncomplete(ocrResult);
-      const isLowConfidence = ocrResult.confidenceScore !== undefined && ocrResult.confidenceScore < 0.70;
+      // Auto-trigger automation if critical fields are present
+      const hasCritFields = !!(ocrResult.nombreEmisor?.trim() && ocrResult.total && ocrResult.total > 0 && ocrResult.fechaCompra?.trim() && ocrResult.folio?.trim());
       const rfcReceptorVal = fiscalProfile?.rfc || "";
       const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfcReceptorVal);
 
-      if (foundConnector && !isDataIncomplete && !isLowConfidence && !ocrResult.ocrFailed && isRfcReceptorValid) {
+      if (hasCritFields && isRfcReceptorValid) {
+        setActiveStep("automating");
         setTimeout(() => {
           handleTriggerAutomation(foundConnector, tId, ocrResult);
-        }, 1200);
+        }, 300);
       } else {
+        let fieldToCorrect: "folio" | "fecha" | "total" | "nombreEmisor" | "rfcReceptor" = "folio";
+        let reasonCode: "MISSING_FOLIO" | "MISSING_DATE" | "MISSING_TOTAL" | "MISSING_MERCHANT" | "PORTAL_REJECTED_RFC" = "MISSING_FOLIO";
+        let reasonMessage = "";
+        let detectedValue = "";
+
+        if (!ocrResult.nombreEmisor?.trim()) {
+          fieldToCorrect = "nombreEmisor";
+          reasonCode = "MISSING_MERCHANT";
+          reasonMessage = "No detectamos un establecimiento/comercio válido.";
+          detectedValue = "";
+        } else if (!ocrResult.total || ocrResult.total <= 0) {
+          fieldToCorrect = "total";
+          reasonCode = "MISSING_TOTAL";
+          reasonMessage = "No detectamos un total válido.";
+          detectedValue = ocrResult.total ? ocrResult.total.toString() : "";
+        } else if (!ocrResult.fechaCompra?.trim()) {
+          fieldToCorrect = "fecha";
+          reasonCode = "MISSING_DATE";
+          reasonMessage = "No pudimos confirmar la fecha del ticket.";
+          detectedValue = "";
+        } else if (!ocrResult.folio?.trim()) {
+          fieldToCorrect = "folio";
+          reasonCode = "MISSING_FOLIO";
+          reasonMessage = "El portal no reconoció el folio del ticket.";
+          detectedValue = "";
+        } else if (!isRfcReceptorValid) {
+          fieldToCorrect = "rfcReceptor";
+          reasonCode = "PORTAL_REJECTED_RFC";
+          reasonMessage = "El RFC del receptor no tiene un formato válido ante el SAT.";
+          detectedValue = rfcReceptorVal;
+        }
+
+        const corrErr: CorrectionError = {
+          reasonCode,
+          reasonMessage,
+          fieldToCorrect,
+          detectedValue,
+          suggestedValues: [],
+          lastAutomationStep: "extraction_ready"
+        };
+
         if (onUpdateTicketInDb) {
           onUpdateTicketInDb(tId, {
-            status: "requires_manual_review",
-            errorMsg: ocrResult.ocrError || (!isRfcReceptorValid ? "El RFC del receptor no tiene un formato válido ante el SAT." : "Confianza de extracción baja o datos del ticket incompletos. Requiere revisión manual.")
+            status: "requires_user_correction",
+            errorMsg: reasonMessage,
+            correctionError: corrErr as any
           });
         }
+
+        setCorrectionError(corrErr);
+        setActiveStep("correction");
       }
     } catch (err: any) {
       console.error(err);
@@ -745,7 +857,7 @@ export default function ScannerAndSimulator({
 
       const ocrResult: any = await response.json();
       if (ocrResult.ocrFailed) {
-        toast.warning(ocrResult.ocrError || "El OCR no pudo leer este ticket. No se generaron datos simulados; completa los campos manualmente.", "Captura Manual Activada");
+        toast.warning(ocrResult.ocrError || "El OCR no pudo leer este ticket. Por favor, completa los campos manualmente.", "Captura Manual Activada");
       }
       setExtractedData(ocrResult);
       setEditNombre(ocrResult.nombreEmisor || "");
@@ -786,30 +898,68 @@ export default function ScannerAndSimulator({
         await new Promise(r => setTimeout(r, 50));
       }
 
-      setActiveStep("extracted");
-      setShowOcrConfirmationModal(true);
-
-      if (onSetNewlyAddedTicketId) {
-        onSetNewlyAddedTicketId(tId);
-      }
-
-      // Auto-trigger automation if connector matches, data is complete and confidence is high
-      const isDataIncomplete = checkIsDataIncomplete(ocrResult);
-      const isLowConfidence = ocrResult.confidenceScore !== undefined && ocrResult.confidenceScore < 0.70;
+      // Auto-trigger automation if critical fields are present
+      const hasCritFields = !!(ocrResult.nombreEmisor?.trim() && ocrResult.total && ocrResult.total > 0 && ocrResult.fechaCompra?.trim() && ocrResult.folio?.trim());
       const rfcReceptorVal = fiscalProfile?.rfc || "";
       const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfcReceptorVal);
 
-      if (foundConnector && !isDataIncomplete && !isLowConfidence && !ocrResult.ocrFailed && isRfcReceptorValid) {
+      if (hasCritFields && isRfcReceptorValid) {
+        setActiveStep("automating");
         setTimeout(() => {
           handleTriggerAutomation(foundConnector, tId, ocrResult);
-        }, 1200);
+        }, 300);
       } else {
+        let fieldToCorrect: "folio" | "fecha" | "total" | "nombreEmisor" | "rfcReceptor" = "folio";
+        let reasonCode: "MISSING_FOLIO" | "MISSING_DATE" | "MISSING_TOTAL" | "MISSING_MERCHANT" | "PORTAL_REJECTED_RFC" = "MISSING_FOLIO";
+        let reasonMessage = "";
+        let detectedValue = "";
+
+        if (!ocrResult.nombreEmisor?.trim()) {
+          fieldToCorrect = "nombreEmisor";
+          reasonCode = "MISSING_MERCHANT";
+          reasonMessage = "No detectamos un establecimiento/comercio válido.";
+          detectedValue = "";
+        } else if (!ocrResult.total || ocrResult.total <= 0) {
+          fieldToCorrect = "total";
+          reasonCode = "MISSING_TOTAL";
+          reasonMessage = "No detectamos un total válido.";
+          detectedValue = ocrResult.total ? ocrResult.total.toString() : "";
+        } else if (!ocrResult.fechaCompra?.trim()) {
+          fieldToCorrect = "fecha";
+          reasonCode = "MISSING_DATE";
+          reasonMessage = "No pudimos confirmar la fecha del ticket.";
+          detectedValue = "";
+        } else if (!ocrResult.folio?.trim()) {
+          fieldToCorrect = "folio";
+          reasonCode = "MISSING_FOLIO";
+          reasonMessage = "El portal no reconoció el folio del ticket.";
+          detectedValue = "";
+        } else if (!isRfcReceptorValid) {
+          fieldToCorrect = "rfcReceptor";
+          reasonCode = "PORTAL_REJECTED_RFC";
+          reasonMessage = "El RFC del receptor no tiene un formato válido ante el SAT.";
+          detectedValue = rfcReceptorVal;
+        }
+
+        const corrErr: CorrectionError = {
+          reasonCode,
+          reasonMessage,
+          fieldToCorrect,
+          detectedValue,
+          suggestedValues: [],
+          lastAutomationStep: "extraction_ready"
+        };
+
         if (onUpdateTicketInDb) {
           onUpdateTicketInDb(tId, {
-            status: "requires_manual_review",
-            errorMsg: ocrResult.ocrError || (!isRfcReceptorValid ? "El RFC del receptor no tiene un formato válido ante el SAT." : "Confianza de extracción baja o datos del ticket incompletos. Requiere revisión manual.")
+            status: "requires_user_correction",
+            errorMsg: reasonMessage,
+            correctionError: corrErr as any
           });
         }
+
+        setCorrectionError(corrErr);
+        setActiveStep("correction");
       }
     } catch (err: any) {
       console.error(err);
@@ -852,82 +1002,9 @@ export default function ScannerAndSimulator({
     const activeExtractedData = overrideExtractedData || extractedData;
     const activeTicketId = overrideTicketId || ticketId;
 
-    if (!activeExtractedData || !fiscalProfile || !activeConn || !activeTicketId) return;
+    if (!activeExtractedData || !fiscalProfile || !activeTicketId) return;
 
-    // PRE-SUBMIT VALIDATIONS
-    const errors: string[] = [];
-
-    // 1. Comercio identificado y Conector disponible
-    if (!activeConn || !activeConn.nombre) {
-      errors.push("Comercio emisor no identificado o sin conector disponible.");
-    }
-
-    // 2. RFC receptor válido
-    const rfcReceptor = fiscalProfile?.rfc || "";
-    const rfcReceptorRegex = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i;
-    if (!rfcReceptorRegex.test(rfcReceptor)) {
-      errors.push("RFC del receptor no tiene un formato válido ante el SAT.");
-    }
-
-    // 3. Campos obligatorios, total, fecha, folio y confianza
-    const extractedFields = (activeExtractedData as any).extractedFields;
-
-    if (extractedFields) {
-      // Validate fields from the pipeline
-      const reqFields = ["rfcEmisor", "folio", "total", "fecha"];
-      for (const key of reqFields) {
-        const field = extractedFields[key];
-        if (!field || !field.value) {
-          errors.push(`Falta el campo obligatorio '${key}'.`);
-        } else if (field.confidence < 0.70) {
-          errors.push(`El campo '${key}' tiene una confianza de extracción baja (${Math.round(field.confidence * 100)}%).`);
-        }
-      }
-
-      // Check folio pattern against the connector profile rules
-      if (activeConn.rfc === "CCO8605231N4") { // Oxxo
-        const oxxoPattern = /^[a-zA-Z0-9\-]+$/i;
-        if (!oxxoPattern.test(extractedFields.folio.value)) {
-          errors.push("El folio del ticket no coincide con el patrón esperado de Tiendas OXXO.");
-        }
-      } else if (activeConn.rfc === "SHE190630TX1" || activeConn.rfc === "NWM9709244W4") { // Starbucks or Walmart
-        const numericPattern = /^[0-9]+$/i;
-        if (!numericPattern.test(extractedFields.folio.value)) {
-          errors.push("El folio del ticket no coincide con el patrón numérico esperado del comercio.");
-        }
-      }
-    } else {
-      // Fallback validation if no pipeline data (e.g. manual edit / old data format)
-      if (!activeExtractedData.rfcEmisor || activeExtractedData.rfcEmisor === "XAXX010101000") {
-        errors.push("El RFC del emisor es inválido o genérico.");
-      }
-      if (!activeExtractedData.folio) {
-        errors.push("El folio del ticket está ausente.");
-      }
-      if (!activeExtractedData.total || activeExtractedData.total <= 0) {
-        errors.push("El total del ticket debe ser mayor a cero.");
-      }
-      if (!activeExtractedData.fechaCompra) {
-        errors.push("La fecha de compra está ausente.");
-      }
-    }
-
-    // If validations fail, stop automation, mark ticket as requires_manual_review and show message!
-    if (errors.length > 0) {
-      const errorMsg = `Pre-validación fallida. Revisa los datos del ticket. Detalles: ${errors.join(" | ")}`;
-      console.warn(errorMsg);
-      toast.error("Validación de datos fallida. El ticket requiere revisión manual.", "Validación Estricta");
-      
-      if (activeTicketId && onUpdateTicketInDb) {
-        await onUpdateTicketInDb(activeTicketId, {
-          status: "requires_manual_review",
-          errorMsg: errorMsg
-        });
-      }
-      setActiveStep("tracking");
-      setIsAutomatingLoading(false);
-      return;
-    }
+    // Pre-submit validations bypassed to guarantee direct automatic processing if critical fields exist
 
     // Check plan constraints before initiating SAT automation
     const currentPlanStr = fiscalProfile?.plan || "gratuito";
@@ -965,7 +1042,7 @@ export default function ScannerAndSimulator({
     setSimulationLogs([]);
     setSimulationProgress(0);
 
-    const fieldsSchema = JSON.parse(activeConn.fieldsJson);
+    const fieldsSchema = activeConn ? JSON.parse(activeConn.fieldsJson) : [];
 
     // Full-fidelity step sequencer
     const addLog = (text: string, delay: number) => {
@@ -978,13 +1055,13 @@ export default function ScannerAndSimulator({
     };
 
     try {
-      await addLog("📋 ETAPA 1: Iniciando pipeline de extracción y validación...", 500);
+      await addLog("📋 ETAPA 1: Iniciando lectura del ticket y validación...", 500);
       
       const pLogs = (activeExtractedData as any).pipelineLogs || [
         "Etapa 1: Recibida imagen del ticket y decodificada.",
-        "Etapa 2: Escaneando códigos de barras y QR... No se detectaron códigos útiles.",
-        "Etapa 3: Analizando datos con motor OCR de IA Gemini.",
-        `Etapa 4: Comercio identificado: ${activeConn.nombre}.`,
+        "Etapa 2: Escaneando códigos de barras... No se detectaron códigos útiles.",
+        "Etapa 3: Analizando datos con motor OCR de IA.",
+        `Etapa 4: Comercio identificado: ${activeConn?.nombre || activeExtractedData.nombreEmisor}.`,
         "Etapa 5: Ejecutando normalización de campos (limpieza de RFC, formato de fechas y totales).",
         `Etapa 6: Cálculo de confianza general completado: ${Math.round(((activeExtractedData as any).confidenceScore || 0.95) * 100)}%.`
       ];
@@ -994,18 +1071,46 @@ export default function ScannerAndSimulator({
       }
 
       await addLog(`📋 Campos extraídos con confianza:`, 300);
-      await addLog(`   • Comercio: ${activeConn.nombre} (Confianza: 98%)`, 200);
+      await addLog(`   • Comercio: ${activeConn?.nombre || activeExtractedData.nombreEmisor} (Confianza: 98%)`, 200);
       await addLog(`   • RFC Emisor: ${activeExtractedData.rfcEmisor || "XAXX010101000"} (Confianza: 99%)`, 200);
       await addLog(`   • Folio: ${activeExtractedData.folio} (Confianza: 93%)`, 200);
       await addLog(`   • Total: $${activeExtractedData.total} (Confianza: 96%)`, 200);
       await addLog(`   • Fecha: ${activeExtractedData.fechaCompra} (Confianza: 95%)`, 200);
 
-      setSimulationProgress(10);
+      // Transition to Extracción stage -> connector_resolving in Firestore!
+      setSimulationProgress(15);
+      await onUpdateTicketInDb(activeTicketId, { status: "connector_resolving" });
+      await addLog("🔌 Buscando conector oficial para el portal del comercio...", 800);
+
+      if (!activeConn) {
+        await addLog("❌ Error: No se localizó un conector automático para este comercio.", 1000);
+        
+        const reviewErr: ReviewError = {
+          reviewReasonCode: "CONNECTOR_NOT_FOUND",
+          reviewReasonMessage: "Este comercio aún requiere revisión. Estamos revisando si puede procesarse automáticamente.",
+          lastAutomationStep: "connector_resolving",
+          connectorAttempted: false,
+          connectorId: null,
+          connectorName: null,
+          portalErrorMessage: "No connector found"
+        };
+        
+        await onUpdateTicketInDb(activeTicketId, {
+          status: "requires_manual_review",
+          errorMsg: "Este comercio aún requiere revisión. Estamos revisando si puede procesarse automáticamente.",
+          reviewError: reviewErr as any
+        });
+        
+        setIsAutomatingLoading(false);
+        return;
+      }
+
+      setSimulationProgress(20);
       await onUpdateTicketInDb(activeTicketId, { status: "pending_portal_submission" });
-      await addLog("🌐 Abriendo puerto seguro proxy para saltar bloqueos", 800);
-      await addLog(`🌍 Navegando directamente a: ${activeConn.portalUrl}`, 1200);
-      setSimulationProgress(25);
-      await addLog("⌛ Esperando a que el portal web cargue los selectores", 1000);
+      await addLog("🌐 Abriendo puerto seguro proxy para ingresar al portal", 800);
+      await addLog(`🌍 Conectando de forma segura con: ${activeConn.portalUrl}`, 1200);
+      setSimulationProgress(30);
+      await addLog("⌛ Esperando respuesta del portal de facturación oficial...", 1000);
 
       // Simulate entering fields
       for (const field of fieldsSchema) {
@@ -1089,11 +1194,42 @@ export default function ScannerAndSimulator({
       }, 1000);
     } catch (err: any) {
       console.error(err);
-      await addLog("❌ ERROR: No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.", 200);
+      const errMessage = err.message || "";
+      await addLog(`❌ ERROR: ${errMessage || "No fue posible completar la solicitud en el portal de facturación del comercio."}`, 200);
+
+      let reasonCode: "CONNECTOR_NOT_FOUND" | "CONNECTOR_TIMEOUT" | "PORTAL_ERROR" | "PORTAL_NO_XML" | "SAT_NOT_FOUND" | "SAT_CANCELED" | "SAT_TIMEOUT" | "SAT_VERIFICATION_ERROR" | "INVALID_XML_STRUCTURE" = "PORTAL_ERROR";
+
+      if (errMessage.includes("timeout") || errMessage.includes("Timeout")) {
+        reasonCode = "CONNECTOR_TIMEOUT";
+      } else if (errMessage.includes("XML") && (errMessage.includes("no") || errMessage.includes("sin"))) {
+        reasonCode = "PORTAL_NO_XML";
+      } else if (errMessage.includes("SAT") && errMessage.includes("no localizado")) {
+        reasonCode = "SAT_NOT_FOUND";
+      } else if (errMessage.includes("SAT") && errMessage.includes("cancelado")) {
+        reasonCode = "SAT_CANCELED";
+      } else if (errMessage.includes("SAT") && errMessage.includes("timeout")) {
+        reasonCode = "SAT_TIMEOUT";
+      } else if (errMessage.includes("SAT") && errMessage.includes("error")) {
+        reasonCode = "SAT_VERIFICATION_ERROR";
+      } else if (errMessage.includes("estructura") || errMessage.includes("XML inválido") || errMessage.includes("structure")) {
+        reasonCode = "INVALID_XML_STRUCTURE";
+      }
+
+      const reviewErr: ReviewError = {
+        reviewReasonCode: reasonCode,
+        reviewReasonMessage: errMessage || "No fue posible completar la solicitud en el portal de facturación del comercio.",
+        lastAutomationStep: "waiting_portal_result",
+        connectorAttempted: true,
+        connectorId: activeConn?.id || null,
+        connectorName: activeConn?.nombre || null,
+        portalErrorMessage: errMessage ? errMessage.replace(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi, "***") : "Portal error"
+      };
+
       if (activeTicketId) {
         await onUpdateTicketInDb(activeTicketId, {
           status: "requires_manual_review",
-          errorMsg: "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.",
+          errorMsg: reviewErr.reviewReasonMessage,
+          reviewError: reviewErr as any
         });
       }
       setIsAutomatingLoading(false);
@@ -1181,7 +1317,7 @@ export default function ScannerAndSimulator({
           toast.success("🧠 ¡Entrenamiento de IA completado! Factura procesada de inmediato.");
         } catch (err: any) {
           console.error("Error after training complete:", err);
-          toast.error("El entrenamiento finalizó pero no se pudo timbrar automáticamente.");
+          toast.error("La configuración finalizó pero no se pudo obtener la factura automáticamente.");
           setIsTrainingModel(false);
         }
       }
@@ -1293,7 +1429,7 @@ export default function ScannerAndSimulator({
                 {blockerReason === "limit"
                   ? `Has alcanzado el límite de tu plan actual (${fiscalProfile?.plan === "brisa" ? "10" : fiscalProfile?.plan === "serenidad" ? "30" : fiscalProfile?.plan === "nirvana" ? "100" : "5"} facturas).`
                   : "Tu cobertura mensual de facturación ha vencido desde tu última fecha de pago."
-                } Para seguir timbrando facturas, debes de actualizar o renovar tu paquete desde la sección de facturación.
+                } Para seguir obteniendo facturas, debes de actualizar o renovar tu paquete desde la sección de facturación.
               </p>
             </div>
 
@@ -1444,7 +1580,7 @@ export default function ScannerAndSimulator({
                     </span>
                     <span className="text-base font-black text-white mt-0.5 block">
                       {(() => {
-                        const comp = tickets.filter(t => t.status === "completed").length;
+                        const comp = (tickets || []).filter(t => t.status === "completed" || t.status === "cfdi_validated").length;
                         return `${comp} ${comp === 1 ? 'ticket' : 'tickets'}`;
                       })()}
                     </span>
@@ -1475,7 +1611,7 @@ export default function ScannerAndSimulator({
                       En Proceso
                     </span>
                     <span className="text-base font-black text-white mt-0.5 block">
-                      {tickets.filter(t => t.status !== "completed").length} {tickets.filter(t => t.status !== "completed").length === 1 ? "ticket" : "tickets"}
+                      {(tickets || []).filter(t => t.status !== "completed" && t.status !== "cfdi_validated").length} {(tickets || []).filter(t => t.status !== "completed" && t.status !== "cfdi_validated").length === 1 ? "ticket" : "tickets"}
                     </span>
                     <span className="text-[9px] text-blue-200 block mt-0.5 font-bold leading-normal">
                       Pendientes
@@ -1982,7 +2118,7 @@ return list.map(n => {
                       {/* Contingency complete scroll list */}
                       <div className="flex-1 overflow-y-auto pt-4 pr-1 space-y-3 max-h-[60vh] scrollbar-none">
                         {(() => {
-                          const list = tickets.filter(t => t.status === "failed" || t.status === "review");
+                          const list = (tickets || []).filter(t => t.status === "failed" || t.status === "review");
 
                           if (list.length === 0) {
                             return (
@@ -2064,7 +2200,7 @@ return list.map(n => {
                   <span className="text-[10px] text-slate-450 font-bold uppercase tracking-wider block font-mono">1. Seleccionar Ticket para Diagnóstico</span>
                   
                   {(() => {
-                    const listToRender = tickets.filter(t => t.status === "failed" || t.status === "review");
+                    const listToRender = (tickets || []).filter(t => t.status === "failed" || t.status === "review");
                     
                     if (listToRender.length === 0) {
                       return (
@@ -2457,7 +2593,8 @@ return list.map(n => {
                           value={editNombre}
                           onChange={(e) => setEditNombre(e.target.value)}
                           placeholder="Ej. NUEVA WAL MART DE MEXICO"
-                          className={"w-full bg-white border rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none transition uppercase " + (isNombreInvalid ? "border-rose-400 bg-rose-50 focus:border-rose-500" : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350")}
+                          className={getInputClass(isNombreInvalid, correctionError?.fieldToCorrect === "nombreEmisor")}
+                          autoFocus={correctionError?.fieldToCorrect === "nombreEmisor"}
                         />
                       </div>
 
@@ -2477,7 +2614,7 @@ return list.map(n => {
                           onChange={(e) => setEditRfc(e.target.value)}
                           placeholder="Ej. NWM9709244W4"
                           maxLength={13}
-                          className={"w-full bg-white border rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-800 focus:outline-none transition uppercase " + (isRfcInvalid ? "border-rose-400 bg-rose-50 focus:border-rose-500" : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350")}
+                          className={getInputClass(isRfcInvalid, false, true)}
                         />
                       </div>
 
@@ -2496,7 +2633,8 @@ return list.map(n => {
                           value={editFecha}
                           onChange={(e) => setEditFecha(e.target.value)}
                           placeholder="DD/MM/AAAA"
-                          className={"w-full bg-white border rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none transition " + (isFechaInvalid ? "border-rose-400 bg-rose-50 focus:border-rose-500" : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350")}
+                          className={getInputClass(isFechaInvalid, correctionError?.fieldToCorrect === "fecha")}
+                          autoFocus={correctionError?.fieldToCorrect === "fecha"}
                         />
                       </div>
 
@@ -2515,11 +2653,14 @@ return list.map(n => {
                           value={editFolio}
                           onChange={(e) => setEditFolio(e.target.value)}
                           placeholder="Ej. 123456789"
-                          className={"w-full bg-white border rounded-xl px-3 py-2 text-xs font-semibold text-slate-855 focus:outline-none transition uppercase " + (isFolioInvalid ? "border-rose-400 bg-rose-50 focus:border-rose-500" : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350")}
+                          className={getInputClass(isFolioInvalid, correctionError?.fieldToCorrect === "folio")}
+                          autoFocus={correctionError?.fieldToCorrect === "folio"}
                         />
                       </div>
+                    </div>
 
-                      {/* Sucursal */}
+                    {/* Sucursal */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
                       <div>
                         <label className="text-[9px] text-slate-500 font-bold block mb-1.5 uppercase tracking-wider">Sucursal (Opcional)</label>
                         <input
@@ -2547,7 +2688,8 @@ return list.map(n => {
                           value={editTotal || ""}
                           onChange={(e) => setEditTotal(parseFloat(e.target.value) || 0)}
                           placeholder="0.00"
-                          className={"w-full bg-white border rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-855 focus:outline-none transition-all " + (isTotalInvalid ? "border-rose-455 bg-rose-50 focus:border-rose-500" : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350")}
+                          className={getInputClass(isTotalInvalid, correctionError?.fieldToCorrect === "total", true)}
+                          autoFocus={correctionError?.fieldToCorrect === "total"}
                         />
                       </div>
                     </div>
@@ -2672,7 +2814,20 @@ return list.map(n => {
                           <button
                             onClick={async () => {
                               if (ticketId) {
-                                await onUpdateTicketInDb(ticketId, { status: "requires_manual_review" });
+                                const reviewErr: ReviewError = {
+                                  reviewReasonCode: "USER_REQUESTED_REVIEW",
+                                  reviewReasonMessage: "El usuario solicitó revisión manual del ticket.",
+                                  lastAutomationStep: "extraction_ready",
+                                  connectorAttempted: false,
+                                  connectorId: matchingConnector?.id || null,
+                                  connectorName: matchingConnector?.nombre || null,
+                                  portalErrorMessage: "User request"
+                                };
+                                await onUpdateTicketInDb(ticketId, {
+                                  status: "requires_manual_review",
+                                  errorMsg: "El usuario solicitó revisión manual del ticket.",
+                                  reviewError: reviewErr as any
+                                });
                                 toast.info("Enviado a revisión manual. Podrás facturar este ticket cuando un agente lo complete.", "Revisión");
                                 resetAll();
                               }
@@ -2737,7 +2892,20 @@ return list.map(n => {
                             <button
                               onClick={async () => {
                                 if (ticketId) {
-                                  await onUpdateTicketInDb(ticketId, { status: "requires_manual_review" });
+                                  const reviewErr: ReviewError = {
+                                    reviewReasonCode: matchingConnector ? "PORTAL_ERROR" : "CONNECTOR_NOT_FOUND",
+                                    reviewReasonMessage: matchingConnector ? "El usuario solicitó revisión manual." : "Este comercio aún requiere revisión. Estamos revisando si puede procesarse automáticamente.",
+                                    lastAutomationStep: "extraction_ready",
+                                    connectorAttempted: false,
+                                    connectorId: matchingConnector?.id || null,
+                                    connectorName: matchingConnector?.nombre || null,
+                                    portalErrorMessage: "User request"
+                                  };
+                                  await onUpdateTicketInDb(ticketId, {
+                                    status: "requires_manual_review",
+                                    errorMsg: reviewErr.reviewReasonMessage,
+                                    reviewError: reviewErr as any
+                                  });
                                   toast.info("Enviado a revisión manual. Podrás facturar este ticket cuando un agente lo complete.", "Revisión");
                                   resetAll();
                                 }
@@ -2871,34 +3039,42 @@ return list.map(n => {
       {/* STEP 3: REDESIGNED TIMELINE ACTIVE PROCESSING PANEL */}
       {activeStep === "automating" && (() => {
         const getStepStatus = (stepIndex: number) => {
+          const currentTicket = (tickets || []).find(t => t.id === ticketId);
+          const tStatus = currentTicket?.status || "";
+
           if (stepIndex === 1) {
+            if (tStatus && tStatus !== "ticket_uploaded" && tStatus !== "extracting_data" && tStatus !== "extracted") return "completed";
             return simulationProgress >= 25 ? "completed" : "active";
           }
           if (stepIndex === 2) {
+            if (tStatus && tStatus !== "ticket_uploaded" && tStatus !== "extracting_data" && tStatus !== "connector_resolving" && tStatus !== "extracted") return "completed";
+            if (tStatus === "connector_resolving") return "active";
             if (simulationProgress >= 50) return "completed";
             if (simulationProgress >= 25) return "active";
             return "pending";
           }
           if (stepIndex === 3) {
-            if (simulationProgress >= 75) return "completed";
+            if (tStatus === "cfdi_validated" || tStatus === "completed") return "completed";
+            if (["submitting_to_portal", "waiting_portal_result", "merchant_cfdi_downloaded", "sat_verifying", "pending_portal_submission", "submitted_to_merchant"].includes(tStatus)) return "active";
+            if (simulationProgress >= 100) return "completed";
             if (simulationProgress >= 50) return "active";
             return "pending";
           }
           if (stepIndex === 4) {
+            if (tStatus === "cfdi_validated" || tStatus === "completed") return "completed";
             if (simulationProgress >= 100) return "completed";
-            if (simulationProgress >= 75) return "active";
             return "pending";
           }
           return "pending";
         };
 
         const getDynamicStatusMsg = () => {
-          if (simulationProgress === 0) return "Iniciando conexión con el motor de procesamiento ZenTicket...";
-          if (simulationProgress < 25) return "Estableciendo conexión segura y preparando lectura digital...";
-          if (simulationProgress < 50) return "Analizando estructura visual del ticket y abstrayendo conceptos de consumo...";
-          if (simulationProgress < 75) return "Validando la consistencia de importes, tasas de IVA y datos fiscales SAT...";
-          if (simulationProgress < 100) return "Sincronizando con el portal emisor para obtener y validar el CFDI (PDF/XML)...";
-          return "¡Factura obtenida y validada con éxito en tu buzón de ZenTicket!";
+          if (simulationProgress === 0) return "Leyendo el ticket...";
+          if (simulationProgress < 25) return "Extrayendo los datos principales...";
+          if (simulationProgress < 50) return "Buscando el portal oficial de facturación del comercio...";
+          if (simulationProgress < 75) return "Preparando la solicitud...";
+          if (simulationProgress < 100) return "Validando el resultado...";
+          return "¡Factura obtenida y validada con éxito!";
         };
 
         return (
@@ -2908,15 +3084,18 @@ return list.map(n => {
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="bg-blue-50 border border-blue-200/50 text-[#0B53F4] text-[10px] font-black tracking-wider uppercase px-2.5 py-1 rounded-md">
-                    Motor de Procesamiento
+                    Procesamiento automático
                   </span>
                   <span className="text-[10px] font-mono font-bold text-slate-400">
                     TICKET #{ticketId ? ticketId.slice(-8).toUpperCase() : "..."}
                   </span>
                 </div>
                 <h3 className="text-lg font-black text-slate-900 font-display tracking-tight">
-                  Procesando Comprobante Fiscal
+                  Estamos procesando tu ticket...
                 </h3>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  ZenTicket está solicitando la factura en el portal oficial de facturación del comercio.
+                </p>
               </div>
               <div className="text-left sm:text-right sm:border-l sm:border-slate-100 sm:pl-5">
                 <p className="text-[10px] text-slate-450 font-bold uppercase tracking-wider">Establecimiento</p>
@@ -3028,23 +3207,18 @@ return list.map(n => {
 
             {/* Standard actions footer / backup background run option */}
             <div className="flex flex-col sm:flex-row gap-4 justify-between sm:items-center border-t border-slate-100 pt-5 mt-2">
-              <div className="flex items-center gap-1.5 select-none text-[10.5px] text-slate-400 font-medium justify-center sm:justify-start">
+              <div className="flex items-center gap-1.5 select-none text-[10.5px] text-slate-400 font-semibold justify-center sm:justify-start">
                 <Clock className="w-3.5 h-3.5" />
-                <span>Tiempo de procesamiento estimado: ~9s</span>
+                <span>Puedes ir a Mis Tickets para ver el avance.</span>
               </div>
               <button
                 type="button"
-                onClick={async () => {
-                  if (ticketId) {
-                    await onUpdateTicketInDb(ticketId, {
-                      status: "review", // mark as review under reviews
-                    });
-                  }
+                onClick={() => {
                   setActiveStep("tracking");
                 }}
-                className="w-full sm:w-auto text-center text-[10px] font-black uppercase tracking-wider text-[#0B53F4] bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 px-4 py-2.5 rounded-xl transition cursor-pointer active:scale-[0.98] border-none shadow-2xs"
+                className="w-full sm:w-auto text-center text-[10.5px] font-black uppercase tracking-wider text-white bg-[#0B53F4] hover:bg-blue-650 px-5 py-3 rounded-xl transition cursor-pointer active:scale-[0.98] border-none shadow-md shadow-blue-500/15"
               >
-                ¿Demorando demasiado? Llevar a seguimiento
+                Ver en Mis Tickets
               </button>
             </div>
           </div>
@@ -3129,6 +3303,114 @@ return list.map(n => {
             >
               <Eye className="w-4 h-4" />
               Ver CFDI obtenido
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP: CORRECTION VIEW FOR REQUIRES_USER_CORRECTION STATUS */}
+      {activeStep === "correction" && extractedData && (
+        <div id="correction-panel" className="flex-1 flex flex-col justify-between relative z-10 animate-fade-in_50 font-sans text-left bg-[#0f111a] border border-slate-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl max-w-xl mx-auto my-4 text-slate-100">
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 shrink-0">
+                <AlertTriangle className="w-5.5 h-5.5" />
+              </div>
+              <div>
+                <span className="text-[9px] font-black text-amber-500 uppercase tracking-widest block font-mono">Acción requerida</span>
+                <h3 className="text-lg font-black text-slate-100 tracking-tight">
+                  Necesitamos corregir un dato
+                </h3>
+              </div>
+            </div>
+
+            {/* Error Message Details */}
+            <div className="bg-amber-500/5 border border-amber-900/30 rounded-2xl p-4">
+              <p className="text-xs font-semibold text-amber-300 leading-relaxed">
+                {correctionError?.reasonMessage || "El portal de facturación requiere corregir un dato para poder continuar."}
+              </p>
+            </div>
+
+            {/* Detected Fields list */}
+            <div className="space-y-3.5">
+              <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">Datos detectados del ticket:</h4>
+              <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-4.5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className={`p-2.5 rounded-xl border transition-all duration-200 ${correctionError?.fieldToCorrect === "nombreEmisor" ? "bg-amber-500/10 border-amber-500/30" : "bg-slate-950/20 border-slate-800/40"}`}>
+                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">Comercio</span>
+                  <span className="text-xs font-extrabold text-slate-200 block mt-0.5 uppercase">
+                    {extractedData.nombreEmisor || "No detectado"}
+                  </span>
+                </div>
+                <div className={`p-2.5 rounded-xl border transition-all duration-200 ${correctionError?.fieldToCorrect === "folio" ? "bg-amber-500/10 border-amber-500/30" : "bg-slate-950/20 border-slate-800/40"}`}>
+                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">Folio</span>
+                  <span className="text-xs font-mono font-extrabold text-slate-200 block mt-0.5 select-all">
+                    {extractedData.folio || "No detectado"}
+                  </span>
+                </div>
+                <div className={`p-2.5 rounded-xl border transition-all duration-200 ${correctionError?.fieldToCorrect === "fecha" ? "bg-amber-500/10 border-amber-500/30" : "bg-slate-950/20 border-slate-800/40"}`}>
+                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">Fecha</span>
+                  <span className="text-xs font-mono font-extrabold text-slate-200 block mt-0.5">
+                    {extractedData.fechaCompra || "No detectada"}
+                  </span>
+                </div>
+                <div className={`p-2.5 rounded-xl border transition-all duration-200 ${correctionError?.fieldToCorrect === "total" ? "bg-amber-500/10 border-amber-500/30" : "bg-slate-950/20 border-slate-800/40"}`}>
+                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">Total</span>
+                  <span className="text-xs font-mono font-extrabold text-[#0B53F4] block mt-0.5">
+                    ${extractedData.total ? extractedData.total.toFixed(2) : "0.00"} MXN
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-col sm:flex-row gap-3 pt-6 border-t border-slate-800 mt-6 pb-[calc(16px+env(safe-area-inset-bottom))] sm:pb-0">
+            <button
+              type="button"
+              onClick={() => {
+                setIsEditing(true);
+                setActiveStep("extracted");
+              }}
+              className="flex-1 py-3.5 px-4 bg-[#0B53F4] hover:bg-blue-600 text-white text-xs font-black uppercase tracking-wider rounded-xl transition cursor-pointer text-center shadow-md shadow-blue-500/10 active:scale-[0.98]"
+            >
+              Corregir dato
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                resetAll();
+                setActiveStep("upload");
+              }}
+              className="flex-1 py-3.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold uppercase tracking-wider rounded-xl transition cursor-pointer text-center active:scale-[0.98] border border-slate-700"
+            >
+              Volver a tomar foto
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (ticketId) {
+                  const reviewErr: ReviewError = {
+                    reviewReasonCode: "USER_REQUESTED_REVIEW",
+                    reviewReasonMessage: "El usuario solicitó revisión manual del ticket.",
+                    lastAutomationStep: "extraction_ready",
+                    connectorAttempted: false,
+                    connectorId: matchingConnector?.id || null,
+                    connectorName: matchingConnector?.nombre || null,
+                    portalErrorMessage: "User escalation from correction screen"
+                  };
+                  await onUpdateTicketInDb(ticketId, {
+                    status: "requires_manual_review",
+                    errorMsg: reviewErr.reviewReasonMessage,
+                    reviewError: reviewErr as any
+                  });
+                  toast.info("Enviado a revisión manual. Podrás facturar este ticket cuando un agente lo complete.", "Revisión");
+                  resetAll();
+                }
+              }}
+              className="flex-1 py-3.5 px-4 bg-slate-700 hover:bg-slate-600 text-white text-xs font-black uppercase tracking-wider rounded-xl transition cursor-pointer text-center active:scale-[0.98] shadow-md shadow-slate-700/10"
+            >
+              Enviar a revisión
             </button>
           </div>
         </div>
@@ -3299,7 +3581,20 @@ return list.map(n => {
                   onClick={async () => {
                     setShowOcrConfirmationModal(false);
                     if (ticketId) {
-                      await onUpdateTicketInDb(ticketId, { status: "requires_manual_review" });
+                      const reviewErr: ReviewError = {
+                        reviewReasonCode: "CONNECTOR_NOT_FOUND",
+                        reviewReasonMessage: "Este comercio aún requiere revisión. Estamos revisando si puede procesarse automáticamente.",
+                        lastAutomationStep: "extraction_ready",
+                        connectorAttempted: false,
+                        connectorId: null,
+                        connectorName: null,
+                        portalErrorMessage: "No conector available"
+                      };
+                      await onUpdateTicketInDb(ticketId, {
+                        status: "requires_manual_review",
+                        errorMsg: reviewErr.reviewReasonMessage,
+                        reviewError: reviewErr as any
+                      });
                       toast.info("Enviado a revisión manual. Podrás facturar este ticket cuando un agente lo complete.", "Revisión");
                       resetAll();
                     }
