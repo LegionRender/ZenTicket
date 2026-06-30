@@ -333,6 +333,24 @@ export default function TicketsListScreen({
           if (associatedTicket.status !== "cfdi_validated" && onUpdateTicketInDb) {
             await onUpdateTicketInDb(associatedTicket.id, { status: "cfdi_validated", errorMsg: "" });
           }
+        } else if (data.status === "canceled") {
+          const errMsg = "El XML obtenido se encuentra CANCELADO ante el SAT. Requiere revisión manual.";
+          setVerificationError(errMsg);
+          if (associatedTicket.status !== "requires_manual_review" && onUpdateTicketInDb) {
+            await onUpdateTicketInDb(associatedTicket.id, {
+              status: "requires_manual_review",
+              errorMsg: "El XML se encuentra cancelado ante el SAT."
+            });
+          }
+        } else if (data.status === "error" || data.status === "timeout") {
+          const errMsg = "Error de conexión o timeout con los controles del SAT. Requiere revisión manual.";
+          setVerificationError(errMsg);
+          if (associatedTicket.status !== "requires_manual_review" && onUpdateTicketInDb) {
+            await onUpdateTicketInDb(associatedTicket.id, {
+              status: "requires_manual_review",
+              errorMsg: errMsg
+            });
+          }
         } else {
           const errMsg = "El XML obtenido no fue localizado en los controles del SAT. Requiere revisión manual.";
           setVerificationError(errMsg);
