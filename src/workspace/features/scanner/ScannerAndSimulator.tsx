@@ -614,7 +614,7 @@ export default function ScannerAndSimulator({
       setTicketId(tId);
 
       // Seek matching connector
-      findMatchingConnector(ocrResult);
+      const foundConnector = findMatchingConnector(ocrResult);
 
       stopSimulation();
       // Wait for completion callback to trigger
@@ -628,6 +628,14 @@ export default function ScannerAndSimulator({
       if (onSetNewlyAddedTicketId) {
         onSetNewlyAddedTicketId(tId);
       }
+
+      // Auto-trigger automation if connector matches and data is complete
+      const isDataIncomplete = checkIsDataIncomplete(ocrResult);
+      if (foundConnector && !isDataIncomplete && fiscalProfile) {
+        setTimeout(() => {
+          handleTriggerAutomation(foundConnector, tId, ocrResult);
+        }, 1200);
+      }
     } catch (err: any) {
       console.error(err);
       setMessage(err.message || "Error al procesar ticket con IA OCR.");
@@ -639,10 +647,11 @@ export default function ScannerAndSimulator({
   const [message, setMessage] = useState<string | null>(null);
 
   // Seek matching connector in rules DB
-  const findMatchingConnector = (data: ExtractedTicketData) => {
+  const findMatchingConnector = (data: ExtractedTicketData): Connector | null => {
     const found = matchConnector(data.nombreEmisor, data.rfcEmisor);
     setMatchingConnector(found);
     setIsConnectorNewlyLearned(false);
+    return found;
   };
 
   // Convert files loaded manually or captured from camera to base64, compress, and parse
@@ -749,7 +758,7 @@ export default function ScannerAndSimulator({
       setTicketId(tId);
 
       // Find match
-      findMatchingConnector(ocrResult);
+      const foundConnector = findMatchingConnector(ocrResult);
 
       stopSimulation();
       // Wait for completion callback to trigger
@@ -762,6 +771,14 @@ export default function ScannerAndSimulator({
 
       if (onSetNewlyAddedTicketId) {
         onSetNewlyAddedTicketId(tId);
+      }
+
+      // Auto-trigger automation if connector matches and data is complete
+      const isDataIncomplete = checkIsDataIncomplete(ocrResult);
+      if (foundConnector && !isDataIncomplete && fiscalProfile) {
+        setTimeout(() => {
+          handleTriggerAutomation(foundConnector, tId, ocrResult);
+        }, 1200);
       }
     } catch (err: any) {
       console.error(err);
@@ -795,9 +812,16 @@ export default function ScannerAndSimulator({
   };
 
   // Trigger high fidelity automation logs and final document generation
-  const handleTriggerAutomation = async (overrideConnector?: Connector) => {
+  const handleTriggerAutomation = async (
+    overrideConnector?: Connector,
+    overrideTicketId?: string,
+    overrideExtractedData?: ExtractedTicketData
+  ) => {
     const activeConn = overrideConnector || matchingConnector;
-    if (!extractedData || !fiscalProfile || !activeConn || !ticketId) return;
+    const activeExtractedData = overrideExtractedData || extractedData;
+    const activeTicketId = overrideTicketId || ticketId;
+
+    if (!activeExtractedData || !fiscalProfile || !activeConn || !activeTicketId) return;
 
     // Check plan constraints before initiating SAT automation
     const currentPlanStr = fiscalProfile?.plan || "gratuito";
@@ -850,7 +874,7 @@ export default function ScannerAndSimulator({
     try {
       await addLog("ZenTicket está procesando el ticket en el portal del comercio.", 800);
       setSimulationProgress(10);
-      await onUpdateTicketInDb(ticketId, { status: "pending_portal_submission" });
+      await onUpdateTicketInDb(activeTicketId, { status: "pending_portal_submission" });
       await addLog("🌐 Abriendo puerto seguro proxy para saltar bloqueos", 800);
       await addLog(`🌍 Navegando directamente a: ${activeConn.portalUrl}`, 1200);
       setSimulationProgress(25);
@@ -860,9 +884,9 @@ export default function ScannerAndSimulator({
       for (const field of fieldsSchema) {
         let val = "";
         if (field.key === "rfc") val = fiscalProfile.rfc;
-        else if (field.key === "folio") val = extractedData.folio;
-        else if (field.key === "total") val = extractedData.total.toString();
-        else if (field.key === "fecha") val = extractedData.fechaCompra;
+        else if (field.key === "folio") val = activeExtractedData.folio;
+        else if (field.key === "total") val = activeExtractedData.total.toString();
+        else if (field.key === "fecha") val = activeExtractedData.fechaCompra;
         else val = "VAL_AUTO__";
 
         await addLog(
@@ -871,7 +895,7 @@ export default function ScannerAndSimulator({
         );
       }
       setSimulationProgress(50);
-      await onUpdateTicketInDb(ticketId, { status: "submitted_to_merchant" });
+      await onUpdateTicketInDb(activeTicketId, { status: "submitted_to_merchant" });
 
       await addLog(`🚀 Presionando botón de consulta en el portal...`, 1200);
       await addLog(`✅ Registro de Ticket validado en el portal corporativo exitosamente.`, 900);
@@ -890,7 +914,7 @@ export default function ScannerAndSimulator({
 
       // Fire actual backend composition to build real XML & visually responsive PDF HTML layouts
       const response = await runAutomation({
-        ticket: extractedData,
+        ticket: activeExtractedData,
         profile: fiscalProfile,
         connector: activeConn,
       });
@@ -903,20 +927,20 @@ export default function ScannerAndSimulator({
 
       // Save Invoice data to Firestore
       await onSaveInvoiceToDb(
-        ticketId,
+        activeTicketId,
         invoiceData.xmlContent,
         invoiceData.pdfHtml,
         invoiceData.folioFiscal,
-        extractedData.rfcEmisor,
-        extractedData.nombreEmisor,
-        extractedData.total,
+        activeExtractedData.rfcEmisor,
+        activeExtractedData.nombreEmisor,
+        activeExtractedData.total,
         invoiceData.cost !== undefined ? invoiceData.cost : (isConnectorNewlyLearned ? 15.00 : 2.50),
         isConnectorNewlyLearned ? "nuevo" : "existente",
         invoiceData.rawCost !== undefined ? invoiceData.rawCost : 0
       );
 
       // update ticket state
-      await onUpdateTicketInDb(ticketId, {
+      await onUpdateTicketInDb(activeTicketId, {
         status: "cfdi_validated",
         invoiceId: invoiceData.folioFiscal,
       });
@@ -929,7 +953,7 @@ export default function ScannerAndSimulator({
 
       // Redirect immediately to tickets tab and trigger the highlight
       if (onTabChange && onSetNewlyAddedTicketId) {
-        onSetNewlyAddedTicketId(ticketId);
+        onSetNewlyAddedTicketId(activeTicketId);
         onTabChange("tickets");
       }
 
@@ -939,8 +963,8 @@ export default function ScannerAndSimulator({
     } catch (err: any) {
       console.error(err);
       await addLog("❌ ERROR: No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.", 200);
-      if (ticketId) {
-        await onUpdateTicketInDb(ticketId, {
+      if (activeTicketId) {
+        await onUpdateTicketInDb(activeTicketId, {
           status: "requires_manual_review",
           errorMsg: "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.",
         });
