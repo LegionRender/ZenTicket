@@ -3136,13 +3136,13 @@ return list.map(n => {
 
       {/* showOcrConfirmationModal Popup Overlay precisely as requested */}
       {showOcrConfirmationModal && extractedData && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl overflow-hidden max-w-lg w-full shadow-2xl border border-slate-100 flex flex-col text-slate-800 animate-scale-up">
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#0b0d19] rounded-3xl overflow-hidden max-w-lg w-full shadow-2xl border border-slate-200/80 dark:border-slate-800/80 flex flex-col max-h-[85vh] text-slate-800 dark:text-slate-200 animate-scale-up">
             {/* Header */}
-            <div className="p-6 border-b border-blue-50 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 flex items-center justify-between text-left">
+            <div className="p-6 border-b border-blue-50 dark:border-slate-800 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 dark:from-slate-900/40 dark:to-slate-900/60 flex items-center justify-between text-left">
               <div>
-                <span className="text-[10px] font-black text-[#0B53F4] tracking-widest block uppercase font-mono">Lectura Optimizada por IA</span>
-                <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+                <span className="text-[10px] font-black text-[#0B53F4] dark:text-blue-400 tracking-widest block uppercase font-mono">Lectura Optimizada por IA</span>
+                <h3 className="text-base font-black text-slate-800 dark:text-slate-200 flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-[#0B53F4] animate-pulse" />
                   Corrobore los Datos Técnicos
                 </h3>
@@ -3150,54 +3150,54 @@ return list.map(n => {
               <button
                 type="button"
                 onClick={() => setShowOcrConfirmationModal(false)}
-                className="text-slate-400 hover:text-slate-600 bg-slate-100 hover:bg-slate-200 p-1.5 rounded-full duration-150 cursor-pointer"
+                className="text-slate-455 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700/80 p-1.5 rounded-full duration-150 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Content */}
-            <div className="p-6 text-left space-y-5">
-              <p className="text-xs text-slate-500 font-semibold leading-relaxed">
+            <div className="p-6 text-left space-y-5 overflow-y-auto flex-1 text-slate-800 dark:text-slate-200">
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
                 {extractedData.ocrFailed
                   ? "El OCR no pudo leer con confianza este ticket. Por seguridad fiscal, dejamos los campos vacíos para que captures únicamente los datos reales impresos en el comprobante."
                   : "Nuestra Inteligencia Artificial interpretó la transcripción del ticket. Por favor verifica que los datos primarios sean correctos antes de proceder."}
               </p>
 
               {/* Info Box */}
-              <div className="bg-slate-50 border border-slate-150 rounded-2xl p-4 space-y-3.5">
+              <div className="bg-slate-50 dark:bg-slate-900/30 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-4 space-y-3.5">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">Establecimiento</span>
-                    <span className="text-xs font-extrabold text-slate-800 uppercase block leading-tight mt-0.5">
+                    <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Establecimiento</span>
+                    <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200 uppercase block leading-tight mt-0.5">
                       {extractedData.nombreEmisor || "Establecimiento no identificado"}
                     </span>
                   </div>
 
                   <div>
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">RFC Emisor</span>
-                    <span className="text-xs font-mono font-extrabold text-slate-800 block mt-0.5 select-all">
+                    <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">RFC Emisor</span>
+                    <span className="text-xs font-mono font-extrabold text-slate-800 dark:text-slate-200 block mt-0.5 select-all">
                       {extractedData.rfcEmisor || "No detectado"}
                     </span>
                   </div>
 
-                  <div className="border-t border-slate-205 pt-2.5">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">Fecha Compra</span>
-                    <span className="text-xs font-mono font-extrabold text-slate-800 block mt-0.5">
+                  <div className="border-t border-slate-205 dark:border-slate-800/60 pt-2.5">
+                    <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Fecha Compra</span>
+                    <span className="text-xs font-mono font-extrabold text-slate-800 dark:text-slate-200 block mt-0.5">
                       {extractedData.fechaCompra || "No detectada"}
                     </span>
                   </div>
 
-                  <div className="border-t border-slate-205 pt-2.5">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">Total Pagado</span>
-                    <span className="text-xs font-mono font-extrabold text-[#0B53F4] block mt-0.5">
+                  <div className="border-t border-slate-205 dark:border-slate-800/60 pt-2.5">
+                    <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Total Pagado</span>
+                    <span className="text-xs font-mono font-extrabold text-[#0B53F4] dark:text-blue-400 block mt-0.5">
                       ${extractedData.total ? extractedData.total.toFixed(2) : "0.00"} MXN
                     </span>
                   </div>
 
-                  <div className="border-t border-slate-205 pt-2.5 col-span-2">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">Folio del Ticket</span>
-                    <span className="text-xs font-mono font-extrabold text-slate-800 block mt-0.5 select-all">
+                  <div className="border-t border-slate-205 dark:border-slate-800/60 pt-2.5 col-span-2">
+                    <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Folio del Ticket</span>
+                    <span className="text-xs font-mono font-extrabold text-slate-800 dark:text-slate-200 block mt-0.5 select-all">
                       {extractedData.folio || "No detectado"}
                     </span>
                   </div>
@@ -3205,10 +3205,10 @@ return list.map(n => {
 
                 <div className={`flex items-start gap-3.5 p-4 border rounded-2xl ${
                   extractedData.ocrFailed
-                    ? "bg-rose-500/5 border-rose-200 text-rose-800"
+                    ? "bg-rose-500/5 border-rose-200 dark:border-rose-900/30 text-rose-800 dark:text-rose-300"
                     : matchingConnector
-                      ? "bg-emerald-500/5 border-emerald-200 text-emerald-800"
-                      : "bg-[#FFFDF5] border-amber-200 text-amber-900"
+                      ? "bg-emerald-500/5 border-emerald-200 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-300"
+                      : "bg-[#FFFDF5] dark:bg-amber-950/10 border-amber-200 dark:border-amber-900/30 text-amber-900 dark:text-amber-300"
                 }`}>
                   {extractedData.ocrFailed ? (
                     <>
@@ -3217,7 +3217,7 @@ return list.map(n => {
                       </div>
                       <div className="space-y-0.5">
                         <span className="font-extrabold text-[10px] uppercase tracking-wider block text-rose-700">Captura manual requerida</span>
-                        <p className="font-medium text-[11px] text-rose-800 leading-relaxed">
+                        <p className="font-medium text-[11px] text-rose-800 dark:text-rose-300 leading-relaxed">
                           No se detectó información suficiente para facturar. Completa establecimiento, RFC, folio, fecha y total con los datos impresos en el ticket.
                         </p>
                       </div>
@@ -3229,7 +3229,7 @@ return list.map(n => {
                       </div>
                       <div className="space-y-0.5">
                         <span className="font-extrabold text-[10px] uppercase tracking-wider block text-emerald-700">⚡ Facturación Automática Disponible</span>
-                        <p className="font-medium text-[11px] text-emerald-650 leading-relaxed">
+                        <p className="font-medium text-[11px] text-emerald-650 dark:text-emerald-400 leading-relaxed">
                           Estamos revisando si este comercio puede procesarse automáticamente.
                         </p>
                       </div>
@@ -3241,7 +3241,7 @@ return list.map(n => {
                       </div>
                       <div className="space-y-0.5">
                         <span className="font-extrabold text-[10px] uppercase tracking-wider block text-amber-800">⚠️ Comercio Sin Conector</span>
-                        <p className="font-medium text-[11px] text-amber-705 leading-relaxed">
+                        <p className="font-medium text-[11px] text-amber-705 dark:text-amber-400 leading-relaxed">
                           Este comercio aún requiere revisión manual. Puedes corregir los datos o enviar el ticket a revisión.
                         </p>
                       </div>
@@ -3252,7 +3252,7 @@ return list.map(n => {
             </div>
 
             {/* Footer */}
-            <div className="p-6 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row gap-2 justify-end">
+            <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 flex flex-col sm:flex-row gap-2 justify-end">
               {getExistingInvoicedTicket(extractedData.rfcEmisor, extractedData.folio) && (
                 <button
                   type="button"
@@ -3271,7 +3271,7 @@ return list.map(n => {
                   setShowOcrConfirmationModal(false);
                   setIsEditing(true);
                 }}
-                className="text-xs font-bold text-slate-650 hover:text-slate-800 bg-white border border-slate-200 hover:border-slate-350 py-3 px-4 rounded-xl duration-150 cursor-pointer active:scale-98 text-center"
+                className="text-xs font-bold text-slate-650 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-slate-350 dark:hover:border-slate-600 py-3 px-4 rounded-xl duration-150 cursor-pointer active:scale-98 text-center"
               >
                 Corregir Datos del Ticket
               </button>
