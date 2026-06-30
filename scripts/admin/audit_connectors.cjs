@@ -16,7 +16,18 @@ if (fs.existsSync(serviceAccountPath)) {
   });
 }
 
-const db = getFirestore();
+let databaseId = undefined;
+const firebaseConfigPath = path.join(__dirname, "../../firebase-applet-config.json");
+if (fs.existsSync(firebaseConfigPath)) {
+  try {
+    const config = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf8"));
+    databaseId = config.firestoreDatabaseId;
+  } catch (err) {
+    console.warn("Failed to parse firebase-applet-config.json:", err.message);
+  }
+}
+
+const db = getFirestore(undefined, databaseId);
 
 async function auditConnectors() {
   console.log("Iniciando auditoría de la Biblioteca de Conectores...");

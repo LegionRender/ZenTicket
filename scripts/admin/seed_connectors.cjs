@@ -16,7 +16,18 @@ if (fs.existsSync(serviceAccountPath)) {
   });
 }
 
-const db = getFirestore();
+let databaseId = undefined;
+const firebaseConfigPath = path.join(__dirname, "../../firebase-applet-config.json");
+if (fs.existsSync(firebaseConfigPath)) {
+  try {
+    const config = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf8"));
+    databaseId = config.firestoreDatabaseId;
+  } catch (err) {
+    console.warn("Failed to parse firebase-applet-config.json:", err.message);
+  }
+}
+
+const db = getFirestore(undefined, databaseId);
 
 const connectorsSeed = [
   {
@@ -115,11 +126,11 @@ const connectorsSeed = [
       "4. Solicitar CFDI y guardar XML"
     ]),
     createdAt: new Date().toISOString(),
-    status: "trained_needs_validation",
+    status: "real_validation",
     isProductionReady: false,
     isMock: false,
     isRestricted: false,
-    runnerAvailable: false,
+    runnerAvailable: true,
     aliases: ["farmacias similares", "similares", "doctor simi", "simi"]
   },
   {

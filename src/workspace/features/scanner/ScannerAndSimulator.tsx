@@ -137,6 +137,17 @@ function compressImage(file: File, maxDimension = 1200, quality = 0.75): Promise
   });
 }
 
+function getFieldSource(f: any): "ticket" | "fiscalProfile" {
+  if (f.source === "ticket" || f.source === "fiscalProfile") {
+    return f.source;
+  }
+  const ticketKeys = ["referenciaFacturacion", "total", "fecha", "folio", "ticketNumber", "billingReference", "date", "sucursal"];
+  if (ticketKeys.includes(f.key)) {
+    return "ticket";
+  }
+  return "fiscalProfile";
+}
+
 export default function ScannerAndSimulator({
   fiscalProfile,
   connectors,
@@ -254,7 +265,7 @@ export default function ScannerAndSimulator({
         const fields = JSON.parse(found.fieldsJson || "[]");
         if (fields.length > 0) {
           const hasMissingTicketField = fields.some((f: any) => {
-            if (f.source !== "ticket" || !f.required) return false;
+            if (getFieldSource(f) !== "ticket" || !f.required) return false;
             if (f.key === "referenciaFacturacion" || f.key === "folio") return !data.folio?.trim();
             if (f.key === "total") return !data.total || data.total <= 0;
             if (f.key === "fecha") return !data.fechaCompra?.trim();
@@ -263,7 +274,7 @@ export default function ScannerAndSimulator({
           if (hasMissingTicketField) return true;
 
           const hasMissingFiscalField = fields.some((f: any) => {
-            if (f.source !== "fiscalProfile" || !f.required) return false;
+            if (getFieldSource(f) !== "fiscalProfile" || !f.required) return false;
             return isFiscalFieldInvalid(f.key);
           });
           if (hasMissingFiscalField) return true;
@@ -1375,12 +1386,12 @@ export default function ScannerAndSimulator({
       // Scheme validation
       let flowSteps = [];
       try {
-        const hasInvalidField = fieldsSchema.some((f: any) => !f.key || !f.name || !f.selector || !f.type || f.required === undefined || !f.source);
+        const hasInvalidField = fieldsSchema.some((f: any) => !f.key || !f.name || !f.selector || !f.type || f.required === undefined);
         if (hasInvalidField) {
-          throw new Error("Esquema de campos inválido.");
+          throw new Error("Esquema de campos inválido: Falta key, name, selector o type en uno de los campos.");
         }
         flowSteps = JSON.parse(activeConn.flowJson || "[]");
-      } catch (e) {
+      } catch (e: any) {
         const schemaErr: ReviewError = {
           reviewReasonCode: "CONNECTOR_SCHEMA_INVALID",
           reviewReasonMessage: "El conector tiene una configuración incompleta y requiere revisión técnica.",
@@ -1388,7 +1399,17 @@ export default function ScannerAndSimulator({
           connectorAttempted: true,
           connectorId: activeConn.id || null,
           connectorName: activeConn.nombre || null,
-          portalErrorMessage: "Invalid fieldsJson or flowJson schema"
+          portalErrorMessage: e.message || "Invalid fieldsJson or flowJson schema",
+          reviewError: {
+            connectorStatus: activeConn.status || "undefined",
+            runnerAvailable: activeConn.runnerAvailable || false,
+            isProductionReady: activeConn.isProductionReady || false,
+            portalMapFound: false,
+            portalMapApproved: false,
+            hasStepsJson: !!activeConn.flowJson,
+            missingFields: ["fieldsSchema_validation_failed"],
+            blockingReason: "CONNECTOR_SCHEMA_INVALID: " + (e.message || "")
+          } as any
         };
         await onUpdateTicketInDb(activeTicketId, {
           status: "requires_manual_review",
@@ -1533,11 +1554,27 @@ export default function ScannerAndSimulator({
       const missingFields: string[] = [];
       if (!fiscalProfile.userId) missingFields.push("userId");
       if (!activeConn.id) missingFields.push("connectorId");
-      if (activeConn.status !== "real_validation" && activeConn.status !== "production_ready") missingFields.push("connector.status");
-      if (activeConn.runnerAvailable !== true) missingFields.push("connector.runnerAvailable");
       
-      if (!pMap) missingFields.push("portalMap");
-      else if (!pMap.isApproved) missingFields.push("portalMap.isApproved");
+      // Enforce the A/B enqueuing rules (Task 3)
+      const isProductionRuleMatch = activeConn.status === "production_ready" && activeConn.runnerAvailable === true && activeConn.isProductionReady === true;
+      const isRealValidationRuleMatch = activeConn.status === "real_validation" && activeConn.runnerAvailable === true && activeConn.isProductionReady === false && pMap && (pMap.isApproved === true || pMap.status === "approved");
+      
+      if (!isProductionRuleMatch && !isRealValidationRuleMatch) {
+        if (activeConn.status !== "production_ready" && activeConn.status !== "real_validation") {
+          missingFields.push("connector.status");
+        }
+        if (activeConn.runnerAvailable !== true) {
+          missingFields.push("connector.runnerAvailable");
+        }
+        if (activeConn.status === "production_ready" && !activeConn.isProductionReady) {
+          missingFields.push("connector.isProductionReady");
+        }
+        if (!pMap) {
+          missingFields.push("portalMap");
+        } else if (!pMap.isApproved && pMap.status !== "approved") {
+          missingFields.push("portalMap.isApproved");
+        }
+      }
 
       if (!pFields.billingReference || !pFields.billingReference.trim()) missingFields.push("portalFields.billingReference");
       if (pFields.total === undefined || pFields.total === null || isNaN(pFields.total)) missingFields.push("portalFields.total");
@@ -1553,13 +1590,35 @@ export default function ScannerAndSimulator({
 
       if (missingFields.length > 0) {
         await addLog(`❌ Faltan campos requeridos: ${missingFields.join(", ")}`, 400);
+        
+        const configErr: ReviewError = {
+          reviewReasonCode: "CONFIG_INCOMPLETE",
+          reviewReasonMessage: `Configuración incompleta: falta registrar ${missingFields.join(", ")}.`,
+          lastAutomationStep: "connector_resolving",
+          connectorAttempted: true,
+          connectorId: activeConn.id || null,
+          connectorName: activeConn.nombre || null,
+          portalErrorMessage: `Configuración incompleta: ${missingFields.join(", ")}`,
+          reviewError: {
+            connectorStatus: activeConn.status || "undefined",
+            runnerAvailable: activeConn.runnerAvailable || false,
+            isProductionReady: activeConn.isProductionReady || false,
+            portalMapFound: !!pMap,
+            portalMapApproved: pMap ? !!pMap.isApproved : false,
+            hasStepsJson: pMap ? !!pMap.stepsJson : false,
+            missingFields: missingFields,
+            blockingReason: "CONFIG_INCOMPLETE: " + missingFields.join(", ")
+          } as any
+        };
+
         await onUpdateTicketInDb(activeTicketId, {
-          status: "missing_required_fields",
-          reviewReasonCode: "MISSING_REQUIRED_FIELDS",
-          errorMsg: `Faltan campos requeridos para este portal: ${missingFields.join(", ")}`,
+          status: "requires_manual_review",
+          reviewReasonCode: "CONFIG_INCOMPLETE",
+          errorMsg: configErr.reviewReasonMessage,
+          reviewError: configErr as any,
           missingFields: missingFields
         } as any);
-        await addAutomationEvent("connector_resolving", "failed", `Faltan campos requeridos: ${missingFields.join(", ")}`, undefined, "MISSING_REQUIRED_FIELDS");
+        await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, "CONFIG_INCOMPLETE");
         setIsAutomatingLoading(false);
         return;
       }
@@ -1777,7 +1836,7 @@ export default function ScannerAndSimulator({
       // Check required fiscal fields in the form state
       const missingProfileFields: string[] = [];
       for (const field of fieldsSchema) {
-        if (field.source === "fiscalProfile" && field.required) {
+        if (getFieldSource(field) === "fiscalProfile" && field.required) {
           const val = customProfileFields[field.key] || "";
           if (field.key === "rfcReceptor" || field.key === "rfc") {
             if (val.trim().length < 12) missingProfileFields.push(field.name);
@@ -3114,8 +3173,8 @@ return list.map(n => {
                       const isCustomConnector = fieldsSchema.length > 0;
 
                       if (isCustomConnector) {
-                        const ticketFields = fieldsSchema.filter((f: any) => f.source === "ticket");
-                        const profileFields = fieldsSchema.filter((f: any) => f.source === "fiscalProfile");
+                        const ticketFields = fieldsSchema.filter((f: any) => getFieldSource(f) === "ticket");
+                        const profileFields = fieldsSchema.filter((f: any) => getFieldSource(f) === "fiscalProfile");
 
                         return (
                           <div className="space-y-5 text-left">
