@@ -65,6 +65,7 @@ const OCR_RESPONSE_SCHEMA = {
     folio: { type: "STRING", description: "Folio, ticket, transaccion o codigo de facturacion. Si no es legible, usa cadena vacia." },
     total: { type: "NUMBER", description: "Total pagado en MXN. Si no es legible, usa 0." },
     sucursal: { type: "STRING", description: "Sucursal o ubicacion si aparece. Si no es legible, usa cadena vacia." },
+    rawOcrText: { type: "STRING", description: "El texto completo e integro extraido del ticket de forma literal, linea por linea." },
     items: {
       type: "ARRAY",
       description: "Conceptos claramente legibles en el ticket.",
@@ -78,7 +79,7 @@ const OCR_RESPONSE_SCHEMA = {
       }
     }
   },
-  required: ["rfcEmisor", "nombreEmisor", "fechaCompra", "folio", "total", "items"]
+  required: ["rfcEmisor", "nombreEmisor", "fechaCompra", "folio", "total", "rawOcrText", "items"]
 };
 
 const OCR_PROMPT = [
@@ -123,6 +124,7 @@ function emptyOcrDraft(message = "El OCR no pudo procesar la imagen. Completa lo
     ocrFailed: true,
     ocrError: message,
     items: [],
+    rawOcrText: "",
     cost: 0,
     rawCost: 0
   };

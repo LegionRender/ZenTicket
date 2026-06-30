@@ -896,6 +896,7 @@ export default function ScannerAndSimulator({
         pipelineLogs: ocrResult.pipelineLogs,
         confidenceScore: ocrResult.confidenceScore,
         extractedFields: ocrResult.extractedFields ? JSON.stringify(ocrResult.extractedFields) : "",
+        rawOcrText: ocrResult.rawOcrText || "",
       } as any);
       setTicketId(tId);
 
@@ -1104,6 +1105,7 @@ export default function ScannerAndSimulator({
         pipelineLogs: ocrResult.pipelineLogs,
         confidenceScore: ocrResult.confidenceScore,
         extractedFields: ocrResult.extractedFields ? JSON.stringify(ocrResult.extractedFields) : "",
+        rawOcrText: ocrResult.rawOcrText || "",
       } as any);
       setTicketId(tId);
 
@@ -1527,55 +1529,33 @@ export default function ScannerAndSimulator({
       const freshTicketData = freshTicketDoc.data()!;
       pFields = freshTicketData.portalFields || {};
 
-      // Validate required fields from database snapshot
+      // Validate required fields and documents from database snapshot (Task 4)
       const missingFields: string[] = [];
-      for (const field of fieldsSchema) {
-        if (field.required) {
-          if (field.source === "ticket") {
-            let val = "";
-            if (field.key === "referenciaFacturacion" || field.key === "folio") {
-              val = pFields.billingReference || "";
-            } else if (field.key === "total") {
-              val = (pFields.total || "").toString();
-            } else if (field.key === "fecha" || field.key === "date") {
-              val = pFields.date || "";
-            } else if (field.key === "ticketNumber") {
-              val = pFields.ticketNumber || "";
-            }
-            
-            if (!val.trim()) {
-              missingFields.push(field.key);
-            }
-          } else if (field.source === "fiscalProfile") {
-            let val = "";
-            if (field.key === "rfcReceptor" || field.key === "rfc") {
-              val = fiscalProfile.rfc || "";
-              if (val.trim().length < 12) val = "";
-            } else if (field.key === "razonSocial") {
-              val = fiscalProfile.razonSocial || "";
-            } else if (field.key === "codigoPostal") {
-              val = fiscalProfile.codigoPostal || "";
-              if (val.trim().length !== 5) val = "";
-            } else if (field.key === "regimenFiscal") {
-              val = fiscalProfile.regimenFiscal || "";
-            } else if (field.key === "usoCFDI") {
-              val = fiscalProfile.usoCFDI || "";
-            } else if (field.key === "email") {
-              val = fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || "";
-              if (!val.includes("@")) val = "";
-            }
-            
-            if (!val.trim()) {
-              missingFields.push(field.key);
-            }
-          }
-        }
-      }
+      if (!fiscalProfile.userId) missingFields.push("userId");
+      if (!activeConn.id) missingFields.push("connectorId");
+      if (activeConn.status !== "real_validation" && activeConn.status !== "production_ready") missingFields.push("connector.status");
+      if (activeConn.runnerAvailable !== true) missingFields.push("connector.runnerAvailable");
+      
+      if (!pMap) missingFields.push("portalMap");
+      else if (!pMap.isApproved) missingFields.push("portalMap.isApproved");
+
+      if (!pFields.billingReference || !pFields.billingReference.trim()) missingFields.push("portalFields.billingReference");
+      if (pFields.total === undefined || pFields.total === null || isNaN(pFields.total)) missingFields.push("portalFields.total");
+
+      if (!fiscalProfile.rfc || !fiscalProfile.rfc.trim()) missingFields.push("fiscalProfile.rfc");
+      if (!fiscalProfile.razonSocial || !fiscalProfile.razonSocial.trim()) missingFields.push("fiscalProfile.businessName");
+      if (!fiscalProfile.codigoPostal || !fiscalProfile.codigoPostal.trim()) missingFields.push("fiscalProfile.postalCode");
+      if (!fiscalProfile.regimenFiscal || !fiscalProfile.regimenFiscal.trim()) missingFields.push("fiscalProfile.taxRegime");
+      if (!fiscalProfile.usoCFDI || !fiscalProfile.usoCFDI.trim()) missingFields.push("fiscalProfile.cfdiUse");
+      
+      const fpEmail = fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || "";
+      if (!fpEmail || !fpEmail.trim() || !fpEmail.includes("@")) missingFields.push("fiscalProfile.email");
 
       if (missingFields.length > 0) {
         await addLog(`❌ Faltan campos requeridos: ${missingFields.join(", ")}`, 400);
         await onUpdateTicketInDb(activeTicketId, {
           status: "missing_required_fields",
+          reviewReasonCode: "MISSING_REQUIRED_FIELDS",
           errorMsg: `Faltan campos requeridos para este portal: ${missingFields.join(", ")}`,
           missingFields: missingFields
         } as any);
@@ -1624,6 +1604,7 @@ export default function ScannerAndSimulator({
         ticketDataSnapshot,
         fiscalProfileSnapshot,
         attempts: 0,
+        maxAttempts: 3,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -3778,33 +3759,27 @@ return list.map(n => {
           const tStatus = currentTicket?.status || "";
           
           if (tStatus === "ticket_uploaded" || tStatus === "extracting_data") {
-            return "Leyendo el ticket...";
+            return "Leyendo ticket";
           }
           if (tStatus === "connector_resolving") {
-            return "Buscando el portal oficial de facturación del comercio...";
-          }
-          if (["pending_portal_submission", "submitting_to_portal"].includes(tStatus)) {
-            return "Preparando solicitud de facturación...";
-          }
-          if (["submitted_to_merchant", "waiting_portal_result", "merchant_cfdi_downloaded"].includes(tStatus)) {
-            return "Esperando respuesta del portal oficial del comercio...";
-          }
-          if (tStatus === "sat_verifying") {
-            return "Validando CFDI ante los servidores oficiales del SAT...";
-          }
-          if (tStatus === "cfdi_validated" || tStatus === "completed") {
-            return "¡Factura obtenida y validada con éxito!";
-          }
-          if (tStatus === "requires_manual_review") {
-            return "El proceso requiere revisión manual.";
+            return "Extrayendo datos";
           }
           if (tStatus === "requires_user_correction") {
-            return "Necesitamos corregir un dato.";
+            return "Revisa los datos";
           }
-          if (tStatus === "failed") {
-            return "No se pudo completar el proceso.";
+          if (["pending_portal_submission", "submitting_to_portal", "submitted_to_merchant", "waiting_portal_result", "merchant_cfdi_downloaded", "queued_for_runner", "runner_processing"].includes(tStatus)) {
+            return "Solicitando factura";
           }
-          return "Iniciando procesamiento...";
+          if (tStatus === "sat_verifying" || tStatus === "sat_validation_pending" || tStatus === "xml_structure_validated") {
+            return "Validando CFDI";
+          }
+          if (tStatus === "cfdi_validated" || tStatus === "completed") {
+            return "Factura lista";
+          }
+          if (tStatus === "requires_manual_review" || tStatus === "failed") {
+            return "Revisión requerida";
+          }
+          return "Leyendo ticket";
         };
 
         return (

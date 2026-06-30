@@ -558,6 +558,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         folio: { type: "STRING", description: "Folio del ticket, ID de transacción, código de facturación o referencia de ticket (ej: 0251846 o 4821-3921-1923)" },
         total: { type: "NUMBER", description: "Total monetario pagado en el ticket en pesos mexicanos" },
         sucursal: { type: "STRING", description: "Sucursal o ubicación donde se realizó la compra" },
+        rawOcrText: { type: "STRING", description: "El texto completo e íntegro extraído del ticket de forma literal, línea por línea." },
         items: {
           type: "ARRAY",
           description: "Lista de conceptos comprados descritos en el ticket",
@@ -571,7 +572,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
           },
         },
       },
-      required: ["rfcEmisor", "nombreEmisor", "fechaCompra", "folio", "total", "items"],
+      required: ["rfcEmisor", "nombreEmisor", "fechaCompra", "folio", "total", "rawOcrText", "items"],
     };
 
     let textResult = "";
@@ -861,6 +862,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       ocrFailed: true,
       ocrError: "El OCR no pudo procesar la imagen. Completa los campos manualmente.",
       items: [],
+      rawOcrText: "",
       cost: 0,
       rawCost: 0
     });

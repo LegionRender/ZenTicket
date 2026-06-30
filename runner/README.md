@@ -27,6 +27,7 @@ npx playwright install chromium
 
 ## Comandos de Ejecución
 
+### 1. Ejecución Local / Pruebas Controladas
 * **Compilar el código**:
   ```bash
   npm run build
@@ -39,6 +40,39 @@ npx playwright install chromium
   ```bash
   npm start
   ```
+
+### 2. Ejecución Estable en Producción (PM2)
+Para garantizar que el runner se ejecute de forma permanente en segundo plano y se reinicie automáticamente ante fallos o reboots del sistema (en VPS, Railway, Render o servidor dedicado):
+* **Arrancar el proceso con PM2**:
+  ```bash
+  # Instalar PM2 globalmente si no está disponible
+  npm install -g pm2
+  
+  # Compilar e iniciar el runner como servicio
+  npm run build
+  pm2 start dist/index.js --name zenticket-runner
+  ```
+* **Detener el proceso**:
+  ```bash
+  pm2 stop zenticket-runner
+  ```
+* **Reiniciar el proceso**:
+  ```bash
+  pm2 restart zenticket-runner
+  ```
+* **Monitorear logs en tiempo real**:
+  ```bash
+  pm2 logs zenticket-runner
+  ```
+* **Estado e inactividad**:
+  ```bash
+  pm2 status
+  ```
+
+### 3. Variables de Entorno y Credenciales
+El runner requiere las siguientes variables de entorno si no se utiliza el archivo de cuenta de servicio local:
+* `FIREBASE_PROJECT_ID`: El ID del proyecto Firebase (`factubolt`).
+* Si se ejecuta localmente o en un VPS tradicional, utiliza el archivo `serviceAccountKey.json` colocado en el directorio raíz de ZenTicket. El runner detectará este archivo automáticamente e inicializará el SDK administrativo de Firebase de forma segura sin exponer credenciales en repositorios públicos.
 
 ---
 

@@ -143,6 +143,24 @@ export default function AdminScreen({
   const [activeTrainings, setActiveTrainings] = useState<any[]>([]);
   const [ocrJobs, setOcrJobs] = useState<any[]>([]);
   const [ocrAlerts, setOcrAlerts] = useState<any[]>([]);
+
+  // Real tickets tracker state for testers
+  const [invoiceJobs, setInvoiceJobs] = useState<any[]>([]);
+  const [realTicketsFilter, setRealTicketsFilter] = useState<"all" | "processing" | "manual_review" | "cfdi_validated" | "error_portal" | "error_sat" | "error_xml">("all");
+
+  useEffect(() => {
+    const q = query(collection(db, "invoice_jobs"), orderBy("createdAt", "desc"), limit(50));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setInvoiceJobs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      },
+      (err) => {
+        console.error("Error loading invoice jobs:", err);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
   const [ocrQueue, setOcrQueue] = useState<any[]>([]);
   const [trainingSyncError, setTrainingSyncError] = useState<string | null>(null);
   const [ocrSyncError, setOcrSyncError] = useState<string | null>(null);
@@ -2531,8 +2549,187 @@ export default function AdminScreen({
             </motion.div>
           </div>
         )}
-
       </AnimatePresence>
+
+      {/* 11. PANEL DE SEGUIMIENTO DE PRUEBAS REALES */}
+      {(() => {
+        const realProcessedTickets = tickets.filter(t => {
+          const hasJob = invoiceJobs.some(j => j.ticketId === t.id);
+          const hasRunnerStatus = ["queued_for_runner", "runner_processing", "sat_validation_pending", "cfdi_validated", "requires_manual_review", "failed"].includes(t.status || "");
+          return hasJob || hasRunnerStatus;
+        });
+
+        const filteredRealTickets = realProcessedTickets.filter(t => {
+          if (realTicketsFilter === "all") return true;
+          if (realTicketsFilter === "processing") {
+            return ["queued_for_runner", "runner_processing", "sat_validation_pending", "xml_structure_validated"].includes(t.status || "");
+          }
+          if (realTicketsFilter === "manual_review") {
+            return t.status === "requires_manual_review";
+          }
+          if (realTicketsFilter === "cfdi_validated") {
+            return t.status === "cfdi_validated";
+          }
+          if (realTicketsFilter === "error_portal") {
+            return t.status === "requires_manual_review" && ["PORTAL_REJECTED_TICKET_DATA", "PORTAL_RETURNED_ERROR", "PORTAL_TIMEOUT", "CAPTCHA_DETECTED", "PORTAL_CHANGED"].includes(t.reviewReasonCode || "");
+          }
+          if (realTicketsFilter === "error_sat") {
+            return t.status === "requires_manual_review" && ["SAT_STATUS_NOT_FOUND", "SAT_STATUS_CANCELLED", "SAT_VALIDATION_UNAVAILABLE", "SAT_TIMEOUT"].includes(t.reviewReasonCode || "");
+          }
+          if (realTicketsFilter === "error_xml") {
+            return t.status === "requires_manual_review" && ["XML_NOT_DOWNLOADED", "XML_STRUCTURE_INVALID", "XML_RFC_MISMATCH", "XML_TOTAL_MISMATCH", "XML_UUID_MISSING"].includes(t.reviewReasonCode || "");
+          }
+          return true;
+        });
+
+        return (
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm text-left space-y-6 select-none">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-5">
+              <div className="flex gap-4 items-center">
+                <div className="w-12 h-12 rounded-full bg-[#0B53F4]/10 border border-[#0B53F4]/15 flex items-center justify-center text-[#0B53F4] shrink-0">
+                  <Terminal className="w-6 h-6 stroke-[2.3]" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black text-[#0B53F4] uppercase tracking-widest font-mono">
+                    TESTING E2E
+                  </span>
+                  <h3 className="text-base font-black text-slate-900 tracking-tight mt-0.5">
+                    Tickets Reales Recientes
+                  </h3>
+                </div>
+              </div>
+              <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2.5 py-1 rounded-full font-mono border border-slate-200">
+                {filteredRealTickets.length} ticket(s) mostrados
+              </span>
+            </div>
+
+            {/* Filters Toolbar */}
+            <div className="flex flex-wrap gap-1.5 p-1 bg-slate-50 border border-slate-200/60 rounded-2xl">
+              {[
+                { key: "all", label: "Todos" },
+                { key: "processing", label: "En proceso" },
+                { key: "manual_review", label: "Revisión requerida" },
+                { key: "cfdi_validated", label: "CFDI validado" },
+                { key: "error_portal", label: "Error portal" },
+                { key: "error_sat", label: "Error SAT" },
+                { key: "error_xml", label: "Error XML" }
+              ].map((btn) => (
+                <button
+                  key={btn.key}
+                  onClick={() => setRealTicketsFilter(btn.key as any)}
+                  type="button"
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold transition cursor-pointer select-none ${
+                    realTicketsFilter === btn.key
+                      ? "bg-[#0B53F4] text-white shadow-xs"
+                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/50"
+                  }`}
+                >
+                  {btn.label}
+                </button>
+              ))}
+            </div>
+
+            {/* List / Table */}
+            {filteredRealTickets.length === 0 ? (
+              <div className="text-center py-10 border border-dashed border-slate-250 rounded-2xl text-xs text-slate-400 font-bold font-sans">
+                No hay tickets en esta categoría.
+              </div>
+            ) : (
+              <div className="overflow-x-auto border border-slate-100 rounded-2xl">
+                <table className="w-full text-xs text-slate-700 font-sans border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/65 border-b border-slate-100 text-[9.5px] font-black text-slate-400 uppercase tracking-wider font-mono">
+                      <th className="py-3 px-4 text-left">Ticket ID / Fecha</th>
+                      <th className="py-3 px-4 text-left">Usuario</th>
+                      <th className="py-3 px-4 text-left">Comercio</th>
+                      <th className="py-3 px-4 text-left">Estatus Ticket</th>
+                      <th className="py-3 px-4 text-left">Detalle / Diagnóstico</th>
+                      <th className="py-3 px-4 text-left">Job / SAT / XML</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRealTickets.map((t) => {
+                      const matchingJob = invoiceJobs.find(j => j.ticketId === t.id);
+                      const hasXml = matchingJob?.result?.xmlStoragePath ? "Sí" : "No";
+                      const satStatus = matchingJob?.result?.satStatus || "N/A";
+                      const dateStr = t.createdAt ? new Date(t.createdAt).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" }) : "N/A";
+                      const runTimeStr = matchingJob?.createdAt ? new Date(matchingJob.createdAt).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" }) : "N/A";
+
+                      let statusBadge = "bg-slate-150 text-slate-650";
+                      if (t.status === "cfdi_validated") {
+                        statusBadge = "bg-emerald-50 text-emerald-700 border border-emerald-150";
+                      } else if (["queued_for_runner", "runner_processing", "sat_validation_pending"].includes(t.status || "")) {
+                        statusBadge = "bg-blue-50 text-[#0B53F4] border border-blue-150";
+                      } else if (t.status === "requires_manual_review") {
+                        statusBadge = "bg-amber-50 text-amber-700 border border-amber-150";
+                      } else if (t.status === "failed") {
+                        statusBadge = "bg-rose-50 text-rose-700 border border-rose-150";
+                      }
+
+                      return (
+                        <tr key={t.id} className="border-b border-slate-100 hover:bg-slate-50/40 transition">
+                          <td className="py-3.5 px-4">
+                            <span className="font-bold text-slate-800 block">#{t.id?.slice(-8).toUpperCase()}</span>
+                            <span className="text-[10px] text-slate-400 font-mono block mt-0.5">{dateStr}</span>
+                          </td>
+                          <td className="py-3.5 px-4 font-mono text-[10.5px]">
+                            {t.userId?.slice(0, 10)}...
+                          </td>
+                          <td className="py-3.5 px-4 font-extrabold text-slate-800">
+                            {t.nombreEmisor || "S/D"}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className={`inline-block px-2.5 py-1 text-[9.5px] font-black rounded-lg leading-none font-sans uppercase ${statusBadge}`}>
+                              {t.status === "cfdi_validated" ? "Validado SAT" : t.status === "requires_manual_review" ? "Revisión Req." : t.status}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {t.reviewReasonCode ? (
+                              <div className="space-y-0.5">
+                                <span className="font-extrabold text-rose-600 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded text-[8.5px] font-mono leading-none">
+                                  {t.reviewReasonCode}
+                                </span>
+                                <p className="text-[10.5px] text-slate-500 font-medium leading-relaxed max-w-[200px] truncate-3-lines" title={t.errorMsg}>
+                                  {t.errorMsg}
+                                </p>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 font-medium">Ninguno</span>
+                            )}
+                            {matchingJob?.screenshotPath && (
+                              <a 
+                                href={matchingJob.screenshotPath}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-0.5 text-[9px] font-black text-[#0B53F4] uppercase tracking-wider hover:underline mt-1.5 block"
+                              >
+                                <ArrowUpRight className="w-2.5 h-2.5" />
+                                <span>Ver Screenshot</span>
+                              </a>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {matchingJob ? (
+                              <div className="space-y-1 font-mono text-[10px] leading-tight">
+                                <div><span className="text-slate-400">Job:</span> <span className="font-semibold text-slate-700">#{matchingJob.id?.slice(-6).toUpperCase()} ({matchingJob.status})</span></div>
+                                <div><span className="text-slate-400">Última Corrida:</span> <span className="text-slate-600">{runTimeStr}</span></div>
+                                <div><span className="text-slate-400">XML Descargado:</span> <span className={`font-bold ${hasXml === "Sí" ? "text-emerald-600" : "text-rose-600"}`}>{hasXml}</span></div>
+                                <div><span className="text-slate-400">Estatus SAT:</span> <span className={`font-bold uppercase ${satStatus === "valid" ? "text-emerald-600" : satStatus === "cancelled" ? "text-rose-600" : "text-slate-500"}`}>{satStatus}</span></div>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 font-mono text-[10px]">Sin Job Asignado</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* 12. BOTTOM RED DE EXTRACCIÓN HARDWARE STATUS CARD CARD */}
       <div className="bg-[#FAF9FF] border border-slate-200/60 rounded-3xl p-5 flex items-center justify-between shadow-2xs select-none">
