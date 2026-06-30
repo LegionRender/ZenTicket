@@ -97,7 +97,7 @@ const connectorsSeed = [
   {
     nombre: "Farmacias Similares",
     rfc: "FSI120304XYZ",
-    portalUrl: "https://facturacion.farmaciassimilares.com",
+    portalUrl: "https://facturacion.gpupm.com/simifactura/portal",
     fieldsJson: JSON.stringify([
       { key: "referenciaFacturacion", name: "Referencia de facturación", selector: "input#ref_simi", type: "text", required: true, source: "ticket" },
       { key: "total", name: "Total Facturado", selector: "input#total_simi", type: "number", required: true, source: "ticket" },
@@ -189,7 +189,9 @@ async function seedConnectors() {
           // Farmacias Similares real flow steps
           steps = [
             { type: "goto", url: "{{portalMap.entryUrl}}" },
-            { type: "fill", selector: "input#ref_simi", value: "{{ticket.billingReference}}", transform: "trim" },
+            { type: "fill", selector: "input#Referencia", value: "{{ticket.billingReference}}", transform: "trim" },
+            { type: "click", selector: "button:has-text('Continuar')" },
+            { type: "waitForSelector", selector: "input#total_simi" },
             { type: "fill", selector: "input#total_simi", value: "{{ticket.total}}", transform: "fixed2" },
             { type: "click", selector: "button#btnBuscar" },
             { type: "waitForSelector", selector: "input#rfc_simi" },
@@ -218,7 +220,7 @@ async function seedConnectors() {
           requiredFields: ["ticket.billingReference", "ticket.total"],
           fiscalFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"],
           captchaSelectorsJson: JSON.stringify(["iframe[src*='recaptcha']", ".g-recaptcha", "#captcha"]),
-          errorSelectorsJson: JSON.stringify([".alert-danger", "#error-msg", ".text-danger"]),
+          errorSelectorsJson: JSON.stringify([".swal-text", ".alert-danger", "#error-msg", ".text-danger"]),
           successSelectorsJson: JSON.stringify([".success-msg", "#download-area"]),
           downloadRulesJson: JSON.stringify({ xmlRequired: true, pdfRequired: false }),
           stepsJson: JSON.stringify(steps),

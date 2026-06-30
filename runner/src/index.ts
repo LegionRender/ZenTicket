@@ -16,11 +16,13 @@ const serviceAccountPath = path.join(__dirname, "../../serviceAccountKey.json");
 if (fs.existsSync(serviceAccountPath)) {
   const serviceAccount = require(serviceAccountPath);
   initializeApp({
-    credential: cert(serviceAccount)
+    credential: cert(serviceAccount),
+    storageBucket: "factubolt.firebasestorage.app"
   });
 } else {
   initializeApp({
-    projectId: "factubolt"
+    projectId: "factubolt",
+    storageBucket: "factubolt.firebasestorage.app"
   });
 }
 

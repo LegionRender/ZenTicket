@@ -42,6 +42,28 @@ npx playwright install chromium
 
 ---
 
+## Pruebas de Facturación y Validación E2E
+
+### 1. Crear un Job de Prueba Local
+Para simular un ticket real y encolar un proceso de facturación automática en el motor local:
+```bash
+# Ejecutar script de encolamiento de prueba
+node scratch/create_test_job.cjs
+```
+Este script creará:
+* Un documento en la colección `tickets` con estatus `queued_for_runner`.
+* Un documento en la colección `invoice_jobs` con estatus `pending` conteniendo los snapshots inmutables del ticket y perfil fiscal.
+
+### 2. Monitoreo de Logs y Almacenamiento
+* **Logs del Worker**: Los logs técnicos se imprimen en consola y se guardan de forma estructurada en la colección `runner_logs`.
+* **Evidencias y Capturas**: Si la navegación falla, el motor tomará un screenshot completo del error y lo subirá de forma privada a Firebase Storage bajo la ruta:
+  `users/{userId}/tickets/{ticketId}/runner-errors/{timestamp}.png`
+* **Archivos Fiscales**: Las facturas XML y PDF exitosas se cargan directamente a:
+  `users/{userId}/tickets/{ticketId}/cfdi.xml`
+  `users/{userId}/tickets/{ticketId}/cfdi.pdf`
+
+---
+
 ## Flujo de Estados
 
 El ciclo de vida del job de facturación sigue la siguiente progresión en el motor:
@@ -66,7 +88,7 @@ El ciclo de vida del job de facturación sigue la siguiente progresión en el mo
 
 ---
 
-## Limitaciones Conocidas
+## Limitaciones Conocidas del Portal Piloto (Farmacias Similares)
 
-1. **Detección de CAPTCHA**: Si el portal oficial presenta un CAPTCHA complejo que requiere resolución humana, el motor detendrá la ejecución con `CAPTCHA_DETECTED` de forma segura, tomará una captura de pantalla y derivará el ticket a revisión manual.
-2. **Cambios en Portales**: Si el comercio cambia el diseño o los selectores del portal oficial, la navegación fallará y el motor registrará `PORTAL_CHANGED` en la bitácora de logs.
+1. **Estructura de Alertas (SweetAlert)**: Si los datos del ticket son incorrectos (ej. referencia inválida), el portal no redirige a una página de error estándar ni escribe en el DOM tradicional; en su lugar, lanza un cuadro de SweetAlert modal. El motor detecta esto usando el selector `.swal-text` y aborta inmediatamente con `PORTAL_RETURNED_ERROR`.
+2. **CAPTCHA**: El portal oficial puede desplegar un control de CAPTCHA si detecta tráfico excesivo o solicitudes sospechosas. El motor abortará de forma segura bajo el código `CAPTCHA_DETECTED` y registrará la captura en el bucket de Storage.

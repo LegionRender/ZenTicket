@@ -6,7 +6,6 @@ export async function pollJobs(): Promise<string[]> {
     // Poll both pending jobs and jobs waiting for SAT verification
     const snapshot = await db.collection("invoice_jobs")
       .where("status", "in", ["pending", "validating_sat"])
-      .orderBy("createdAt", "asc")
       .limit(10)
       .get();
 
