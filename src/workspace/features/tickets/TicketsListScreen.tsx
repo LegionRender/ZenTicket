@@ -20,6 +20,7 @@ interface TicketsListScreenProps {
   onTabChange?: (tab: "capturar" | "tickets" | "conectores" | "historial" | "resumen" | "cuenta" | "admin") => void;
   newlyAddedTicketId?: string | null;
   onClearNewlyAddedTicketId?: () => void;
+  onUpdateTicketInDb?: (ticketId: string, updates: any) => Promise<void>;
 }
 
 // ----------------------------------------------------
@@ -168,6 +169,26 @@ const getBrandBrandIcon = (nombre: string) => {
   };
 };
 
+const validateXmlStructure = (xmlContent: string | null | undefined): boolean => {
+  if (!xmlContent) return false;
+  
+  // Minimal structural validation of downloaded XML:
+  // Must contain cfdi:Comprobante, cfdi:Emisor, cfdi:Receptor, cfdi:Impuestos, cfdi:Conceptos,
+  // cfdi:Concepto, cfdi:Traslados, cfdi:Traslado with TipoFactor="Tasa", TasaOCuota="0.160000",
+  // and tfd:TimbreFiscalDigital with UUID, SelloCFD, SelloSAT, NoCertificadoSAT, FechaTimbrado.
+  const hasComprobante = /<cfdi:Comprobante\b[^>]*\bTotal=/i.test(xmlContent) || /<Comprobante\b[^>]*\bTotal=/i.test(xmlContent);
+  const hasEmisor = /<cfdi:Emisor\b[^>]*\bRfc=/i.test(xmlContent) || /<Emisor\b[^>]*\bRfc=/i.test(xmlContent);
+  const hasReceptor = /<cfdi:Receptor\b[^>]*\bRfc=/i.test(xmlContent) || /<Receptor\b[^>]*\bRfc=/i.test(xmlContent);
+  const hasTimbre = (/<tfd:TimbreFiscalDigital\b/i.test(xmlContent) || /<TimbreFiscalDigital\b/i.test(xmlContent)) &&
+                    /\bUUID=/i.test(xmlContent) &&
+                    /\bFechaTimbrado=/i.test(xmlContent) &&
+                    /\bSelloCFD=/i.test(xmlContent) &&
+                    /\bSelloSAT=/i.test(xmlContent) &&
+                    /\bNoCertificadoSAT=/i.test(xmlContent);
+
+  return !!(hasComprobante && hasEmisor && hasReceptor && hasTimbre);
+};
+
 export default function TicketsListScreen({
   tickets,
   invoices,
@@ -177,7 +198,8 @@ export default function TicketsListScreen({
   onDeleteTicket,
   onTabChange,
   newlyAddedTicketId,
-  onClearNewlyAddedTicketId
+  onClearNewlyAddedTicketId,
+  onUpdateTicketInDb
 }: TicketsListScreenProps) {
   const toast = useToast();
   
@@ -275,6 +297,55 @@ export default function TicketsListScreen({
   // THIRD VIEW SCREEN: VER PDF - DETALLE DE FACTURA
   // ----------------------------------------------------
   if (activeInvoiceData) {
+    const associatedTicket = tickets.find(t => t.invoiceId === activeInvoiceData.folioFiscal || t.id === activeInvoiceData.ticketId);
+    const isXmlValid = validateXmlStructure(activeInvoiceData.xmlContent);
+
+    // Auto-transition to cfdi_validated or requires_manual_review if it is merchant_cfdi_downloaded
+    if (associatedTicket && associatedTicket.status === "merchant_cfdi_downloaded" && onUpdateTicketInDb) {
+      if (isXmlValid) {
+        onUpdateTicketInDb(associatedTicket.id, { status: "cfdi_validated" });
+      } else {
+        onUpdateTicketInDb(associatedTicket.id, {
+          status: "requires_manual_review",
+          errorMsg: "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual."
+        });
+      }
+    }
+
+    const ticketStatus = associatedTicket ? associatedTicket.status : "cfdi_validated";
+    const canRenderPdf = ticketStatus === "cfdi_validated" && isXmlValid;
+
+    if (!canRenderPdf) {
+      return (
+        <div className="max-w-xl mx-auto py-12 px-6 text-center animate-fade-in">
+          <div className="flex items-center gap-3 mb-8">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedInvoiceId(null);
+                setShowXmlCode(false);
+              }}
+              className="p-2 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] rounded-full cursor-pointer transition"
+            >
+              <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
+            </button>
+            <span className="text-sm font-black text-slate-800">Volver</span>
+          </div>
+          <div className="bg-rose-50 border border-rose-100 rounded-3xl p-8 text-left space-y-4">
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <h3 className="text-base font-extrabold text-rose-950">Comprobante no disponible</h3>
+            <p className="text-xs text-rose-800 leading-normal font-medium">
+              No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     const isMock = activeInvoiceData.id?.startsWith("mock-");
     
     // Resolve dynamic currency and details
@@ -1154,15 +1225,17 @@ export default function TicketsListScreen({
           <button
             type="button"
             onClick={() => {
-              let xmlToDownload = activeInvoiceData.xmlContent;
-              if (!xmlToDownload) {
-                const subT = totalVal / 1.16;
-                const ivT = totalVal - subT;
-                const emNameClean = emisorCorp.replace(/["&'<>]/g, "");
-                const recNameClean = nombreReceptorVal.replace(/["&'<>]/g, "");
-                xmlToDownload = `<?xml version="1.0" encoding="UTF-8"?>\n<cfdi:Comprobante Version="4.0" Serie="F" Folio="88219" Fecha="${formattedDate.replace(" ", "T")}" SubTotal="${subT.toFixed(2)}" Moneda="MXN" TipoDeComprobante="I" Exportacion="01" MetodoPago="PUE" LugarExpedicion="${lugarExpedicion.replace(", México", "")}" Total="${totalVal.toFixed(2)}">\n  <cfdi:Emisor Rfc="${rfcEmisorVal}" Nombre="${emNameClean}" RegimenFiscal="601"/>\n  <cfdi:Receptor Rfc="${rfcReceptorVal}" Nombre="${recNameClean}" RegimenFiscalReceptor="${regimenFiscalReceptorVal.substring(0,3)}" UsoCFDI="${usoCfdiVal.substring(0,3)}"/>\n  <cfdi:Conceptos>\n    <cfdi:Concepto ClaveProdServ="90101501" Cantidad="1" ClaveUnidad="E48" Descripcion="${itemsList[0]?.description || itemsList[0]?.descripcion || "Consumo General de Mercancías"}" ValorUnitario="${subT.toFixed(2)}" Importe="${subT.toFixed(2)}">\n      <cfdi:Impuestos>\n        <cfdi:Traslados>\n          <cfdi:Traslado Base="${subT.toFixed(2)}" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="${ivT.toFixed(2)}"/>\n        </cfdi:Traslados>\n      </cfdi:Impuestos>\n    </cfdi:Concepto>\n  </cfdi:Conceptos>\n  <cfdi:Complemento>\n    <tfd:TimbreFiscalDigital Version="1.1" UUID="${uuidVal}" FechaTimbrado="${formattedDate.replace(" ", "T")}" SelloCFD="${selloSAT.substring(0, 30)}..." NoCertificadoSAT="${noCertificadoSAT}" SelloSAT="${selloSAT}"/>\n  </cfdi:Complemento>\n</cfdi:Comprobante>`;
+              const ticketStatus = associatedTicket ? associatedTicket.status : "cfdi_validated";
+              const isAllowed = ticketStatus === "merchant_cfdi_downloaded" || ticketStatus === "cfdi_validated";
+              
+              if (!isAllowed || !activeInvoiceData.xmlContent) {
+                toast.error(
+                  "El XML aún no está disponible. ZenTicket debe obtenerlo primero desde el portal oficial del comercio.",
+                  "Descarga no disponible"
+                );
+                return;
               }
-              downloadFile(xmlToDownload, `Factura_${emisorNameRaw}_${uuidVal.substring(0,10)}.xml`, "text/xml");
+              downloadFile(activeInvoiceData.xmlContent, `Factura_${emisorNameRaw}_${uuidVal.substring(0,10)}.xml`, "text/xml");
             }}
             className="w-full zt-btn-secondary-blue transition duration-150 flex items-center justify-center gap-2 py-4 rounded-2xl font-black uppercase text-xs cursor-pointer"
           >
@@ -1483,7 +1556,7 @@ export default function TicketsListScreen({
                     Servidor de Correo SMTP Activo
                   </span>
                   <p className="text-[9.5px] text-emerald-650 dark:text-emerald-300 font-semibold block mt-0.5 leading-normal">
-                    Credenciales configuradas para <strong>{smtpStatus.smtpUser}</strong>. La factura XML y PDF se enviará de forma <strong>REAL</strong> a {emailTo}.
+                    Credenciales configuradas para <strong>{smtpStatus.smtpUser}</strong>. El CFDI obtenido se enviará directamente a {emailTo}.
                   </p>
                 </div>
               </div>
@@ -1492,11 +1565,11 @@ export default function TicketsListScreen({
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse shrink-0" />
                   <span className="text-[10.5px] text-amber-800 dark:text-amber-400 font-black">
-                    Modo Sandbox: Correo Simulado
+                    Servidor SMTP Desconfigurado
                   </span>
                 </div>
                 <p className="text-[9.5px] text-amber-700 dark:text-amber-350 leading-normal font-semibold">
-                  Se ha simulado el envío con éxito. Si quieres que le llegue un <strong>correo real</strong> a tu buzón personal o al de tu contador, configura las claves <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_HOST</code>, <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_USER</code> y <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_PASS</code> en la pestaña <strong>Settings &gt; Secrets</strong> de AI Studio.
+                  Si deseas recibir los correos directamente en tu buzón personal o en el de tu contador, configura las claves <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_HOST</code>, <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_USER</code> y <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_PASS</code> en la pestaña <strong>Settings &gt; Secrets</strong> de AI Studio.
                 </p>
               </div>
             )}
@@ -1778,7 +1851,7 @@ export default function TicketsListScreen({
                             {isNewlyAdded && (
                               <span className="bg-emerald-50 text-emerald-700 text-[8.5px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider leading-none shadow-3xs flex items-center gap-0.5 animate-pulse shrink-0">
                                 <Sparkles className="w-2.5 h-2.5 fill-current" />
-                                Recién Timbrado
+                                CFDI Obtenido
                               </span>
                             )}
                           </div>
@@ -1801,7 +1874,20 @@ export default function TicketsListScreen({
                         
                         <button
                           type="button"
-                          onClick={() => downloadFile(inv.xmlContent, `Factura_${inv.nombreEmisor}_${inv.folioFiscal?.substring(0,8)}.xml`, "text/xml")}
+                          onClick={() => {
+                            const associatedT = tickets.find(t => t.id === inv.ticketId || t.invoiceId === inv.folioFiscal);
+                            const ticketStatus = associatedT ? associatedT.status : "cfdi_validated";
+                            const isAllowed = ticketStatus === "merchant_cfdi_downloaded" || ticketStatus === "cfdi_validated";
+                            
+                            if (!isAllowed || !inv.xmlContent) {
+                              toast.error(
+                                "El XML aún no está disponible. ZenTicket debe obtenerlo primero desde el portal oficial del comercio.",
+                                "Descarga no disponible"
+                              );
+                              return;
+                            }
+                            downloadFile(inv.xmlContent, `Factura_${inv.nombreEmisor}_${inv.folioFiscal?.substring(0,8)}.xml`, "text/xml");
+                          }}
                           className="w-full zt-btn-secondary-blue font-black rounded-xl py-1.5 px-3 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer"
                         >
                           <Download className="w-3.5 h-3.5 stroke-[2.2]" />
@@ -1830,7 +1916,20 @@ export default function TicketsListScreen({
                       
                       <button
                         type="button"
-                        onClick={() => downloadFile(inv.xmlContent, `Factura_${inv.nombreEmisor}_${inv.folioFiscal?.substring(0,8)}.xml`, "text/xml")}
+                        onClick={() => {
+                          const associatedT = tickets.find(t => t.id === inv.ticketId || t.invoiceId === inv.folioFiscal);
+                          const ticketStatus = associatedT ? associatedT.status : "cfdi_validated";
+                          const isAllowed = ticketStatus === "merchant_cfdi_downloaded" || ticketStatus === "cfdi_validated";
+                          
+                          if (!isAllowed || !inv.xmlContent) {
+                            toast.error(
+                              "El XML aún no está disponible. ZenTicket debe obtenerlo primero desde el portal oficial del comercio.",
+                              "Descarga no disponible"
+                            );
+                            return;
+                          }
+                          downloadFile(inv.xmlContent, `Factura_${inv.nombreEmisor}_${inv.folioFiscal?.substring(0,8)}.xml`, "text/xml");
+                        }}
                         className="flex-1 zt-btn-secondary-blue font-black rounded-xl py-2.5 px-3.5 text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-2xs cursor-pointer min-h-[42px]"
                       >
                         <Download className="w-4 h-4 stroke-[2.2]" />

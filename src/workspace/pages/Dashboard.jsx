@@ -63,7 +63,7 @@ export const Dashboard = () => {
     const invoiceUuids = new Set(invoices.map(inv => inv.folioFiscal));
     
     tickets.forEach(t => {
-      if (t.status === "completed") {
+      if (t.status === "completed" || t.status === "cfdi_validated" || t.status === "merchant_cfdi_downloaded") {
         const uuid = t.invoiceId || "E5B9C231-18FA-427D-B27D-1F3D573B4D22";
         if (!invoiceUuids.has(uuid)) {
           list.push({
@@ -133,9 +133,9 @@ export const Dashboard = () => {
           }
         } else if (t.status === "failed" && !readNotifIds.includes(`failed-${ticketId}`)) {
           return true;
-        } else if (t.status === "review" && !readNotifIds.includes(`review-${ticketId}`)) {
+        } else if ((t.status === "review" || t.status === "requires_manual_review") && !readNotifIds.includes(`review-${ticketId}`)) {
           return true;
-        } else if (t.status === "completed" && !readNotifIds.includes(`completed-${ticketId}`)) {
+        } else if ((t.status === "completed" || t.status === "cfdi_validated" || t.status === "merchant_cfdi_downloaded") && !readNotifIds.includes(`completed-${ticketId}`)) {
           return true;
         }
       }
@@ -1654,6 +1654,7 @@ export const Dashboard = () => {
                 onTabChange={handleTabClick}
                 newlyAddedTicketId={newlyAddedTicketId}
                 onClearNewlyAddedTicketId={() => setNewlyAddedTicketId(null)}
+                onUpdateTicketInDb={onUpdateTicketInDb}
               />
             </div>
           )}

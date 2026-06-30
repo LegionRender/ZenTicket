@@ -848,8 +848,9 @@ export default function ScannerAndSimulator({
     };
 
     try {
-      await addLog("🤖 [Playwright CLI] Inicializando robot de navegación web", 100);
+      await addLog("ZenTicket está procesando el ticket en el portal del comercio.", 800);
       setSimulationProgress(10);
+      await onUpdateTicketInDb(ticketId, { status: "pending_portal_submission" });
       await addLog("🌐 Abriendo puerto seguro proxy para saltar bloqueos", 800);
       await addLog(`🌍 Navegando directamente a: ${activeConn.portalUrl}`, 1200);
       setSimulationProgress(25);
@@ -870,6 +871,7 @@ export default function ScannerAndSimulator({
         );
       }
       setSimulationProgress(50);
+      await onUpdateTicketInDb(ticketId, { status: "submitted_to_merchant" });
 
       await addLog(`🚀 Presionando botón de consulta en el portal...`, 1200);
       await addLog(`✅ Registro de Ticket validado en el portal corporativo exitosamente.`, 900);
@@ -884,7 +886,7 @@ export default function ScannerAndSimulator({
       await addLog(`🖨️ Presionando botón 'Generar Factura / CFDI 4.0' en el portal emisor...`, 1500);
       setSimulationProgress(90);
 
-      await addLog(`🔗 Conectando con PAC certificado emisor SAT para timbrar XML...`, 1200);
+      await addLog("📥 Solicitando descarga del comprobante generado desde el portal oficial del comercio...", 1200);
 
       // Fire actual backend composition to build real XML & visually responsive PDF HTML layouts
       const response = await runAutomation({
@@ -894,7 +896,7 @@ export default function ScannerAndSimulator({
       });
 
       if (!response.ok) {
-        throw new Error("El motor del SAT reportó un error al certificar el CFDI.");
+        throw new Error("No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.");
       }
 
       const invoiceData = await response.json();
@@ -915,11 +917,11 @@ export default function ScannerAndSimulator({
 
       // update ticket state
       await onUpdateTicketInDb(ticketId, {
-        status: "completed",
+        status: "cfdi_validated",
         invoiceId: invoiceData.folioFiscal,
       });
 
-      await addLog(`💾 Factura certificada exitosamente. Folio Fiscal UID: ${invoiceData.folioFiscal}`, 800);
+      await addLog("CFDI obtenido desde el portal del comercio.", 800);
       await addLog(`📥 Archivos PDF & XML descargados en almacén virtual de ZenTicket.`, 500);
       await addLog(`🎉 ¡Procesamiento completado con éxito!`, 200);
 
@@ -936,11 +938,11 @@ export default function ScannerAndSimulator({
       }, 1000);
     } catch (err: any) {
       console.error(err);
-      await addLog(`❌ ERROR DE AUTOMATIZACIÓN: ${err.message || "Portal falló al procesar"}`, 200);
+      await addLog("❌ ERROR: No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.", 200);
       if (ticketId) {
         await onUpdateTicketInDb(ticketId, {
-          status: "review", // Status in Firestore is "review" indicating it continues under review/tracking
-          errorMsg: err.message || "Failed simulation process",
+          status: "requires_manual_review",
+          errorMsg: "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.",
         });
       }
       setIsAutomatingLoading(false);

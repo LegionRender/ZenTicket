@@ -3553,19 +3553,19 @@ export default function ProfileForm({
                 {[
                   {
                     q: "¿Cómo se descargan automáticamente las facturas?",
-                    a: "ZenTicket se conecta a las APIs privadas del SAT y de tus proveedores de forma cifrada mediante tokens seguros, leyendo tus CFDI emitidos y recibidos de inmediato cada vez que se emiten."
+                    a: "ZenTicket lee los datos de tu ticket de compra y automatiza el proceso ingresando tus datos fiscales de receptor directamente en el portal oficial del comercio emisor para descargar el XML y PDF oficiales de forma 100% segura."
                   },
                   {
                     q: "¿El timbrado consume saldo secundario de timbrado?",
-                    a: "No. Con ZenTicket tienes timbrados directos cubiertos integralmente en tus facturas periódicas de acuerdo a los límites autorizados en tu suscripción mensual."
+                    a: "No. ZenTicket no cobra por timbrado ni requiere timbres adicionales, ya que el proceso oficial lo realiza el comercio emisor al procesar tu ticket."
                   },
                   {
                     q: "¿Qué sucede si un ticket de comercio falla en el reconocimiento?",
                     a: "Nuestra IA OCR inteligente cuenta con tolerancia y reintentos automáticos. Si un ticket es de baja calidad o tiene datos ambiguos, se enviará de inmediato al Buzón de Espera para un ajuste manual visual rápido."
                   },
                   {
-                    q: "¿Es seguro resguardar mis sellos fiscales CSD?",
-                    a: "Totalmente. Los Certificados de Sello Digital (CSD) y credenciales CIEC se almacenan y resguardan bajo encriptación de estándar bancario militar AES-256 en reposo, garantizando el máximo nivel de cumplimiento y confidencialidad."
+                    q: "¿Necesito proporcionar mi firma electrónica o sellos CSD?",
+                    a: "No. ZenTicket nunca te solicitará tu E-Firma, archivos .key, .cer o contraseñas del SAT. Toda la facturación se realiza a través de los portales oficiales de los comercios usando tus datos fiscales de receptor estándar (RFC, Razón Social, Régimen y CP)."
                   }
                 ].map((item, index) => {
                   const isOpen = openFaqIndex === index;

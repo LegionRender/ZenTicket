@@ -1028,7 +1028,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                 <div className="bg-[#0b53f4]/5 border border-blue-100 rounded-2xl p-4 text-left flex items-start gap-3">
                   <ShieldCheck className="w-5 h-5 text-[#0B53F4] shrink-0 mt-0.5" />
                   <p className="text-[11px] text-slate-500 leading-normal font-semibold">
-                    Tus credenciales de la E-Firma o datos certificados por el SAT se encriptan de extremo a extremo utilizando llaves asimétricas AES-256 certificadas.
+                    Tus datos fiscales para solicitar facturas se encriptan de extremo a extremo utilizando llaves asimétricas AES-256.
                   </p>
                 </div>
               </motion.div>
