@@ -216,6 +216,8 @@ export default function TicketsListScreen({
   // Outer routing tabs: list or ver-pdf
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [showXmlCode, setShowXmlCode] = useState(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [isValidatingSat, setIsValidatingSat] = useState<boolean>(false);
   
   // Filter inside list
   const [activeSubTab, setActiveSubTab] = useState<"en-seguimiento" | "facturas-emitidas">("en-seguimiento");
@@ -293,6 +295,66 @@ export default function TicketsListScreen({
   // Handle opening the details view
   const activeInvoiceData = emittedInvoicesList.find(inv => inv.id === selectedInvoiceId);
 
+  // Trigger SAT verification when detail view is opened
+  useEffect(() => {
+    if (!selectedInvoiceId || !activeInvoiceData || !activeInvoiceData.xmlContent) {
+      setVerificationError(null);
+      return;
+    }
+
+    const associatedTicket = tickets.find(t => t.invoiceId === activeInvoiceData.folioFiscal || t.id === activeInvoiceData.ticketId);
+    if (!associatedTicket) return;
+
+    // Only run if it's in merchant_cfdi_downloaded or cfdi_validated
+    const needsSatCheck = associatedTicket.status === "merchant_cfdi_downloaded" || associatedTicket.status === "cfdi_validated";
+    if (!needsSatCheck) return;
+
+    const runSatVerification = async () => {
+      setIsValidatingSat(true);
+      setVerificationError(null);
+      try {
+        const isXmlValid = validateXmlStructure(activeInvoiceData.xmlContent);
+        if (!isXmlValid) {
+          throw new Error("El XML obtenido del portal del comercio no contiene la estructura básica obligatoria.");
+        }
+
+        const res = await fetch("/api/cfdi/verify-sat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ xmlContent: activeInvoiceData.xmlContent })
+        });
+
+        if (!res.ok) {
+          throw new Error("Error al conectar con el servicio de verificación del SAT.");
+        }
+
+        const data = await res.json();
+        if (data.status === "valid") {
+          if (associatedTicket.status !== "cfdi_validated" && onUpdateTicketInDb) {
+            await onUpdateTicketInDb(associatedTicket.id, { status: "cfdi_validated", errorMsg: "" });
+          }
+        } else {
+          const errMsg = "El XML obtenido no fue localizado en los controles del SAT. Requiere revisión manual.";
+          setVerificationError(errMsg);
+          if (associatedTicket.status !== "requires_manual_review" && onUpdateTicketInDb) {
+            await onUpdateTicketInDb(associatedTicket.id, {
+              status: "requires_manual_review",
+              errorMsg: "El XML no fue localizado en los controles del SAT."
+            });
+          }
+        }
+      } catch (err: any) {
+        console.error("SAT Verification failed client side:", err);
+        const errMsg = err.message || "Error al verificar el CFDI con el SAT.";
+        setVerificationError(errMsg);
+      } finally {
+        setIsValidatingSat(false);
+      }
+    };
+
+    runSatVerification();
+  }, [selectedInvoiceId, activeInvoiceData, tickets, onUpdateTicketInDb]);
+
   // ----------------------------------------------------
   // THIRD VIEW SCREEN: VER PDF - DETALLE DE FACTURA
   // ----------------------------------------------------
@@ -300,22 +362,24 @@ export default function TicketsListScreen({
     const associatedTicket = tickets.find(t => t.invoiceId === activeInvoiceData.folioFiscal || t.id === activeInvoiceData.ticketId);
     const isXmlValid = validateXmlStructure(activeInvoiceData.xmlContent);
 
-    // Auto-transition to cfdi_validated or requires_manual_review if it is merchant_cfdi_downloaded
-    if (associatedTicket && associatedTicket.status === "merchant_cfdi_downloaded" && onUpdateTicketInDb) {
-      if (isXmlValid) {
-        onUpdateTicketInDb(associatedTicket.id, { status: "cfdi_validated" });
-      } else {
-        onUpdateTicketInDb(associatedTicket.id, {
-          status: "requires_manual_review",
-          errorMsg: "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual."
-        });
-      }
+    const ticketStatus = associatedTicket ? associatedTicket.status : "cfdi_validated";
+    const isFailed = ticketStatus === "failed";
+    const isManualReview = ticketStatus === "requires_manual_review";
+    const canRenderPdf = ticketStatus === "cfdi_validated" && isXmlValid && !verificationError && !isFailed && !isManualReview && !isValidatingSat;
+
+    if (isValidatingSat) {
+      return (
+        <div className="max-w-xl mx-auto py-24 text-center animate-fade-in">
+          <div className="animate-spin rounded-full h-10 w-10 border-[#0B53F4] border-t-transparent mx-auto"></div>
+          <p className="text-slate-550 text-[11px] mt-4 font-mono uppercase tracking-widest">
+            Verificando validez en controles del SAT...
+          </p>
+        </div>
+      );
     }
 
-    const ticketStatus = associatedTicket ? associatedTicket.status : "cfdi_validated";
-    const canRenderPdf = ticketStatus === "cfdi_validated" && isXmlValid;
-
     if (!canRenderPdf) {
+      const displayMsg = (isManualReview && associatedTicket?.errorMsg) || verificationError || "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.";
       return (
         <div className="max-w-xl mx-auto py-12 px-6 text-center animate-fade-in">
           <div className="flex items-center gap-3 mb-8">
@@ -339,7 +403,7 @@ export default function TicketsListScreen({
             </div>
             <h3 className="text-base font-extrabold text-rose-950">Comprobante no disponible</h3>
             <p className="text-xs text-rose-800 leading-normal font-medium">
-              No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.
+              {displayMsg}
             </p>
           </div>
         </div>
@@ -358,8 +422,8 @@ export default function TicketsListScreen({
       ? (activeInvoiceData as any).nombreEmisor === "Starbucks" ? "Café Sirena S. de R.L. de C.V." : `${emisorNameRaw} S.A. de C.V.`
       : `${emisorNameRaw} S.A. de C.V.`;
       
-    const rfcEmisorVal = activeInvoiceData.rfcEmisor || "CSI020226MV4";
-    const uuidVal = activeInvoiceData.folioFiscal || "E5B9C231-18FA-427D-B27D-1F3D573B4D22";
+    const rfcEmisorVal = activeInvoiceData.rfcEmisor || "";
+    const uuidVal = activeInvoiceData.folioFiscal || "";
     
     // Format dates nicely
     let formattedDate = "24/10/2023 14:22:10";

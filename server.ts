@@ -1406,6 +1406,90 @@ app.post("/api/connectors/learn", async (req: Request, res: Response): Promise<v
   }
 });
 
+function parseCfdiInfo(xmlContent: string) {
+  const uuidMatch = /UUID="([^"]+)"/i.exec(xmlContent);
+  const emisorRfcMatch = /<cfdi:Emisor\b[^>]*\bRfc="([^"]+)"/i.exec(xmlContent) || /<Emisor\b[^>]*\bRfc="([^"]+)"/i.exec(xmlContent);
+  const receptorRfcMatch = /<cfdi:Receptor\b[^>]*\bRfc="([^"]+)"/i.exec(xmlContent) || /<Receptor\b[^>]*\bRfc="([^"]+)"/i.exec(xmlContent);
+  const totalMatch = /<cfdi:Comprobante\b[^>]*\bTotal="([^"]+)"/i.exec(xmlContent) || /<Comprobante\b[^>]*\bTotal="([^"]+)"/i.exec(xmlContent);
+
+  return {
+    uuid: uuidMatch ? uuidMatch[1].trim() : "",
+    rfcEmisor: emisorRfcMatch ? emisorRfcMatch[1].trim() : "",
+    rfcReceptor: receptorRfcMatch ? receptorRfcMatch[1].trim() : "",
+    total: totalMatch ? parseFloat(totalMatch[1].trim()) : 0,
+    totalStr: totalMatch ? totalMatch[1].trim() : ""
+  };
+}
+
+async function verifyCfdiWithSat(rfcEmisor: string, rfcReceptor: string, total: number, uuid: string): Promise<{ status: string; detail: string }> {
+  const expression = `?re=${rfcEmisor}&rr=${rfcReceptor}&tt=${total.toFixed(2)}&id=${uuid}`;
+  const soapEnvelope = `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:Consulta>
+         <tem:expresionImpresa><![CDATA[${expression}]]></tem:expresionImpresa>
+      </tem:Consulta>
+   </soapenv:Body>
+</soapenv:Envelope>`;
+
+  try {
+    const response = await fetch("https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc", {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/xml;charset=utf-8",
+        "SOAPAction": "http://tempuri.org/IConsultaCFDIService/Consulta"
+      },
+      body: soapEnvelope
+    });
+
+    if (!response.ok) {
+      return { status: "error", detail: "HTTP error calling SAT service" };
+    }
+
+    const xmlResponse = await response.text();
+    console.log("[SAT Verify] Expression:", expression);
+
+    const estadoMatch = /<a:Estado>([^<]+)<\/a:Estado>/i.exec(xmlResponse) || /<Estado>([^<]+)<\/Estado>/i.exec(xmlResponse);
+    const codigoEstatusMatch = /<a:CodigoEstatus>([^<]+)<\/a:CodigoEstatus>/i.exec(xmlResponse) || /<CodigoEstatus>([^<]+)<\/CodigoEstatus>/i.exec(xmlResponse);
+
+    const estado = estadoMatch ? estadoMatch[1].trim() : "";
+    const codigoEstatus = codigoEstatusMatch ? codigoEstatusMatch[1].trim() : "";
+
+    if (estado.toLowerCase() === "vigente") {
+      return { status: "valid", detail: `Estado: ${estado}. Codigo: ${codigoEstatus}` };
+    } else {
+      return { status: "not_found", detail: `Estado: ${estado || "No Encontrado"}. Codigo: ${codigoEstatus}` };
+    }
+  } catch (err: any) {
+    console.error("Error calling SAT CFDI verification service:", err);
+    return { status: "error", detail: err.message || "Network error calling SAT service" };
+  }
+}
+
+app.post("/api/cfdi/verify-sat", async (req: Request, res: Response): Promise<void> => {
+  const { xmlContent } = req.body;
+  if (!xmlContent) {
+    res.status(400).json({ error: "Missing xmlContent in request body" });
+    return;
+  }
+
+  const info = parseCfdiInfo(xmlContent);
+  if (!info.uuid || !info.rfcEmisor || !info.rfcReceptor || !info.total) {
+    res.json({
+      status: "invalid_xml",
+      error: "El XML no contiene toda la información fiscal obligatoria (UUID, RFC Emisor, RFC Receptor o Total)."
+    });
+    return;
+  }
+
+  const verification = await verifyCfdiWithSat(info.rfcEmisor, info.rfcReceptor, info.total, info.uuid);
+  res.json({
+    status: verification.status,
+    detail: verification.detail,
+    info
+  });
+});
+
 // API endpoint: Run high-fidelity automation simulation and generate official CFDI XML & PDF html representation
 app.post("/api/automation/run", async (req: Request, res: Response): Promise<void> => {
   const { ticket, profile, connector } = req.body;

@@ -64,16 +64,16 @@ export const Dashboard = () => {
     
     tickets.forEach(t => {
       if (t.status === "completed" || t.status === "cfdi_validated" || t.status === "merchant_cfdi_downloaded") {
-        const uuid = t.invoiceId || "E5B9C231-18FA-427D-B27D-1F3D573B4D22";
-        if (!invoiceUuids.has(uuid)) {
+        const uuid = t.invoiceId;
+        if (uuid && !invoiceUuids.has(uuid)) {
           list.push({
             id: `inv-fallback-${t.id}`,
             userId: t.userId,
             ticketId: t.id || "",
             folioFiscal: uuid,
-            rfcEmisor: t.rfcEmisor || "CSI020226MV4",
+            rfcEmisor: t.rfcEmisor || "",
             nombreEmisor: t.nombreEmisor || "Emisor SAT",
-            rfcReceptor: fiscalProfile?.rfc || "XAXX010101000",
+            rfcReceptor: fiscalProfile?.rfc || "",
             nombreReceptor: fiscalProfile?.razonSocial || "Público General",
             total: t.total || 0,
             createdAt: t.createdAt,
