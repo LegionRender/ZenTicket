@@ -12,7 +12,7 @@ const plans = [
     desc: "Ideal para probar ZenTicket y automatizar las primeras facturas sin compromiso.",
     price: "$0",
     features: [
-      "5 facturas generadas al mes.",
+      "5 facturas obtenidas al mes.",
       "Escaneo de tickets desde imagen o archivo.",
       "Historial básico de tickets.",
       "Estado de procesamiento de cada ticket.",
@@ -34,11 +34,11 @@ const plans = [
     desc: "Para personas que facturan algunos consumos al mes y quieren evitar hacerlo manualmente.",
     price: "$2",
     features: [
-      "10 facturas generadas al mes.",
+      "10 facturas obtenidas al mes.",
       "Todo lo del plan Gratuito.",
       "Historial ampliado de tickets.",
       "Seguimiento de tickets en proceso.",
-      "Visualización de facturas emitidas, pendientes y con error.",
+      "Visualización de CFDI obtenidos, pendientes y con error.",
       "Acceso a conectores disponibles.",
       "Registro básico de gastos.",
       "Soporte por email.",
@@ -57,11 +57,11 @@ const plans = [
     desc: "El plan recomendado para usuarios que facturan de forma constante y necesitan mayor control de sus tickets y gastos.",
     price: "$250",
     features: [
-      "30 facturas generadas al mes.",
+      "30 facturas obtenidas al mes.",
       "Todo lo del plan Brisa.",
       "Historial completo de tickets del mes.",
       "Panel de gastos y resumen mensual.",
-      "Filtros por estado: procesando, emitido, pendiente o con error.",
+      "Filtros por estado: procesando, obtenido, pendiente o con error.",
       "Seguimiento de tickets en segundo plano.",
       "Acceso completo a conectores disponibles.",
       "Organización de facturas por comercio, fecha y estado.",
@@ -83,7 +83,7 @@ const plans = [
     desc: "Para usuarios de alto volumen, negocios pequeños o equipos que necesitan automatizar muchas facturas cada mes.",
     price: "$500",
     features: [
-      "100 facturas generadas al mes.",
+      "100 facturas obtenidas al mes.",
       "Todo lo del plan Serenidad.",
       "Historial extendido de tickets y facturas.",
       "Mayor capacidad de procesamiento mensual.",
@@ -153,8 +153,8 @@ const PricingSection = ({ onChoose }) => {
               Transparencia y Regla Clara de Consumo
             </h4>
             <p className="text-slate-600 text-[14px] leading-relaxed">
-              Una factura debe descontarse de tu plan <strong>únicamente cuando se genere correctamente</strong>. 
-              Los tickets en estado <em>procesando</em>, <em>en seguimiento</em>, <em>pendiente</em> o <em>requiere acción</em> <strong>no se descuentan</strong> de tu saldo hasta que la factura quede completamente emitida.
+              Una factura debe descontarse de tu plan <strong>únicamente cuando se obtenga correctamente</strong>. 
+              Los tickets en estado <em>procesando</em>, <em>en seguimiento</em>, <em>pendiente</em> o <em>requiere acción</em> <strong>no se descuentan</strong> de tu saldo hasta que la factura quede completamente obtenida.
             </p>
           </div>
         </div>

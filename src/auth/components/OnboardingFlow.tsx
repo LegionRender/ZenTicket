@@ -393,7 +393,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                     Configurar Perfil de Usuario
                   </h2>
                   <p className="text-xs md:text-sm text-slate-500">
-                    Introduce tu nombre, teléfono y personaliza tu fotografía para el gestor de timbrado.
+                    Introduce tu nombre, teléfono y personaliza tu fotografía para el gestor de facturación.
                   </p>
                 </div>
 
@@ -548,7 +548,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                         </div>
                       </div>
                       <p className="text-[10px] text-slate-400 leading-normal ml-1">
-                        Este teléfono es crítico para autenticar operaciones y recubrir tus timbrados fiscales con la certificación de seguridad obligatoria.
+                        Este teléfono es crítico para autenticar operaciones y recubrir tus solicitudes fiscales con la certificación de seguridad obligatoria.
                       </p>
                     </div>
                   </div>
@@ -572,7 +572,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                     Plan de Suscripción Integral
                   </h2>
                   <p className="text-xs md:text-sm text-slate-500">
-                    Asigna la cuota mensual de timbrado y simulación SAT. Puedes alternar tu plan o cancelarlo en el futuro.
+                    Asigna la cuota mensual de facturación y simulación SAT. Puedes alternar tu plan o cancelarlo en el futuro.
                   </p>
                 </div>
 
@@ -979,7 +979,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                       ¡Listo, {name}!
                     </h2>
                     <p className="text-xs text-slate-500 leading-relaxed">
-                      Tu perfil fiscal ha sido sincronizado virtualmente en la nube. Todo el ecosistema de timbrado está disponible sin candados.
+                      Tu perfil fiscal ha sido sincronizado virtualmente en la nube. Todo el ecosistema de facturación está disponible sin candados.
                     </p>
                   </div>
                 </div>

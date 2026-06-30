@@ -220,7 +220,7 @@ export default function TicketsListScreen({
   const [isValidatingSat, setIsValidatingSat] = useState<boolean>(false);
   
   // Filter inside list
-  const [activeSubTab, setActiveSubTab] = useState<"en-seguimiento" | "facturas-emitidas">("en-seguimiento");
+  const [activeSubTab, setActiveSubTab] = useState<"en-seguimiento" | "cfdi-obtenidos">("en-seguimiento");
   
   // Interactive inputs
   const [emailTo, setEmailTo] = useState(currentUserEmail || "legionrender@gmail.com");
@@ -289,7 +289,12 @@ export default function TicketsListScreen({
   };
 
   // Use strictly real user data here, with absolutely no simulation/mock data.
-  const inProgressList = tickets.filter(t => t.status !== "completed");
+  const inProgressList = tickets.filter(
+    (t) =>
+      t.status !== "completed" &&
+      t.status !== "cfdi_validated" &&
+      t.status !== "merchant_cfdi_downloaded"
+  );
   const emittedInvoicesList = invoices;
 
   // Handle opening the details view
@@ -745,6 +750,14 @@ export default function TicketsListScreen({
           <button
             type="button"
             onClick={() => {
+              const ticketStatus = associatedTicket ? associatedTicket.status : "";
+              if (ticketStatus !== "cfdi_validated" || !activeInvoiceData.xmlContent) {
+                toast.error(
+                  "El PDF de la factura solo está disponible después de validar con éxito el comprobante ante el SAT (estado: cfdi_validated). El XML es obligatorio.",
+                  "Descarga no disponible"
+                );
+                return;
+              }
               toast.info("Generando reporte PDF tamaño carta oficial...", "PDF");
               setTimeout(() => {
                 const printWindow = window.open("", "_blank");
@@ -1274,7 +1287,7 @@ export default function TicketsListScreen({
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                                   <polyline points="20 6 9 17 4 12"></polyline>
                                 </svg>
-                                Timbrado verificado en bases SAT en tiempo real
+                                CFDI verificado en bases SAT en tiempo real
                               </span>
                             </div>
                           </div>
@@ -1282,7 +1295,7 @@ export default function TicketsListScreen({
                           <!-- Footer banner item indicating invoice origin -->
                           <div class="custom-decor-footer-banner">
                             <div class="footer-banner-item">
-                              <span>Esta factura es una representación impresa de un CFDI emitida a través de ZenTicket &bull; www.zenticket.mx</span>
+                              <span>Esta factura es una representación impresa de un CFDI obtenido a través de ZenTicket &bull; www.zenticket.mx</span>
                             </div>
                           </div>
 
@@ -1583,14 +1596,14 @@ export default function TicketsListScreen({
           
           <div className="text-slate-640 text-[11.5px] sm:text-xs text-left space-y-2 leading-relaxed">
             <p>
-              En esta demostración de ZenTicket, <strong>simulamos la interacción robotizada con el SAT y portales comerciales</strong> para enseñarte las capacidades de extracción de la IA mediante esquemas estructurados de selectores CSS (como Alsea, Oxxo o Walmart).
+              En esta demostración de ZenTicket, <strong>simulamos la interacción automatizada con el SAT y portales comerciales</strong> para enseñarte las capacidades de extracción de la IA mediante esquemas estructurados de selectores CSS (como Alsea, Oxxo o Walmart).
             </p>
             <p>
               <strong>¿Cómo hacerlo 100% real en tu propio producto de producción?</strong>
             </p>
             <ul className="list-decimal pl-4.5 space-y-2 text-[11px] sm:text-[11.5px] font-semibold text-slate-700">
               <li>
-                <strong className="text-slate-800">Scraping Automático (Playwright/Puppeteer):</strong> Configura un robot en el servidor que cargue la URL del portal del emisor, rellene los campos mapeados (RFC, folio, total) usando selectores CSS, resuelva captchas usando decodificadores (como <i>2Captcha</i>), proceda a emitir y devuelva los archivos XML y PDF.
+                <strong className="text-slate-800">Conexión Automática con Portales:</strong> Configura un conector en el servidor que cargue la URL del portal del emisor, rellene los campos mapeados (RFC, folio, total) usando selectores CSS, resuelva captchas de forma automatizada y devuelva los archivos XML y PDF.
               </li>
               <li>
                 <strong className="text-slate-800">Conexión directa vía PAC / SAT Web Service:</strong> Solicita facturas directamente al SAT o a proveedores autorizados de certificación (PACs) asociando las credenciales de tu FIEL / CSD, permitiendo la descargas automáticas inmediatas desde las bases del SAT de forma masiva sin captchas.
@@ -1695,14 +1708,14 @@ export default function TicketsListScreen({
         
         <button
           type="button"
-          onClick={() => setActiveSubTab("facturas-emitidas")}
+          onClick={() => setActiveSubTab("cfdi-obtenidos")}
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer ${
-            activeSubTab === "facturas-emitidas"
+            activeSubTab === "cfdi-obtenidos"
               ? "bg-white text-slate-800 shadow-[0_2px_10px_rgba(15,23,42,0.06)]"
               : "text-slate-450 hover:text-slate-705"
           }`}
         >
-          Facturas Emitidas
+          CFDI obtenidos
         </button>
       </div>
 
@@ -1747,7 +1760,7 @@ export default function TicketsListScreen({
                     {isProcessing && t.id?.startsWith("user-") && (
                       <div className="absolute inset-0 bg-white/95 flex flex-col justify-center items-center z-15 p-2 text-center space-y-1">
                         <RefreshCw className="w-5 h-5 text-[#0B53F4] animate-spin" />
-                        <span className="font-extrabold text-[10px] text-[#0B53F4] uppercase tracking-wider">Playwright SAT Activo</span>
+                        <span className="font-extrabold text-[10px] text-[#0B53F4] uppercase tracking-wider">Conector SAT Activo</span>
                       </div>
                     )}
 
@@ -1775,17 +1788,21 @@ export default function TicketsListScreen({
                             RECIÉN AGREGADO
                           </span>
                         )}
-                        {t.status === "review" ? (
+                        {t.status === "requires_manual_review" || t.status === "review" ? (
                           <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                            REVISIÓN ADMIN
+                            Revisión Manual
                           </span>
                         ) : isFailed ? (
                           <span className="bg-rose-100 text-rose-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                            FALLIDO
+                            Fallido
+                          </span>
+                        ) : t.status === "pending_portal_submission" || t.status === "submitted_to_merchant" ? (
+                          <span className="bg-blue-100 text-blue-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none font-bold">
+                            Facturando
                           </span>
                         ) : (
                           <span className="bg-[#FEF3C7] text-[#D97706] text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                            PROCESANDO
+                            Procesando
                           </span>
                         )}
                       </div>
@@ -1874,11 +1891,11 @@ export default function TicketsListScreen({
           </div>
         </div>
 
-        {/* COLUMN 2: FACTURAS EMITIDAS (Visible on desktop OR when mobile has activeSubTab === "facturas-emitidas") */}
-        <div className={`space-y-4 lg:col-span-6 ${activeSubTab === "facturas-emitidas" ? "block" : "hidden lg:block"}`}>
+        {/* COLUMN 2: CFDI OBTENIDOS (Visible on desktop OR when mobile has activeSubTab === "cfdi-obtenidos") */}
+        <div className={`space-y-4 lg:col-span-6 ${activeSubTab === "cfdi-obtenidos" ? "block" : "hidden lg:block"}`}>
           <div className="px-1 text-left mb-2">
             <h2 className="font-display font-extrabold text-base text-slate-800 tracking-tight">
-              Facturas Emitidas
+              CFDI obtenidos
             </h2>
           </div>
 
@@ -1886,8 +1903,8 @@ export default function TicketsListScreen({
             {emittedInvoicesList.length === 0 ? (
               <div className="bg-white border border-dashed border-slate-200/80 p-9 rounded-3xl text-center">
                 <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                <p className="text-xs font-black text-slate-800">No hay facturas emitidas</p>
-                <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">Las facturas emitidas y certificadas por el SAT se guardarán aquí.</p>
+                <p className="text-xs font-black text-slate-800">No hay CFDI obtenidos</p>
+                <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">Los CFDI obtenidos y certificados por el SAT se guardarán aquí.</p>
               </div>
             ) : (
               emittedInvoicesList.map((inv) => {

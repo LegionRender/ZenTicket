@@ -2951,7 +2951,7 @@ export default function ProfileForm({
                     type="button"
                     onClick={() => {
                       setActiveModal(null);
-                      toast.success("Mostrando tu historial de CFDI timbrados en el Buzón Activo.", "Facturas y Recibos");
+                      toast.success("Mostrando tu historial de CFDI obtenidos en el Buzón Activo.", "Facturas y Recibos");
                     }}
                     className="bg-[#EBF1FF] hover:bg-[#DDECFF] text-[#0B53F4] text-[11px] font-extrabold px-3.5 py-2.5 rounded-xl transition cursor-pointer"
                   >
@@ -3546,7 +3546,7 @@ export default function ProfileForm({
           {activeModal === "faq" && (
             <div className="space-y-4 text-left">
               <p className="text-xs text-slate-455 font-bold ml-1 mb-2">
-                ¿Tienes dudas sobre los procesos fiscales o el timbrado automático del SAT? Consulta nuestro manual guiado inmediato.
+                ¿Tienes dudas sobre los procesos fiscales o la obtención automática de facturas? Consulta nuestro manual guiado inmediato.
               </p>
 
               <div className="space-y-3">
@@ -3556,8 +3556,8 @@ export default function ProfileForm({
                     a: "ZenTicket lee los datos de tu ticket de compra y automatiza el proceso ingresando tus datos fiscales de receptor directamente en el portal oficial del comercio emisor para descargar el XML y PDF oficiales de forma 100% segura."
                   },
                   {
-                    q: "¿El timbrado consume saldo secundario de timbrado?",
-                    a: "No. ZenTicket no cobra por timbrado ni requiere timbres adicionales, ya que el proceso oficial lo realiza el comercio emisor al procesar tu ticket."
+                    q: "¿La solicitud de facturación consume saldo o timbres adicionales?",
+                    a: "No. ZenTicket no cobra por descarga de facturas ni requiere timbres adicionales, ya que el proceso de facturación lo realiza el comercio emisor al procesar tu ticket."
                   },
                   {
                     q: "¿Qué sucede si un ticket de comercio falla en el reconocimiento?",
@@ -3744,7 +3744,7 @@ export default function ProfileForm({
                     className="w-full text-xs font-bold bg-white border border-slate-200/80 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-xl px-3.5 py-3 text-slate-800 focus:outline-none transition-all cursor-pointer"
                   >
                     <option value="error_conector">Error con Conectores (Didi/Uber/Starbucks)</option>
-                    <option value="duda_sat">Problema de Timbrado SAT Facturación 4.0</option>
+                    <option value="duda_sat">Problema de Facturación 4.0 SAT</option>
                     <option value="billing">Dudas de Facturación y Planes de Pago</option>
                     <option value="ocr_problem">Error de Escáneo / Lectura OCR Ticket</option>
                   </select>
@@ -4038,7 +4038,7 @@ export default function ProfileForm({
                       </div>
                       <div className="text-left leading-tight">
                         <span className="text-sm font-bold text-slate-800 block">Datos Fiscales (SAT)</span>
-                        <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">Seguridad y timbrado CFDI v4.0</span>
+                        <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">Seguridad y validación CFDI v4.0</span>
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-[#0B53F4]" />

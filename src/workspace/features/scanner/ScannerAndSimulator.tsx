@@ -120,6 +120,9 @@ export default function ScannerAndSimulator({
   const toast = useToast();
   const { user } = useAuth();
   const userName = fiscalProfile?.razonSocial || user?.displayName || "Usuario";
+  const isAdmin = user?.email && (user.email.toLowerCase().includes("legionrender") || user.email.toLowerCase().includes("ricardo"));
+  const isDev = import.meta.env.DEV;
+  const canShowDebug = !!(isAdmin || isDev);
 
   // Renewal/Blocker States
   const [showRenewalBlocker, setShowRenewalBlocker] = useState(false);
@@ -233,7 +236,7 @@ export default function ScannerAndSimulator({
         category: "cuenta",
         criticality: "critica",
         title: "Perfil Fiscal Incompleto",
-        message: "Debe rellenar sus datos oficiales (RFC, Razón Social, Régimen) en la pestaña ⚙️ Perfil Fiscal para poder habilitar el timbrado de sus comprobantes.",
+        message: "Debe rellenar sus datos oficiales (RFC, Razón Social, Régimen) en la pestaña ⚙️ Perfil Fiscal para poder habilitar el proceso de facturación de sus comprobantes.",
         createdAt: new Date(),
         read: readNotifIds.includes("profile-warning-alert"),
         actionText: "Completar Perfil ⚙️",
@@ -292,10 +295,10 @@ export default function ScannerAndSimulator({
             id: `completed-${ticketId}`,
             category: "facturas",
             criticality: "informativa",
-            title: wasOffline ? `Factura Emitida (Sincronización Offline)` : `Factura Certificada SAT - ${t.nombreEmisor || "Establecimiento"}`,
+            title: wasOffline ? `Factura Obtenida (Sincronización Offline)` : `CFDI Obtenido - ${t.nombreEmisor || "Establecimiento"}`,
             message: wasOffline
               ? `El ticket sin conexión de ${t.nombreEmisor || "Establecimiento"} por $${(t.total || 0).toFixed(2)} MXN ha sido procesado y facturado automáticamente.`
-              : `Se timbró exitosamente el CFDI 4.0 para ${t.nombreEmisor || "Establecimiento"} por un monto de $${(t.total || 0).toFixed(2)} MXN de manera limpia.`,
+              : `Se obtuvo exitosamente el CFDI 4.0 para ${t.nombreEmisor || "Establecimiento"} por un monto de $${(t.total || 0).toFixed(2)} MXN de manera limpia.`,
             createdAt: timestamp,
             read: readNotifIds.includes(`completed-${ticketId}`),
             actionText: "Ver detalles 📄",
@@ -384,12 +387,12 @@ export default function ScannerAndSimulator({
         selectedStrategy === "ocr" ? "Recalibración Neuronal del OCR (Filtros Gauss y reducción de ruido bilinear)" 
         : selectedStrategy === "rfc" ? "Enmienda inteligente de RFC del Emisor (Contraste con padrón de contribuyentes de SAT)"
         : selectedStrategy === "resico" ? "Forzar RESICO en Metadatos (Bypass régimen ultraestricto de facturación 4.0)"
-        : "Parche Dinámico de Script (Inyección Playwright Stealth & bypass de selectores anti-bot externos)"
+        : "Parche Dinámico de Script (Bypass de selectores externos)"
       }` },
-      { p: 60, l: "🔌 Inyectando nuevos parámetros en caliente en los scripts de Playwright..." },
-      { p: 80, l: "🔑 Bypass de CAPTCHA externo exitoso. Conexión de Túnel Seguro establecida con el SAT..." },
-      { p: 95, l: "📨 Solicitud certificada. Detonando el timbrado de CFDI final..." },
-      { p: 100, l: "✅ ¡Timbrado de factura finalizado con éxito! Registro actualizado." }
+      { p: 60, l: "🔌 Configurando parámetros de conexión..." },
+      { p: 80, l: "🔑 Conexión segura establecida con el portal..." },
+      { p: 95, l: "📨 Solicitud certificada. Procesando solicitud de facturación..." },
+      { p: 100, l: "✅ ¡Proceso de facturación finalizado con éxito! Registro actualizado." }
     ];
 
     for (const step of steps) {
@@ -406,7 +409,7 @@ export default function ScannerAndSimulator({
           invoiceId: `INV-${Math.floor(100000 + Math.random() * 900000)}`
         });
       }
-      toast.success(`Ticket de ${ticket.nombreEmisor} autocorregido y timbrado exitosamente sin re-subir.`, "Resolución Completa ✅");
+      toast.success(`Ticket de ${ticket.nombreEmisor} autocorregido y facturado exitosamente sin re-subir.`, "Resolución Completa ✅");
       setSelectedContingencyTicket(null);
     } catch (err) {
       toast.error("Ocurrió un error al persistir la solución del ticket en la base de datos.");
@@ -501,7 +504,7 @@ export default function ScannerAndSimulator({
       "Extrayendo conceptos y desglosando impuestos...",
       "Validando importes y consistencia aritmética...",
       "Identificando RFC del emisor y dirección...",
-      "Comprobando integridad y timbrado preliminar...",
+      "Comprobando integridad y facturación preliminar...",
       "Casi listo. Generando respuesta estructurada..."
     ];
     let msg98Index = 0;
@@ -1133,12 +1136,12 @@ export default function ScannerAndSimulator({
     }
 
     const steps = [
-      { progress: 15, step: "🔍 Descubriendo portal de facturación oficial en base a DNS y Google Search API..." },
-      { progress: 35, step: "🧠 Analizando DOM para identificar inputs dinámicos (RFC, Folio, Monto)..." },
-      { progress: 55, step: "🖥️ Generando aserciones de Playwright y selectores optimizados contra CAPTCHA..." },
-      { progress: 75, step: "🌐 Simulando peticiones RPC de prueba para evadir protecciones Cloudflare..." },
-      { progress: 95, step: "💾 Registrando nuevo conector automatizado y compilando especificación JSON..." },
-      { progress: 100, step: "🎉 ¡Entrenamiento completado con éxito! Iniciando timbrado inmediato..." }
+      { progress: 15, step: "Buscando portal de facturación..." },
+      { progress: 35, step: "Preparando la solicitud..." },
+      { progress: 55, step: "Configurando conector..." },
+      { progress: 75, step: "Estableciendo conexión segura..." },
+      { progress: 95, step: "Registrando conector..." },
+      { progress: 100, step: "¡Configuración completada con éxito! Iniciando facturación..." }
     ];
 
     let currentStepIdx = 0;
@@ -1571,7 +1574,7 @@ export default function ScannerAndSimulator({
                 </div>
 
                  <p className="text-xs text-slate-450 leading-relaxed font-medium">
-                  Bitácora inteligente en tiempo real para flujos técnicos, de timbrado y de integraciones bancarias. Organiza alertas operativas críticas del robot de Playwright y el SAT.
+                  Bitácora inteligente en tiempo real para flujos técnicos, de facturación y de integraciones bancarias. Organiza alertas operativas críticas del conector y el SAT.
                 </p>
 
                 {/* Categories Tab Bar */}
@@ -2201,22 +2204,22 @@ return list.map(n => {
                               <span className="text-[8px] bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 border border-rose-250 dark:border-rose-500/20 px-1 py-0.2 rounded font-sans leading-none animate-pulse">Bloqueado ❌</span>
                             </h5>
                             <p className="text-[9.5px] text-slate-700 dark:text-slate-300 mt-1 leading-relaxed bg-[#FAF9FF] dark:bg-slate-900/40 p-2.5 border border-slate-200 dark:border-slate-800/60 rounded-xl font-mono">
-                              <b>Causa raíz:</b> {selectedContingencyTicket.errorMsg || "Timeout o bloqueo parcial anti-bot en el robot de Playwright."}
+                              <b>Causa raíz:</b> {selectedContingencyTicket.errorMsg || "Timeout o bloqueo en el portal de facturación."}
                             </p>
                           </div>
                         </div>
 
-                        {/* Step 4: Emisión CFDI */}
+                        {/* Step 4: Facturación CFDI */}
                         <div className="relative">
                           <div className="absolute -left-[27px] w-4 h-4 rounded-full bg-slate-200 dark:bg-slate-800 border-4 border-slate-50 dark:border-[#0d0f1c] flex items-center justify-center">
                             <div className="w-1 h-1 bg-slate-400 rounded-full"></div>
                           </div>
                           <div>
                             <h5 className="text-[11px] font-black text-slate-450 dark:text-slate-400 flex items-center gap-1.5 leading-none">
-                              Emisión CFDI
+                              Facturación CFDI
                               <span className="text-[8px] bg-slate-100 dark:bg-slate-900 text-slate-550 dark:text-slate-400 px-1 py-0.2 rounded font-sans leading-none">En espera ⌛</span>
                             </h5>
-                            <p className="text-[9.5px] text-slate-400 dark:text-slate-500 mt-0.5 leading-normal">Timbrado pendiente. Esperando resolución de contingencia de portal.</p>
+                            <p className="text-[9.5px] text-slate-400 dark:text-slate-500 mt-0.5 leading-normal">Facturación pendiente. Esperando resolución de contingencia de portal.</p>
                           </div>
                         </div>
                       </div>
@@ -2275,7 +2278,7 @@ return list.map(n => {
                           </div>
                         </div>
 
-                        {/* Parche Playwright */}
+                        {/* Parche Conector */}
                         <div
                           onClick={() => !isSolvingContingency && setSelectedStrategy("playwright")}
                           className={`p-3 rounded-xl border cursor-pointer transition text-left flex gap-2.5 ${
@@ -2286,8 +2289,8 @@ return list.map(n => {
                         >
                           <Play className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
                           <div>
-                            <span className={`text-[10.5px] font-black block ${selectedStrategy === "playwright" ? "text-orange-900 dark:text-orange-200" : "text-slate-800 dark:text-slate-200"}`}>Parche Dinámico Playwright</span>
-                            <p className="text-[9px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5">Omitirá cargas lentas de la página de facturación externa para evadir anti-bots.</p>
+                            <span className={`text-[10.5px] font-black block ${selectedStrategy === "playwright" ? "text-orange-900 dark:text-orange-200" : "text-slate-800 dark:text-slate-200"}`}>Parche Dinámico del Conector</span>
+                            <p className="text-[9px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5">Omitirá cargas lentas de la página de facturación externa.</p>
                           </div>
                         </div>
                       </div>
@@ -2371,93 +2374,211 @@ return list.map(n => {
           {/* Values parsed & connector seek panel */}
           <div className="lg:col-span-8 flex flex-col justify-between text-left">
             {isTrainingModel ? (
-              /* High-tech, premium AI training monitor */
-              <div className="bg-[#121626] border border-slate-700/60 text-white rounded-3xl p-6 md:p-8 space-y-6 text-left relative overflow-hidden shadow-2xl animate-fade-in_50">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-[#0B53F4]/15 rounded-full blur-2xl pointer-events-none" />
-                
-                <div className="flex gap-4 items-center border-b border-slate-800/80 pb-5 font-sans">
+              /* Simple, friendly loading/training progress view */
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 space-y-6 text-center shadow-md animate-fade-in_50">
+                <div className="flex flex-col items-center gap-4 animate-pulse">
                   <div className="relative shrink-0 w-12 h-12 flex items-center justify-center">
                     <div className="absolute inset-0 rounded-full border border-[#0B53F4]/30 animate-ping opacity-60" />
-                    <div className="absolute inset-0 rounded-full border-3 border-t-sky-400 border-r-indigo-500 border-b-[#0B53F4] border-l-transparent animate-spin" />
-                    <div className="w-7 h-7 rounded-full bg-slate-800/90 flex items-center justify-center">
-                      <Brain className="w-4 h-4 text-sky-400 animate-pulse" />
-                    </div>
+                    <div className="absolute inset-0 rounded-full border-3 border-t-[#0B53F4] border-slate-100 animate-spin" />
+                    <Brain className="w-5 h-5 text-[#0B53F4] absolute" />
                   </div>
                   <div>
-                    <span className="text-[9.5px] font-black tracking-widest text-[#CBDAFF]/90 uppercase font-mono bg-[#0B53F4]/20 border border-[#0B53F4]/30 px-2.5 py-1 rounded-md leading-none">
-                      Entrenamiento de Automatización con IA
-                    </span>
-                    <h4 className="text-base font-black text-white mt-1.5 flex items-center gap-1.5">
-                      Modelando portal para: <span className="text-sky-305 font-black uppercase text-sm select-text">{extractedData.nombreEmisor}</span>
+                    <h4 className="text-base font-black text-slate-800 tracking-tight">
+                      Preparando la solicitud...
                     </h4>
+                    <p className="text-xs text-slate-500 mt-1.5 max-w-sm mx-auto leading-relaxed">
+                      Estamos configurando el conector disponible para procesar tu ticket automáticamente.
+                    </p>
                   </div>
                 </div>
 
-                <div className="space-y-2 font-sans">
-                  <div className="flex justify-between items-baseline font-mono text-xs leading-none mb-1">
-                    <span className="text-slate-400 font-extrabold uppercase tracking-wide text-[9px]">Porcentaje del Proceso</span>
-                    <span className="font-mono text-xs font-black text-sky-450">{trainingProgress}%</span>
-                  </div>
-                  <p className="text-xs text-slate-200 bg-slate-900 border border-slate-800 p-4 rounded-xl leading-relaxed font-mono flex items-center gap-2.5 select-text shadow-inner">
-                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-450 animate-ping shrink-0" />
-                    {trainingStatus}
-                  </p>
-                </div>
-
-                {/* Progress bar visual container */}
-                <div>
-                  <div className="h-3 bg-slate-950 rounded-full overflow-hidden relative border border-slate-800 p-0.5">
+                <div className="space-y-2 max-w-xs mx-auto">
+                  <div className="h-3 bg-slate-100 rounded-full overflow-hidden relative border border-slate-200 p-0.5">
                     <div 
-                      className="bg-gradient-to-r from-sky-400 via-indigo-500 to-[#0B53F4] h-full rounded-full transition-all duration-300 relative shadow-[0_0_12px_rgba(56,189,248,0.45)]"
+                      className="bg-gradient-to-r from-blue-500 to-[#0B53F4] h-full rounded-full transition-all duration-300 relative shadow-sm"
                       style={{ width: `${trainingProgress}%` }}
                     />
                   </div>
-                  <div className="flex justify-between items-center text-[9px] font-mono text-slate-500 mt-2 font-sans">
-                    <span>ZENTICKET AI COGNITIVE ENGINE v1.2</span>
-                    <span>SISTEMA DE CONTROL DE APRENDIZAJE ACTIVO</span>
+                  <div className="flex justify-between items-center text-[10px] font-bold text-slate-400">
+                    <span>{trainingStatus}</span>
+                    <span className="text-[#0B53F4] font-black">{trainingProgress}%</span>
                   </div>
-                </div>
-
-                {/* High tech logging console */}
-                <div className="bg-slate-950 rounded-2xl p-4.5 border border-slate-900 h-28 overflow-y-auto font-mono text-[10.5px] text-slate-400 space-y-2 select-text scrollbar-none shadow-inner">
-                  <div>[{new Date().toLocaleTimeString()}] [CONSOLA_ADMIN] Iniciando sesión remota de entrenamiento...</div>
-                  {trainingProgress >= 15 && <div>[{new Date().toLocaleTimeString()}] [BÚSQUEDA] DNS resuelto para {extractedData.nombreEmisor}. Navegando hacia portal de facturación...</div>}
-                  {trainingProgress >= 35 && <div>[{new Date().toLocaleTimeString()}] [MAPPER] Localizados campos críticos de facturación. Inyectando tokens de aserción...</div>}
-                  {trainingProgress >= 55 && <div>[{new Date().toLocaleTimeString()}] [PLAYWRIGHT] Generado script heurístico, estructurando campos dinámicos...</div>}
-                  {trainingProgress >= 75 && <div>[{new Date().toLocaleTimeString()}] [PAC] Autenticando canal con firma del receptor para emitir CFDI 4.0...</div>}
-                  {trainingProgress >= 95 && <div>[{new Date().toLocaleTimeString()}] [SST] Guardando conector permanente para {extractedData.nombreEmisor} en base de datos...</div>}
-                  {trainingProgress === 100 && <div className="text-emerald-400 font-bold font-mono">[{new Date().toLocaleTimeString()}] [SUCCESS] ¡Sincronizado! Disparando ejecución de factura...</div>}
                 </div>
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Visual Tab Selector precisely as requested - Pestañas de Corroboración vs Detalles */}
-                <div className="flex border-b border-slate-200 mb-4 text-xs font-extrabold gap-4 select-none font-sans">
-                  <button
-                    type="button"
-                    onClick={() => setActiveExtractedTab("corroborar")}
-                    className={`pb-2.5 px-1 border-b-2 transition-all cursor-pointer flex items-center gap-1.5 uppercase tracking-wide duration-150 relative ${
-                      activeExtractedTab === "corroborar"
-                        ? "border-[#0B53F4] text-[#0B53F4]"
-                        : "border-transparent text-slate-400 hover:text-slate-650"
-                    }`}
-                  >
-                    📋 Corroborar Ticket
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveExtractedTab("detalles")}
-                    className={`pb-2.5 px-1 border-b-2 transition-all cursor-pointer flex items-center gap-1.5 uppercase tracking-wide duration-150 ${
-                      activeExtractedTab === "detalles"
-                        ? "border-[#0B53F4] text-[#0B53F4]"
-                        : "border-transparent text-slate-400 hover:text-slate-650"
-                    }`}
-                  >
-                    🔍 Detalle Técnico (OCR)
-                  </button>
-                </div>
+                {isEditing ? (
+                  /* Manual edit form for data correction in premium light styles */
+                  <div className="space-y-4 bg-slate-50 p-5 rounded-2xl border border-slate-200 relative">
+                    <div className="flex items-center justify-between border-b border-slate-200 pb-2.5 mb-2">
+                      <h5 className="text-[11px] font-extrabold text-[#0B53F4] flex items-center gap-1.5 uppercase tracking-wider font-mono">
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-[#0B53F4] animate-pulse" />
+                        Corrección Manual de Campos Críticos
+                      </h5>
+                      {!checkIsDataIncomplete(extractedData) && (
+                        <button
+                          onClick={() => {
+                            setEditNombre(extractedData.nombreEmisor || "");
+                            setEditRfc(extractedData.rfcEmisor || "");
+                            setEditFecha(extractedData.fechaCompra || "");
+                            setEditFolio(extractedData.folio || "");
+                            setEditSucursal(extractedData.sucursal || "");
+                            setEditTotal(extractedData.total || 0);
+                            setValidationError(null);
+                            setIsEditing(false);
+                          }}
+                          className="text-[10px] text-slate-500 hover:text-slate-800 font-extrabold uppercase transition cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                      )}
+                    </div>
 
-                {activeExtractedTab === "corroborar" && !isEditing ? (
+                    {validationError && (
+                      <div className="p-3 bg-rose-50 border border-rose-250 rounded-xl text-[11px] text-rose-700 font-bold flex items-center gap-2 animate-pulse">
+                        <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                        <span>{validationError}</span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Nombre Emisor */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1.5">
+                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Razón Social Emisor *</label>
+                          {isNombreInvalid && (
+                            <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                              ⚠️ Faltante
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={editNombre}
+                          onChange={(e) => setEditNombre(e.target.value)}
+                          placeholder="Ej. NUEVA WAL MART DE MEXICO"
+                          className={"w-full bg-white border rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none transition uppercase " + (isNombreInvalid ? "border-rose-400 bg-rose-50 focus:border-rose-500" : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350")}
+                        />
+                      </div>
+
+                      {/* RFC Emisor */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1.5">
+                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">RFC Emisor *</label>
+                          {isRfcInvalid && (
+                            <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                              ⚠️ Inválido
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={editRfc}
+                          onChange={(e) => setEditRfc(e.target.value)}
+                          placeholder="Ej. NWM9709244W4"
+                          maxLength={13}
+                          className={"w-full bg-white border rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-800 focus:outline-none transition uppercase " + (isRfcInvalid ? "border-rose-400 bg-rose-50 focus:border-rose-500" : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350")}
+                        />
+                      </div>
+
+                      {/* Fecha Compra */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1.5">
+                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Fecha del Ticket *</label>
+                          {isFechaInvalid && (
+                            <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                              ⚠️ Faltante
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={editFecha}
+                          onChange={(e) => setEditFecha(e.target.value)}
+                          placeholder="DD/MM/AAAA"
+                          className={"w-full bg-white border rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none transition " + (isFechaInvalid ? "border-rose-400 bg-rose-50 focus:border-rose-500" : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350")}
+                        />
+                      </div>
+
+                      {/* Referencia Folio */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1.5">
+                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Folio de Compra *</label>
+                          {isFolioInvalid && (
+                            <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                              ⚠️ Faltante
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={editFolio}
+                          onChange={(e) => setEditFolio(e.target.value)}
+                          placeholder="Ej. 123456789"
+                          className={"w-full bg-white border rounded-xl px-3 py-2 text-xs font-semibold text-slate-855 focus:outline-none transition uppercase " + (isFolioInvalid ? "border-rose-400 bg-rose-50 focus:border-rose-500" : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350")}
+                        />
+                      </div>
+
+                      {/* Sucursal */}
+                      <div>
+                        <label className="text-[9px] text-slate-500 font-bold block mb-1.5 uppercase tracking-wider">Sucursal (Opcional)</label>
+                        <input
+                          type="text"
+                          value={editSucursal}
+                          onChange={(e) => setEditSucursal(e.target.value)}
+                          placeholder="Ej. Sucursal Santa Fe"
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-[#0B53F4] hover:border-slate-350 transition-all font-sans"
+                        />
+                      </div>
+
+                      {/* Total Pagado */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1.5">
+                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Total de la Compra ($ MXN) *</label>
+                          {isTotalInvalid && (
+                            <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                              ⚠️ Total Inválido
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editTotal || ""}
+                          onChange={(e) => setEditTotal(parseFloat(e.target.value) || 0)}
+                          placeholder="0.00"
+                          className={"w-full bg-white border rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-855 focus:outline-none transition-all " + (isTotalInvalid ? "border-rose-455 bg-rose-50 focus:border-rose-500" : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350")}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2.5 pt-3.5 justify-end">
+                      <button
+                        onClick={handleSaveEditedData}
+                        className="text-[10px] font-black uppercase tracking-widest text-white bg-[#0B53F4] hover:bg-blue-600 px-6 py-3.5 rounded-xl transition duration-150 shadow-md shadow-[#0B53F4]/10 cursor-pointer active:scale-[0.98] select-none border-none font-sans"
+                      >
+                        Confirmar y Guardar Cambios
+                      </button>
+                      {!checkIsDataIncomplete(extractedData) && (
+                        <button
+                          onClick={() => {
+                            setEditNombre(extractedData.nombreEmisor || "");
+                            setEditRfc(extractedData.rfcEmisor || "");
+                            setEditFecha(extractedData.fechaCompra || "");
+                            setEditFolio(extractedData.folio || "");
+                            setEditSucursal(extractedData.sucursal || "");
+                            setEditTotal(extractedData.total || 0);
+                            setValidationError(null);
+                            setIsEditing(false);
+                          }}
+                          className="text-[10px] font-bold uppercase tracking-widest text-[#0B53F4] bg-[#0B53F4]/5 border border-[#0B53F4]/10 px-5 py-3.5 rounded-xl transition cursor-pointer select-none font-sans"
+                        >
+                          Cancelar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
                   /* SIMPLIFIED CORROBORATION PAGE AS REQUESTED */
                   <div className="space-y-5 animate-fade-in_50 font-sans">
                     {/* Duplicate/Already Invoiced ticket warning inline */}
@@ -2479,7 +2600,7 @@ return list.map(n => {
                               </p>
                               <button
                                 onClick={resetAll}
-                                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition shadow-xs text-[11px] uppercase tracking-wider inline-flex items-center gap-1.5 cursor-pointer font-sans"
+                                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition shadow-xs text-[11px] uppercase tracking-wider inline-flex items-center gap-1.5 cursor-pointer font-sans border-none"
                               >
                                 <X className="w-3.5 h-3.5" />
                                 Cancelar y Capturar Otro
@@ -2491,462 +2612,262 @@ return list.map(n => {
                       return null;
                     })()}
 
+                    {/* Simple confirmation card */}
                     <div className="bg-[#FAF9FF] border border-[#EBF1FF] rounded-3xl p-6 text-left space-y-4.5 shadow-2xs">
-                      <div>
-                        <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block font-mono">Establecimiento (Tienda)</span>
-                        <h3 className="text-lg font-black text-slate-800 uppercase mt-1 flex items-center gap-2.5 select-text">
-                          <Building2 className="w-5.5 h-5.5 text-[#0B53F4]" />
-                          {extractedData.nombreEmisor}
-                        </h3>
-                      </div>
-                      
-                      <div>
-                        <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block font-mono font-bold">Importe Total</span>
-                        <h2 className="text-3xl font-black text-[#0B53F4] mt-1 font-mono tracking-tight select-text">
-                          ${extractedData.total.toFixed(2)} MXN
-                        </h2>
-                      </div>
-
-                      {/* Explicit automated vs training details card - Summarized */}
-                      <div className={`p-4 rounded-xl border flex items-center gap-3 text-xs ${
-                        matchingConnector 
-                          ? "bg-emerald-50/70 border-emerald-200 text-emerald-800"
-                          : "bg-amber-50/70 border-amber-200 text-amber-800"
-                      }`}>
-                        {matchingConnector ? (
-                          <>
-                            <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
-                            <div>
-                              <span className="font-black text-xs uppercase tracking-wide block">Automatización Lista</span>
-                              <p className="text-[11px] font-medium text-emerald-700 leading-tight">
-                                Conector listo para timbrado directo sin demoras.
-                              </p>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="w-5 h-5 text-amber-600 shrink-0 animate-pulse" />
-                            <div>
-                              <span className="font-black text-xs uppercase tracking-wide block">Entrenamiento Requerido</span>
-                              <p className="text-[11px] font-medium text-amber-700 leading-tight">
-                                La IA entrenará el portal de la tienda en segundos.
-                              </p>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Prominent main invoice clickers triggers */}
-                    <div className="flex flex-col sm:flex-row gap-3 pt-1">
-                      <button
-                        onClick={() => {
-                          if (matchingConnector) {
-                            handleTriggerAutomation();
-                          } else {
-                            handleRunTraining();
-                          }
-                        }}
-                        disabled={!fiscalProfile || !extractedData || checkIsDataIncomplete(extractedData)}
-                        className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-white bg-[#0B53F4] hover:bg-blue-600 disabled:opacity-55 px-7 py-4 rounded-2xl transition duration-150 shadow-md shadow-[#0B53F4]/15 active:scale-[0.98] select-none cursor-pointer text-center"
-                      >
-                        <Play className="w-4 h-4 fill-current" />
-                        Facturar de Inmediato
-                      </button>
-                      <button
-                        onClick={() => setActiveExtractedTab("detalles")}
-                        className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-[#0B53F4] bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 px-6 py-4 rounded-2xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-2xs"
-                      >
-                        Ver Desglose Técnico
-                      </button>
-
-                      {getExistingInvoicedTicket(extractedData?.rfcEmisor, extractedData?.folio) && (
-                        <button
-                          onClick={resetAll}
-                          className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-white bg-rose-600 hover:bg-rose-700 px-6 py-4 rounded-2xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-md shadow-rose-600/15"
-                        >
-                          <X className="w-4 h-4 shrink-0" />
-                          Cancelar Escaneo
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  /* ORIGINAL DETAILED VIEW */
-                  <>
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                      <div>
-                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Datos Extraídos Vision OCR</h4>
-                        
-                        {/* OCR Score and Resolution indicators */}
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          <span className="bg-[#0B53F4]/10 border border-[#0B53F4]/20 text-[#0B53F4] font-mono text-[9px] font-black px-2.5 py-1 rounded-md flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 text-[#FFB200] animate-pulse" />
-                            OCR SCORE: {(extractedData.nombreEmisor ? 25 : 0) + (extractedData.total > 0 ? 30 : 0) + (extractedData.folio ? 20 : 0) + (extractedData.rfcEmisor ? 15 : 0) + 10}/100 PTS
+                      <div className="grid grid-cols-2 gap-6">
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block font-mono">Comercio</span>
+                          <span className="text-sm font-black text-slate-800 uppercase block mt-1 select-text">
+                            {extractedData.nombreEmisor || "No detectado"}
                           </span>
-                          <span className={`font-mono text-[9px] font-black px-2.5 py-1 rounded-md border flex items-center gap-1 ${
-                            extractedData.total > 0 && extractedData.rfcEmisor && extractedData.nombreEmisor
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-250"
-                              : "bg-rose-50 text-rose-700 border-rose-250 animate-pulse"
-                          }`}>
-                            <CheckCircle className="w-3 h-3" />
-                            {extractedData.total > 0 && extractedData.rfcEmisor && extractedData.nombreEmisor ? "RESOLUCIÓN: OK" : "RESOLUCIÓN: INCOMPLETO"}
+                        </div>
+                        
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block font-mono font-bold">Total</span>
+                          <span className="text-sm font-black text-[#0B53F4] block mt-1 font-mono select-text font-bold">
+                            ${extractedData.total ? extractedData.total.toFixed(2) : "0.00"} MXN
+                          </span>
+                        </div>
+
+                        <div className="border-t border-slate-200/60 pt-3">
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block font-mono font-bold">Fecha</span>
+                          <span className="text-xs font-extrabold text-slate-700 block mt-0.5 select-text">
+                            {extractedData.fechaCompra || "No detectada"}
+                          </span>
+                        </div>
+
+                        <div className="border-t border-slate-200/60 pt-3">
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block font-mono font-bold">Folio</span>
+                          <span className="text-xs font-extrabold text-slate-700 block mt-0.5 select-text">
+                            {extractedData.folio || "No detectado"}
                           </span>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2">
-                        {!isEditing && (
-                          <button
-                            onClick={() => setIsEditing(true)}
-                            className="text-[9px] font-extrabold uppercase tracking-widest border border-slate-200 hover:border-slate-350 bg-white text-slate-600 hover:text-slate-800 px-3 py-1.5 rounded-lg transition duration-150 flex items-center gap-1.5 cursor-pointer shadow-sm"
-                          >
-                            <RefreshCw className="w-3 h-3 text-slate-500" />
-                            Corregir Datos
-                          </button>
-                        )}
-                        <span className="text-[9px] font-extrabold uppercase tracking-widest bg-[#0B53F4]/10 text-[#0B53F4] px-3 py-1.5 rounded-md border border-[#0B53F4]/20 flex items-center gap-1 shrink-0">
-                          <CheckCircle className="w-3.5 h-3.5 text-[#0B53F4]" /> IA Sincronizada
-                        </span>
-                      </div>
                     </div>
 
-                    {checkIsDataIncomplete(extractedData) && !isEditing && (
-                      <div className="p-4 bg-rose-50 border border-rose-200 text-rose-850 rounded-2xl flex items-start gap-3 text-xs leading-relaxed transition-all shadow-sm">
-                        <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5 animate-pulse" />
+                    {checkIsDataIncomplete(extractedData) ? (
+                      <div className="p-4 bg-rose-50 border border-rose-200 text-rose-855 rounded-2xl flex flex-col gap-3 text-xs leading-relaxed transition-all shadow-sm text-left">
+                        <div className="flex items-start gap-3">
+                          <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5 animate-pulse" />
+                          <div>
+                            <span className="font-extrabold block text-rose-800 uppercase mb-0.5 tracking-wide">🚨 Datos Críticos Faltantes</span>
+                            <p className="opacity-95 text-rose-700 leading-normal font-semibold">
+                              No pudimos leer bien algunos datos del ticket.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <button
+                            onClick={resetAll}
+                            className="text-[9.5px] font-black uppercase tracking-wider text-rose-700 bg-rose-100 hover:bg-rose-200 px-3.5 py-2 rounded-xl transition cursor-pointer border-none font-sans"
+                          >
+                            Volver a tomar foto
+                          </button>
+                          <button
+                            onClick={() => setIsEditing(true)}
+                            className="text-[9.5px] font-black uppercase tracking-wider text-blue-700 bg-blue-100 hover:bg-blue-200 px-3.5 py-2 rounded-xl transition cursor-pointer border-none font-sans"
+                          >
+                            Editar datos
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (ticketId) {
+                                await onUpdateTicketInDb(ticketId, { status: "requires_manual_review" });
+                                toast.info("Enviado a revisión manual. Podrás facturar este ticket cuando un agente lo complete.", "Revisión");
+                                resetAll();
+                              }
+                            }}
+                            className="text-[9.5px] font-black uppercase tracking-wider text-slate-700 bg-slate-100 hover:bg-slate-205 px-3.5 py-2 rounded-xl transition cursor-pointer border-none font-sans"
+                          >
+                            Enviar a revisión
+                          </button>
+                        </div>
+                      </div>
+                    ) : matchingConnector ? (
+                      <div className="p-3.5 bg-blue-50 border border-blue-150 text-blue-900 rounded-xl flex items-start gap-2.5 text-xs text-left animate-fade-in_50 font-sans">
+                        <CheckCircle className="w-4.5 h-4.5 text-[#0B53F4] shrink-0 mt-0.5" />
                         <div>
-                          <span className="font-extrabold block text-rose-800 uppercase mb-0.5 tracking-wide">🚨 Datos Críticos Faltantes</span>
-                          <p className="opacity-95 text-rose-700 leading-normal font-medium">
-                            Para timbrar una factura de forma legal, se requiere que la digitalización reconozca con exactitud el <strong>RFC Emisor</strong>, el <strong>Folio</strong>, la <strong>Fecha</strong> y el <strong>Total</strong> ($ MXN). Por favor, presiona el botón <span className="font-bold underline cursor-pointer hover:text-slate-900" onClick={() => setIsEditing(true)}>Corregir Datos</span> para complementarlos manualmente.
+                          <p className="font-semibold text-blue-800 leading-normal">
+                            Estamos revisando si este comercio puede procesarse automáticamente.
                           </p>
                         </div>
                       </div>
+                    ) : (
+                      <div className="p-4 bg-amber-50/50 border border-amber-200 text-amber-900 rounded-2xl flex flex-col gap-3 text-xs leading-relaxed transition-all shadow-sm text-left">
+                        <div className="flex items-start gap-3">
+                          <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 animate-pulse" />
+                          <div>
+                            <span className="font-extrabold block text-amber-800 uppercase mb-0.5 tracking-wide">Comercio Sin Conector</span>
+                            <p className="opacity-95 text-amber-700 leading-normal font-semibold">
+                              Este comercio aún requiere revisión manual. Puedes corregir los datos o enviar el ticket a revisión.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                     )}
 
-              {isEditing ? (
-                /* Manual edit form for data correction in premium light styles */
-                <div className="space-y-4 bg-slate-50 p-5 rounded-2xl border border-slate-200 relative">
-                  <div className="flex items-center justify-between border-b border-slate-200 pb-2.5 mb-2">
-                    <h5 className="text-[11px] font-extrabold text-[#0B53F4] flex items-center gap-1.5 uppercase tracking-wider font-mono">
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-[#0B53F4] animate-pulse" />
-                      Corrección Manual de Campos Críticos
-                    </h5>
+                    {/* Prominent main invoice clickers triggers */}
                     {!checkIsDataIncomplete(extractedData) && (
-                      <button
-                        onClick={() => {
-                          setEditNombre(extractedData.nombreEmisor || "");
-                          setEditRfc(extractedData.rfcEmisor || "");
-                          setEditFecha(extractedData.fechaCompra || "");
-                          setEditFolio(extractedData.folio || "");
-                          setEditSucursal(extractedData.sucursal || "");
-                          setEditTotal(extractedData.total || 0);
-                          setValidationError(null);
-                          setIsEditing(false);
-                        }}
-                        className="text-[10px] text-slate-500 hover:text-slate-800 font-extrabold uppercase transition cursor-pointer"
-                      >
-                        Cancelar
-                      </button>
+                      <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                        {matchingConnector ? (
+                          <>
+                            <button
+                              onClick={handleTriggerAutomation}
+                              disabled={!fiscalProfile || !extractedData}
+                              className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-white bg-[#0B53F4] hover:bg-blue-600 disabled:opacity-55 px-7 py-4 rounded-2xl transition duration-150 shadow-md shadow-[#0B53F4]/15 active:scale-[0.98] select-none cursor-pointer text-center border-none font-sans"
+                            >
+                              <Play className="w-4 h-4 fill-current" />
+                              Confirmar y facturar
+                            </button>
+                            <button
+                              onClick={() => setIsEditing(true)}
+                              className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-[#0B53F4] bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 px-6 py-4 rounded-2xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-2xs font-sans"
+                            >
+                              Editar datos
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => setIsEditing(true)}
+                              className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-[#0B53F4] bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 px-6 py-4 rounded-2xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-2xs font-sans"
+                            >
+                              Editar datos
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (ticketId) {
+                                  await onUpdateTicketInDb(ticketId, { status: "requires_manual_review" });
+                                  toast.info("Enviado a revisión manual. Podrás facturar este ticket cuando un agente lo complete.", "Revisión");
+                                  resetAll();
+                                }
+                              }}
+                              className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-slate-700 bg-slate-100 hover:bg-slate-205 px-6 py-4 rounded-2xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-2xs font-sans"
+                            >
+                              Enviar a revisión
+                            </button>
+                          </>
+                        )}
+                      </div>
                     )}
-                  </div>
 
-                  {validationError && (
-                    <div className="p-3 bg-rose-50 border border-rose-250 rounded-xl text-[11px] text-rose-700 font-bold flex items-center gap-2 animate-pulse">
-                      <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
-                      <span>{validationError}</span>
-                    </div>
-                  )}
+                    {/* Technical debug details render block */}
+                    {canShowDebug && showTechnicalDebug && (
+                      <div className="space-y-4 pt-4 border-t border-slate-150 animate-fade-in_50">
+                        {/* Static view for high-contrast data presentation */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-5 rounded-2xl border border-slate-200/65 shadow-sm text-left">
+                          <div className="flex items-start gap-2.5">
+                            <Building2 className="w-4 h-4 text-[#0B53F4] mt-1 shrink-0" />
+                            <div>
+                              <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wide font-sans">Emisor Comercial</span>
+                              <span className="text-xs font-bold text-slate-855 uppercase">{extractedData.nombreEmisor}</span>
+                            </div>
+                          </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Nombre Emisor */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1.5">
-                        <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Razón Social Emisor *</label>
-                        {isNombreInvalid && (
-                          <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                            ⚠️ Faltante
-                          </span>
-                        )}
+                          <div className="flex items-start gap-2.5">
+                            <Building2 className="w-4 h-4 text-[#0B53F4] mt-1 shrink-0" />
+                            <div>
+                              <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wide font-sans">RFC Emisor</span>
+                              <span className="text-xs font-mono font-bold text-slate-855 select-all">{extractedData.rfcEmisor}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-2.5">
+                            <Calendar className="w-4 h-4 text-[#0B53F4] mt-1 shrink-0" />
+                            <div>
+                              <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wide font-sans">Fecha Compra</span>
+                              <span className="text-xs font-bold text-slate-800 font-mono">{extractedData.fechaCompra}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-2.5">
+                            <FileText className="w-4 h-4 text-[#0B53F4] mt-1 shrink-0" />
+                            <div>
+                              <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wide font-sans">Referencia Folio</span>
+                              <span className="text-xs font-bold text-slate-855 font-mono select-all">{extractedData.folio}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Items Desglose Preview */}
+                        <div className="text-left">
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2 font-sans">Desglose de Conceptos ({extractedData.items.length})</span>
+                          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden max-h-32 overflow-y-auto scrollbar-none shadow-sm">
+                            <table className="w-full text-xs text-left border-collapse font-sans">
+                              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold">
+                                <tr>
+                                  <th className="px-4 py-2 uppercase tracking-wider text-[9px]">Concepto</th>
+                                  <th className="px-4 py-2 text-right w-24 uppercase tracking-wider text-[9px]">Importe</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {extractedData.items.map((item, index) => (
+                                  <tr key={index} className="hover:bg-slate-50/50">
+                                    <td className="px-4 py-2 text-slate-750 font-mono text-[10.5px] uppercase">{item.description}</td>
+                                    <td className="px-4 py-2 text-right text-slate-900 font-bold font-mono text-[10.5px]">${item.amount.toFixed(2)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* Connector Validation Banner */}
+                        <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-5 relative overflow-hidden text-left">
+                          <div className="absolute top-0 right-0 w-32 h-32 bg-[#0B53F4]/5 rounded-full blur-2xl pointer-events-none" />
+                          {matchingConnector ? (
+                            <div className="flex items-center gap-3 relative z-10 font-sans">
+                              <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center shrink-0 border border-emerald-150">
+                                <CheckCircle className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <h5 className="text-xs font-bold text-slate-900 uppercase tracking-wide">Conector de Facturación Encontrado</h5>
+                                <p className="text-[10px] text-slate-400 mt-1 font-semibold">Conector disponible: <span className="font-mono underline text-[#0B53F4] font-bold">{matchingConnector.nombre}</span></p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-start gap-3 relative z-10 font-sans">
+                              <div className="w-10 h-10 bg-amber-50 text-[#FFB200] rounded-full flex items-center justify-center shrink-0 border border-amber-150 mt-0.5">
+                                <AlertTriangle className="w-5 h-5 animate-pulse" />
+                              </div>
+                              <div className="flex-1">
+                                <h5 className="text-xs font-bold text-slate-900 uppercase tracking-wide">No existe conector activo</h5>
+                                <p className="text-[10px] text-slate-400 mt-1 max-w-sm leading-relaxed font-semibold">
+                                  Este comercio aún requiere revisión manual. Puedes corregir los datos o enviar el ticket a revisión.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <input
-                        type="text"
-                        value={editNombre}
-                        onChange={(e) => setEditNombre(e.target.value)}
-                        placeholder="Ej. NUEVA WAL MART DE MEXICO"
-                        className={`w-full bg-white border rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none transition uppercase ${
-                          isNombreInvalid 
-                            ? "border-rose-400 bg-rose-50 focus:border-rose-500" 
-                            : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350"
-                        }`}
-                      />
-                    </div>
-
-                    {/* RFC Emisor */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1.5">
-                        <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">RFC del Emisor comercial *</label>
-                        {isRfcInvalid && (
-                          <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                            ⚠️ Inválido (12-13 Caracteres)
-                          </span>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        value={editRfc}
-                        onChange={(e) => setEditRfc(e.target.value)}
-                        placeholder="Ej. NWM9709244W4"
-                        maxLength={13}
-                        className={`w-full bg-white border rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-800 focus:outline-none transition uppercase ${
-                          isRfcInvalid
-                            ? "border-rose-450 bg-rose-50 focus:border-rose-500"
-                            : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350"
-                        }`}
-                      />
-                    </div>
-
-                    {/* Referencia Folio */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1.5">
-                        <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Folio o Referencia del ticket *</label>
-                        {isFolioInvalid && (
-                          <span className="text-[9px] text-[#0B53F4] font-extrabold uppercase tracking-wider flex items-center gap-1">
-                            ⚠️ Requerido
-                          </span>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        value={editFolio}
-                        onChange={(e) => setEditFolio(e.target.value)}
-                        placeholder="Ej. TR-495038"
-                        className={`w-full bg-white border rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-800 focus:outline-none transition-all ${
-                          isFolioInvalid
-                            ? "border-rose-455 bg-rose-50 focus:border-rose-500"
-                            : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350"
-                        }`}
-                      />
-                    </div>
-
-                    {/* Fecha Compra */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1.5">
-                        <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Fecha Compra (AAAA-MM-DD) *</label>
-                        {isFechaInvalid && (
-                          <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                            ⚠️ Requerido
-                          </span>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        value={editFecha}
-                        onChange={(e) => setEditFecha(e.target.value)}
-                        placeholder="Ej. 2026-06-08"
-                        className={`w-full bg-white border rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-800 focus:outline-none transition-all ${
-                          isFechaInvalid
-                            ? "border-rose-455 bg-rose-50 focus:border-rose-500"
-                            : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350"
-                        }`}
-                      />
-                    </div>
-
-                    {/* Sucursal */}
-                    <div>
-                      <label className="text-[9px] text-slate-500 font-bold block mb-1.5 uppercase tracking-wider">Sucursal (Opcional)</label>
-                      <input
-                        type="text"
-                        value={editSucursal}
-                        onChange={(e) => setEditSucursal(e.target.value)}
-                        placeholder="Ej. Sucursal Santa Fe"
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-[#0B53F4] hover:border-slate-350 transition-all font-sans"
-                      />
-                    </div>
-
-                    {/* Total Pagado */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1.5">
-                        <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Total de la Compra ($ MXN) *</label>
-                        {isTotalInvalid && (
-                          <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                            ⚠️ Total Inválido
-                          </span>
-                        )}
-                      </div>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editTotal || ""}
-                        onChange={(e) => setEditTotal(parseFloat(e.target.value) || 0)}
-                        placeholder="0.00"
-                        className={`w-full bg-white border rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-850 focus:outline-none transition-all ${
-                          isTotalInvalid
-                            ? "border-rose-455 bg-rose-50 focus:border-rose-500"
-                            : "border-slate-200 focus:border-[#0B53F4] hover:border-slate-350"
-                        }`}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2.5 pt-3.5 justify-end">
-                    <button
-                      onClick={handleSaveEditedData}
-                      className="text-[10px] font-black uppercase tracking-widest text-white bg-[#0B53F4] hover:bg-blue-600 px-6 py-3.5 rounded-xl transition duration-150 shadow-md shadow-[#0B53F4]/10 cursor-pointer active:scale-[0.98] select-none"
-                    >
-                      Confirmar y Guardar Cambios
-                    </button>
-                    {!checkIsDataIncomplete(extractedData) && (
-                      <button
-                        onClick={() => {
-                          setEditNombre(extractedData.nombreEmisor || "");
-                          setEditRfc(extractedData.rfcEmisor || "");
-                          setEditFecha(extractedData.fechaCompra || "");
-                          setEditFolio(extractedData.folio || "");
-                          setEditSucursal(extractedData.sucursal || "");
-                          setEditTotal(extractedData.total || 0);
-                          setValidationError(null);
-                          setIsEditing(false);
-                        }}
-                        className="text-[10px] font-bold uppercase tracking-widest text-[#0B53F4] bg-[#0B53F4]/5 border border-[#0B53F4]/10 px-5 py-3.5 rounded-xl transition cursor-pointer select-none"
-                      >
-                        Cancelar
-                      </button>
                     )}
-                  </div>
-                </div>
-              ) : (
-                /* Static view for high-contrast data presentation */
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-5 rounded-2xl border border-slate-200/65 shadow-sm">
-                  <div className="flex items-start gap-2.5">
-                    <Building2 className="w-4 h-4 text-[#0B53F4] mt-1 shrink-0" />
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wide font-sans">Emisor Comercial</span>
-                      <span className="text-xs font-bold text-slate-850 uppercase">{extractedData.nombreEmisor}</span>
-                    </div>
-                  </div>
 
-                  <div className="flex items-start gap-2.5">
-                    <Cpu className="w-4 h-4 text-[#0B53F4] mt-1 shrink-0" />
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wide font-sans">RFC Emisor</span>
-                      <span className="text-xs font-mono font-bold text-slate-850 select-all">{extractedData.rfcEmisor}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-2.5">
-                    <Calendar className="w-4 h-4 text-[#0B53F4] mt-1 shrink-0" />
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wide font-sans">Fecha Compra</span>
-                      <span className="text-xs font-bold text-slate-800 font-mono">{extractedData.fechaCompra}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-2.5">
-                    <FileText className="w-4 h-4 text-[#0B53F4] mt-1 shrink-0" />
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wide font-sans">Referencia Folio</span>
-                      <span className="text-xs font-bold text-slate-850 font-mono select-all">{extractedData.folio}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-2.5">
-                    <Sparkles className="w-4 h-4 text-[#FFB200] mt-1 shrink-0" />
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wide font-sans">Sucursal</span>
-                      <span className="text-xs font-bold text-slate-800 uppercase">{extractedData.sucursal || "General"}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-2.5">
-                    <FileText className="w-4 h-4 text-[#0B53F4] mt-1 shrink-0" />
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-extrabold block uppercase tracking-wide font-sans">Total Pagado</span>
-                      <span className="text-sm font-black text-[#0B53F4] tracking-tight font-mono">${extractedData.total.toFixed(2)} MXN</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Items Desglose Preview */}
-              <div>
-                <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2 font-sans">Desglose de Conceptos ({extractedData.items.length})</span>
-                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden max-h-32 overflow-y-auto scrollbar-none shadow-sm">
-                  <table className="w-full text-xs text-left border-collapse font-sans">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold">
-                      <tr>
-                        <th className="px-4 py-2 uppercase tracking-wider text-[9px]">Concepto</th>
-                        <th className="px-4 py-2 text-right w-24 uppercase tracking-wider text-[9px]">Importe</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {extractedData.items.map((item, index) => (
-                        <tr key={index} className="hover:bg-slate-50/50">
-                          <td className="px-4 py-2 text-slate-750 font-mono text-[10.5px] uppercase">{item.description}</td>
-                          <td className="px-4 py-2 text-right text-slate-900 font-bold font-mono text-[10.5px]">${item.amount.toFixed(2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Connector Validation Banner */}
-              <div className="p-5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-5 mt-4 bg-white border-slate-200 shadow-sm relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-[#0B53F4]/5 rounded-full blur-2xl pointer-events-none" />
-                
-                {matchingConnector ? (
-                  <div className="flex items-center gap-3 relative z-10 font-sans">
-                    <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center shrink-0 border border-emerald-150">
-                      <CheckCircle className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-bold text-slate-900 uppercase tracking-wide">Conector de Facturación Encontrado</h5>
-                      <p className="text-[10px] text-slate-400 mt-1 font-semibold">Navegación Playwright mapeada: <span className="font-mono underline text-[#0B53F4] font-bold">{matchingConnector.nombre}</span></p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-start gap-3 relative z-10 font-sans">
-                    <div className="w-10 h-10 bg-amber-50 text-[#FFB200] rounded-full flex items-center justify-center shrink-0 border border-amber-150 mt-0.5">
-                      <AlertTriangle className="w-5 h-5 animate-pulse" />
-                    </div>
-                    <div className="flex-1">
-                      <h5 className="text-xs font-bold text-slate-900 uppercase tracking-wide">No existe conector activo</h5>
-                      <p className="text-[10px] text-slate-400 mt-1 max-w-sm leading-relaxed font-semibold">
-                        Procederemos a ejecutar una auditoría por Google Search, interpretando el cargador del SAT para proponer nuevos selectores en segundos.
-                      </p>
-                    </div>
+                    {/* Developer Debug Toggle Link */}
+                    {canShowDebug && (
+                      <div className="text-center pt-2 select-none">
+                        <button
+                          type="button"
+                          onClick={() => setShowTechnicalDebug(!showTechnicalDebug)}
+                          className="text-[9px] font-extrabold uppercase tracking-widest text-[#0B53F4]/60 hover:text-[#0B53F4] transition cursor-pointer underline bg-transparent border-none font-sans"
+                        >
+                          {showTechnicalDebug ? "Ocultar detalles de depuración" : "Ver detalles de depuración"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                <button
-                  onClick={() => {
-                    if (ticketId && onStartAutomation) {
-                      onStartAutomation(ticketId);
-                    }
-                    handleTriggerAutomation();
-                  }}
-                  disabled={!fiscalProfile || !extractedData || checkIsDataIncomplete(extractedData)}
-                  className="sm:shrink-0 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 text-white bg-[#0B53F4] hover:bg-blue-600 px-5.5 py-3.5 rounded-xl transition shadow-md shadow-[#0B53F4]/10 active:scale-[0.98] disabled:opacity-50 select-none relative z-10 cursor-pointer text-center"
-                >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  Iniciar Automatización
-                </button>
+                {!fiscalProfile && (
+                  <div className="text-[10px] text-rose-600 flex items-center gap-2 font-bold bg-rose-50 border border-rose-150 rounded-xl p-3 mt-2 font-sans text-left">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+                    <span>Primero debes rellenar tus datos oficiales en la pestaña ⚙️ Perfil Fiscal antes de facturar.</span>
+                  </div>
+                )}
               </div>
-
-              {!fiscalProfile && (
-                <div className="text-[10px] text-rose-600 flex items-center gap-2 font-bold bg-rose-50 border border-rose-150 rounded-xl p-3 mt-2 font-sans text-left">
-                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
-                  <span>Primero debes rellenar tus datos oficiales en la pestaña ⚙️ Perfil Fiscal antes de timbrar.</span>
-                </div>
-              )}
-              </>
             )}
             </div>
-          )}
           </div>
-        </div>
-      )}
-
+        )} 
       {/* STEP 3: REDESIGNED TIMELINE ACTIVE PROCESSING PANEL */}
       {activeStep === "automating" && (() => {
         const getStepStatus = (stepIndex: number) => {
@@ -3185,7 +3106,7 @@ return list.map(n => {
           <div className="space-y-2">
             <h3 className="text-lg font-black text-slate-950 tracking-tight uppercase">¡Factura Automatizada con Éxito!</h3>
             <p className="text-xs text-slate-450 max-w-sm mx-auto leading-relaxed">
-              El ticket comercial ha sido procesado, timbrado e incorporado de forma segura en tu historial de CFDIs v4.0 listos para consultar.
+              El ticket comercial ha sido procesado, obtenido e incorporado de forma segura en tu historial de CFDIs v4.0 listos para consultar.
             </p>
           </div>
 
@@ -3207,7 +3128,7 @@ return list.map(n => {
               className="text-xs font-bold uppercase tracking-wider bg-[#0B53F4] hover:bg-blue-600 text-white px-5 py-3.5 rounded-xl transition cursor-pointer select-none flex items-center gap-1.5 shadow-md shadow-[#0B53F4]/10"
             >
               <Eye className="w-4 h-4" />
-              Ver Factura Emitida
+              Ver CFDI obtenido
             </button>
           </div>
         </div>
@@ -3252,154 +3173,81 @@ return list.map(n => {
                       {extractedData.nombreEmisor || "Establecimiento no identificado"}
                     </span>
                   </div>
+
                   <div>
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">Monto Total</span>
-                    <span className="text-sm font-black text-[#0B53F4] block font-mono mt-0.5">
-                      ${(extractedData.total || 0).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">RFC Emisor</span>
+                    <span className="text-xs font-mono font-extrabold text-slate-800 block mt-0.5 select-all">
+                      {extractedData.rfcEmisor || "No detectado"}
+                    </span>
+                  </div>
+
+                  <div className="border-t border-slate-205 pt-2.5">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">Fecha Compra</span>
+                    <span className="text-xs font-mono font-extrabold text-slate-800 block mt-0.5">
+                      {extractedData.fechaCompra || "No detectada"}
+                    </span>
+                  </div>
+
+                  <div className="border-t border-slate-205 pt-2.5">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">Total Pagado</span>
+                    <span className="text-xs font-mono font-extrabold text-[#0B53F4] block mt-0.5">
+                      ${extractedData.total ? extractedData.total.toFixed(2) : "0.00"} MXN
+                    </span>
+                  </div>
+
+                  <div className="border-t border-slate-205 pt-2.5 col-span-2">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">Folio del Ticket</span>
+                    <span className="text-xs font-mono font-extrabold text-slate-800 block mt-0.5 select-all">
+                      {extractedData.folio || "No detectado"}
                     </span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 border-t border-slate-200/60 pt-3">
-                  <div>
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">Folio de Compra</span>
-                    <span className="text-xs font-extrabold text-slate-700 block mt-0.5">
-                      {extractedData.folio || "S/D"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">Fecha del Ticket</span>
-                    <span className="text-xs font-extrabold text-slate-700 block mt-0.5">
-                      {extractedData.fechaCompra || "S/D"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Pipeline Extraction Results and Confidence */}
-              {extractedData.confidenceScore !== undefined && (
-                <div className="bg-blue-50/40 border border-blue-100/60 rounded-2xl p-4 space-y-3 text-left">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black text-blue-900 uppercase tracking-wider block font-mono">
-                      Confianza del Pipeline:
-                    </span>
-                    <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-wider leading-none ${
-                      extractedData.confidenceScore >= 0.85
-                        ? "bg-emerald-100 text-emerald-800"
-                        : extractedData.confidenceScore >= 0.70
-                        ? "bg-amber-100 text-amber-800"
-                        : "bg-rose-100 text-rose-800"
-                    }`}>
-                      {Math.round(extractedData.confidenceScore * 100)}%
-                    </span>
-                  </div>
-
-                  {/* Fields list showing Raw vs Normalized */}
-                  {extractedData.extractedFields && (
-                    <div className="space-y-1.5 border-t border-blue-100/40 pt-2 text-[10px] text-slate-650 font-medium">
-                      <div className="grid grid-cols-3 font-bold text-slate-450 uppercase text-[8px] tracking-wider mb-1">
-                        <span>Campo</span>
-                        <span>Original (OCR/QR)</span>
-                        <span>Normalizado</span>
-                      </div>
-                      {Object.entries(extractedData.extractedFields).map(([key, f]: [string, any]) => {
-                        if (key === "barcode" && !f.value) return null;
-                        return (
-                          <div key={key} className="grid grid-cols-3 py-0.5 border-b border-slate-100/40 last:border-b-0 leading-tight">
-                            <span className="font-extrabold uppercase text-slate-700">{key}</span>
-                            <span className="truncate pr-1 text-slate-500 font-mono" title={f.rawText}>{f.rawText || "N/A"}</span>
-                            <span className="truncate font-mono font-bold text-slate-800" title={f.value}>{f.value || "N/A"}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Stage logs list */}
-                  {extractedData.pipelineLogs && (
-                    <div className="border-t border-blue-100/40 pt-2 space-y-1">
-                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Registro de Etapas (Pipeline Logs)</span>
-                      <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
-                        {extractedData.pipelineLogs.map((log: string, idx: number) => (
-                          <p key={idx} className="text-[9px] leading-normal font-mono text-slate-550 border-l border-slate-200 pl-1.5">
-                            {log}
-                          </p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Duplicate/Already Invoiced ticket warning in modal */}
-              {(() => {
-                const dupTicket = getExistingInvoicedTicket(extractedData.rfcEmisor, extractedData.folio);
-                if (dupTicket) {
-                  return (
-                    <div className="bg-rose-50 border border-rose-250 rounded-2xl p-4 flex items-start gap-3.5 text-rose-950 text-xs text-left">
-                      <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center shrink-0 text-rose-600 mt-0.5 animate-bounce">
+                <div className={`flex items-start gap-3.5 p-4 border rounded-2xl ${
+                  extractedData.ocrFailed
+                    ? "bg-rose-500/5 border-rose-200 text-rose-800"
+                    : matchingConnector
+                      ? "bg-emerald-500/5 border-emerald-200 text-emerald-800"
+                      : "bg-[#FFFDF5] border-amber-200 text-amber-900"
+                }`}>
+                  {extractedData.ocrFailed ? (
+                    <>
+                      <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center shrink-0 text-rose-600 mt-0.5">
                         <AlertTriangle className="w-4.5 h-4.5" />
                       </div>
-                      <div className="space-y-1">
-                        <span className="font-extrabold text-[10px] uppercase tracking-wider block text-rose-700">⚠️ ¡Atención! Ticket Ya Facturado</span>
-                        <p className="font-semibold text-[11.5px] text-rose-900 leading-normal">
-                          Este ticket con Folio <strong className="font-black underline select-text">{extractedData.folio}</strong> y RFC Emisor <strong className="font-black select-text">{extractedData.rfcEmisor}</strong> ya fue facturado anteriormente en su cuenta.
-                        </p>
-                        <p className="text-[10px] text-rose-700 font-medium">
-                          Volver a procesarlo generará folios duplicados ante el SAT y consumos extras no deseados.
+                      <div className="space-y-0.5">
+                        <span className="font-extrabold text-[10px] uppercase tracking-wider block text-rose-700">Captura manual requerida</span>
+                        <p className="font-medium text-[11px] text-rose-800 leading-relaxed">
+                          No se detectó información suficiente para facturar. Completa establecimiento, RFC, folio, fecha y total con los datos impresos en el ticket.
                         </p>
                       </div>
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-
-              {/* Automatic status indicator block precisely as requested */}
-              <div className={`p-4 rounded-2xl border flex items-start gap-3.5 text-xs leading-relaxed ${
-                extractedData.ocrFailed
-                  ? "bg-rose-50 border-rose-200 text-rose-900"
-                  : matchingConnector 
-                  ? "bg-emerald-500/5 border-emerald-200 text-emerald-800"
-                  : "bg-[#FFFDF5] border-amber-200 text-amber-900"
-              }`}>
-                {extractedData.ocrFailed ? (
-                  <>
-                    <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center shrink-0 text-rose-600 mt-0.5">
-                      <AlertTriangle className="w-4.5 h-4.5" />
-                    </div>
-                    <div className="space-y-0.5">
-                      <span className="font-extrabold text-[10px] uppercase tracking-wider block text-rose-700">Captura manual requerida</span>
-                      <p className="font-medium text-[11px] text-rose-800 leading-relaxed">
-                        No se detectó información suficiente para facturar. Completa establecimiento, RFC, folio, fecha y total con los datos impresos en el ticket.
-                      </p>
-                    </div>
-                  </>
-                ) : matchingConnector ? (
-                  <>
-                    <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-600 mt-0.5 animate-pulse">
-                      <CheckCircle className="w-4.5 h-4.5" />
-                    </div>
-                    <div className="space-y-0.5">
-                      <span className="font-extrabold text-[10px] uppercase tracking-wider block text-emerald-700">⚡ Facturación 100% Automática Lista</span>
-                      <p className="font-medium text-[11px] text-emerald-650 leading-relaxed">
-                        Detectamos que este portal de facturación ya está entrenado en su cuenta (<strong>{matchingConnector.nombre}</strong>). Al presionar o confirmar, el timbrado automático SAT se detonará directo en segundo plano a través de Playwright.
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 text-amber-600 mt-0.5 animate-pulse">
-                      <Brain className="w-4.5 h-4.5" />
-                    </div>
-                    <div className="space-y-0.5">
-                      <span className="font-extrabold text-[10px] uppercase tracking-wider block text-amber-800">🧠 Nuevo Entrenamiento IA SAT Requerido</span>
-                      <p className="font-medium text-[11px] text-amber-705 leading-relaxed">
-                        Aún no contamos con un portal entrenado para <strong>{extractedData.nombreEmisor}</strong>. Al presionar facturar, nuestro agente IA procederá a entrenar el portal de manera dinámica, registrará el conector y timbrará tu factura en tiempo real.
-                      </p>
-                    </div>
-                  </>
-                )}
+                    </>
+                  ) : matchingConnector ? (
+                    <>
+                      <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-600 mt-0.5 animate-pulse">
+                        <CheckCircle className="w-4.5 h-4.5" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="font-extrabold text-[10px] uppercase tracking-wider block text-emerald-700">⚡ Facturación Automática Disponible</span>
+                        <p className="font-medium text-[11px] text-emerald-650 leading-relaxed">
+                          Estamos revisando si este comercio puede procesarse automáticamente.
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 text-amber-600 mt-0.5 animate-pulse">
+                        <AlertTriangle className="w-4.5 h-4.5" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="font-extrabold text-[10px] uppercase tracking-wider block text-amber-800">⚠️ Comercio Sin Conector</span>
+                        <p className="font-medium text-[11px] text-amber-705 leading-relaxed">
+                          Este comercio aún requiere revisión manual. Puedes corregir los datos o enviar el ticket a revisión.
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -3427,21 +3275,34 @@ return list.map(n => {
               >
                 Corregir Datos del Ticket
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowOcrConfirmationModal(false);
-                  if (matchingConnector) {
+              {matchingConnector ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowOcrConfirmationModal(false);
                     handleTriggerAutomation();
-                  } else {
-                    handleRunTraining();
-                  }
-                }}
-                disabled={checkIsDataIncomplete(extractedData)}
-                className="text-xs font-black uppercase tracking-wider text-white bg-[#0B53F4] hover:bg-blue-600 disabled:opacity-50 py-3 px-6 rounded-xl duration-150 cursor-pointer active:scale-98 text-center shadow-md shadow-[#0B53F4]/15"
-              >
-                {extractedData.ocrFailed ? "Completa los datos para continuar" : matchingConnector ? "Confirmar y Facturar" : "Entrenar y Facturar"}
-              </button>
+                  }}
+                  disabled={checkIsDataIncomplete(extractedData)}
+                  className="text-xs font-black uppercase tracking-wider text-white bg-[#0B53F4] hover:bg-blue-600 disabled:opacity-55 py-3 px-6 rounded-xl duration-150 cursor-pointer active:scale-98 text-center shadow-md shadow-[#0B53F4]/15"
+                >
+                  Confirmar y Facturar
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setShowOcrConfirmationModal(false);
+                    if (ticketId) {
+                      await onUpdateTicketInDb(ticketId, { status: "requires_manual_review" });
+                      toast.info("Enviado a revisión manual. Podrás facturar este ticket cuando un agente lo complete.", "Revisión");
+                      resetAll();
+                    }
+                  }}
+                  className="text-xs font-black uppercase tracking-wider text-white bg-slate-600 hover:bg-slate-700 py-3 px-6 rounded-xl duration-150 cursor-pointer active:scale-98 text-center shadow-md shadow-slate-600/15"
+                >
+                  Enviar a Revisión Manual
+                </button>
+              )}
             </div>
           </div>
         </div>

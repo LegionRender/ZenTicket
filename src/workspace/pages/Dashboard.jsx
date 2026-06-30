@@ -409,7 +409,7 @@ export const Dashboard = () => {
               "1. Acceder al portal de facturación Alsea",
               "2. Capturar RFC receptor y datos del ticket de compra",
               "3. Indicar Uso de CFDI correspondiente",
-              "4. Efectuar timbrado digital federal SAT",
+              "4. Obtener CFDI certificado",
               "5. Guardar documentos PDF y XML generados"
             ]),
             createdAt: new Date().toISOString()
@@ -451,7 +451,7 @@ export const Dashboard = () => {
               "1. Ingresar al portal de facturas Walmart México",
               "2. Suministrar TR y RFC receptor",
               "3. Suministrar código de sucursal de compra",
-              "4. Proceder con el timbrado fiscal",
+              "4. Obtener CFDI certificado",
               "5. Almacenar facturas PDF y XML"
             ]),
             createdAt: new Date().toISOString()
@@ -633,7 +633,7 @@ export const Dashboard = () => {
 
         if (syncToastId) toast.dismiss(syncToastId);
         toast.success(
-          `Factura emitida para ${ocrResult.nombreEmisor} por un total de $${ocrResult.total} MXN (Sincronización Offline).`
+          `Factura obtenida para ${ocrResult.nombreEmisor} por un total de $${ocrResult.total} MXN (Sincronización Offline).`
         );
 
       } catch (err) {
@@ -1104,7 +1104,7 @@ export const Dashboard = () => {
       "1. Acceder al portal remoto de facturación corporativa",
       "2. Ingresar código de referencia y RFC de receptor",
       "3. Configurar Uso de CFDI 4.0 seleccionado",
-      "4. Solicitar timbrado certificado ante PAC",
+      "4. Obtener CFDI certificado",
       "5. Sincronizar comprobantes PDF y XML oficiales"
     ];
 
@@ -1180,7 +1180,7 @@ export const Dashboard = () => {
         "1. Navegar al dominio de autofactura",
         "2. Identificar el ticket de consumo",
         "3. Llenar los datos de receptor fiscal",
-        "4. Generar CFDI timbrado",
+        "4. Obtener CFDI",
         "5. Descargar XML y representaciones visuales"
       ];
 
@@ -1236,7 +1236,7 @@ export const Dashboard = () => {
             "1. Acceder al portal de facturación Alsea",
             "2. Capturar RFC receptor y datos del ticket de compra",
             "3. Indicar Uso de CFDI correspondiente",
-            "4. Efectuar timbrado digital federal SAT",
+            "4. Obtener CFDI",
             "5. Guardar documentos PDF y XML generados"
           ]),
           createdAt: new Date().toISOString()
@@ -1276,7 +1276,7 @@ export const Dashboard = () => {
             "1. Ingresar al portal de facturas Walmart México",
             "2. Suministrar TR y RFC receptor",
             "3. Suministrar código de sucursal de compra",
-            "4. Proceder con el timbrado fiscal",
+            "4. Obtener CFDI",
             "5. Almacenar facturas PDF y XML"
           ]),
           createdAt: new Date().toISOString()
@@ -1307,7 +1307,7 @@ export const Dashboard = () => {
   };
 
   const onStartTicketAutomation = async (ticketId) => {
-    toast.info("Iniciando secuencia robótica Playwright de timbrado...");
+    toast.info("Iniciando proceso de facturación...");
   };
 
   const isAdmin = user?.email && (user.email.toLowerCase().includes("legionrender") || user.email.toLowerCase().includes("ricardo"));
