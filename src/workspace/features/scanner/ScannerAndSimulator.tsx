@@ -3202,8 +3202,9 @@ return list.map(n => {
                     </span>
                   </div>
                 </div>
+              </div>
 
-                <div className={`flex items-start gap-3.5 p-4 border rounded-2xl ${
+              <div className={`flex items-start gap-3.5 p-4 border rounded-2xl ${
                   extractedData.ocrFailed
                     ? "bg-rose-500/5 border-rose-200 dark:border-rose-900/30 text-rose-800 dark:text-rose-300"
                     : matchingConnector
@@ -3248,7 +3249,6 @@ return list.map(n => {
                     </>
                   )}
                 </div>
-              </div>
             </div>
 
             {/* Footer */}
