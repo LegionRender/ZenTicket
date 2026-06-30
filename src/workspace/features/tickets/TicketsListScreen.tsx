@@ -471,7 +471,7 @@ export default function TicketsListScreen({
     if (revErr) {
       const code = revErr.reviewReasonCode;
       if (code === "CONNECTOR_NOT_FOUND") return "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.";
-      if (code === "PORTAL_NO_XML") return "El portal no entregó el XML necesario para validar tu CFDI.";
+      if (code === "PORTAL_NO_XML") return "El portal oficial no entregó el XML necesario para validar tu CFDI.";
       if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
       if (code === "PORTAL_REJECTED_TOTAL") return "El portal no reconoció el total detectado.";
       if (code === "SAT_NOT_FOUND") return "El CFDI no fue localizado en los controles del SAT.";
@@ -480,6 +480,16 @@ export default function TicketsListScreen({
       if (code === "USER_REQUESTED_REVIEW") return "El usuario solicitó revisión manual del ticket.";
       if (code === "CONNECTOR_TIMEOUT") return "El conector del comercio tardó más de lo esperado en responder.";
       if (code === "PORTAL_ERROR") return revErr.reviewReasonMessage || "Ocurrió un error en el portal del comercio.";
+      if (code === "CONNECTOR_RUNNER_NOT_AVAILABLE") return "El conector está entrenado, pero el motor productivo de automatización aún no está disponible.";
+      if (code === "CONNECTOR_SCHEMA_INVALID") return "El conector tiene una configuración incompleta y requiere revisión técnica.";
+      if (code === "CONNECTOR_NOT_PRODUCTION_READY") return "El conector de este comercio está en validación técnica y no está listo para producción.";
+      if (code === "CONNECTOR_RESTRICTED") return "Este portal requiere credenciales especiales o permisos de acceso restringidos.";
+      if (code === "CONNECTOR_BROKEN") return "El conector de este portal se encuentra temporalmente fuera de servicio por mantenimiento.";
+      if (code === "PORTAL_FIELD_MAP_CHANGED") return "La estructura del portal oficial ha cambiado. Se ha programado un rediscovery técnico.";
+      if (code === "PORTAL_REQUIRES_LOGIN") return "El portal del comercio requiere iniciar sesión con cuenta de usuario.";
+      if (code === "PORTAL_REQUIRES_CAPTCHA") return "El portal oficial requiere resolver un CAPTCHA interactivo.";
+      if (code === "PORTAL_REQUIRES_EMAIL_VERIFICATION") return "El portal oficial requiere una verificación por correo electrónico.";
+      if (code === "PORTAL_NO_DOWNLOAD_LINKS") return "El portal oficial no proporcionó enlaces de descarga válidos.";
     }
 
     if (corrErr) {

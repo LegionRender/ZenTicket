@@ -28,7 +28,27 @@ export interface CorrectionError {
 }
 
 export interface ReviewError {
-  reviewReasonCode: "CONNECTOR_NOT_FOUND" | "CONNECTOR_TIMEOUT" | "PORTAL_ERROR" | "PORTAL_NO_XML" | "SAT_NOT_FOUND" | "SAT_CANCELED" | "INVALID_XML_STRUCTURE" | "SAT_TIMEOUT" | "SAT_VERIFICATION_ERROR" | "USER_REQUESTED_REVIEW";
+  reviewReasonCode: 
+    | "CONNECTOR_NOT_FOUND" 
+    | "CONNECTOR_TIMEOUT" 
+    | "PORTAL_ERROR" 
+    | "PORTAL_NO_XML" 
+    | "SAT_NOT_FOUND" 
+    | "SAT_CANCELED" 
+    | "INVALID_XML_STRUCTURE" 
+    | "SAT_TIMEOUT" 
+    | "SAT_VERIFICATION_ERROR" 
+    | "USER_REQUESTED_REVIEW"
+    | "CONNECTOR_RUNNER_NOT_AVAILABLE"
+    | "CONNECTOR_SCHEMA_INVALID"
+    | "CONNECTOR_NOT_PRODUCTION_READY"
+    | "CONNECTOR_RESTRICTED"
+    | "CONNECTOR_BROKEN"
+    | "PORTAL_FIELD_MAP_CHANGED"
+    | "PORTAL_REQUIRES_LOGIN"
+    | "PORTAL_REQUIRES_CAPTCHA"
+    | "PORTAL_REQUIRES_EMAIL_VERIFICATION"
+    | "PORTAL_NO_DOWNLOAD_LINKS";
   reviewReasonMessage: string;
   lastAutomationStep: string;
   connectorAttempted: boolean;
@@ -210,6 +230,14 @@ export default function ScannerAndSimulator({
   const [editSucursal, setEditSucursal] = useState("");
   const [editTotal, setEditTotal] = useState(0);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [customProfileFields, setCustomProfileFields] = useState<Record<string, string>>({
+    rfcReceptor: "",
+    razonSocial: "",
+    codigoPostal: "",
+    regimenFiscal: "",
+    usoCFDI: "",
+    email: ""
+  });
 
   // Corroboration Sub-tab & AI Model training visualizer states
   const [activeExtractedTab, setActiveExtractedTab] = useState<"corroborar" | "detalles">("corroborar");
@@ -219,7 +247,50 @@ export default function ScannerAndSimulator({
 
   // Helper validation function to check missing or bad critical fields
   const checkIsDataIncomplete = (data: ExtractedTicketData): boolean => {
+    const found = matchConnector(data.nombreEmisor, data.rfcEmisor);
+    if (found) {
+      try {
+        const fields = JSON.parse(found.fieldsJson || "[]");
+        if (fields.length > 0) {
+          const hasMissingTicketField = fields.some((f: any) => {
+            if (f.source !== "ticket" || !f.required) return false;
+            if (f.key === "referenciaFacturacion" || f.key === "folio") return !data.folio?.trim();
+            if (f.key === "total") return !data.total || data.total <= 0;
+            if (f.key === "fecha") return !data.fechaCompra?.trim();
+            return false;
+          });
+          if (hasMissingTicketField) return true;
+
+          const hasMissingFiscalField = fields.some((f: any) => {
+            if (f.source !== "fiscalProfile" || !f.required) return false;
+            return isFiscalFieldInvalid(f.key);
+          });
+          if (hasMissingFiscalField) return true;
+
+          return false;
+        }
+      } catch (e) {
+        // fallback
+      }
+    }
     return !data.rfcEmisor?.trim() || !data.nombreEmisor?.trim() || !data.total || data.total <= 0 || !data.folio?.trim() || !data.fechaCompra?.trim();
+  };
+
+  const isFiscalFieldInvalid = (key: string): boolean => {
+    if (!fiscalProfile) return true;
+    if (key === "rfcReceptor" || key === "rfc") {
+      return !fiscalProfile.rfc || fiscalProfile.rfc.trim().length < 12;
+    }
+    if (key === "razonSocial") return !fiscalProfile.razonSocial?.trim();
+    if (key === "codigoPostal") {
+      return !fiscalProfile.codigoPostal || fiscalProfile.codigoPostal.trim().length !== 5;
+    }
+    if (key === "regimenFiscal") return !fiscalProfile.regimenFiscal?.trim();
+    if (key === "usoCFDI") return !fiscalProfile.usoCFDI?.trim();
+    if (key === "email") {
+      return !fiscalProfile.correoElectronico || !fiscalProfile.correoElectronico.includes("@");
+    }
+    return false;
   };
 
   // Helper function to find if we already have a successfully processed ticket with same Folio & RFC Emisor
@@ -528,6 +599,14 @@ export default function ScannerAndSimulator({
       setEditFolio(data.folio || "");
       setEditSucursal(data.sucursal || "");
       setEditTotal(data.total || 0);
+      setCustomProfileFields({
+        rfcReceptor: fiscalProfile?.rfc || "",
+        razonSocial: fiscalProfile?.razonSocial || "",
+        codigoPostal: fiscalProfile?.codigoPostal || "",
+        regimenFiscal: fiscalProfile?.regimenFiscal || "",
+        usoCFDI: fiscalProfile?.usoCFDI || "",
+        email: fiscalProfile?.correoElectronico || ""
+      });
       const found = matchConnector(ticket.nombreEmisor, ticket.rfcEmisor);
       setMatchingConnector(found);
 
@@ -996,6 +1075,14 @@ export default function ScannerAndSimulator({
       setEditFolio(ocrResult.folio || "");
       setEditSucursal(ocrResult.sucursal || "");
       setEditTotal(ocrResult.total || 0);
+      setCustomProfileFields({
+        rfcReceptor: fiscalProfile?.rfc || "",
+        razonSocial: fiscalProfile?.razonSocial || "",
+        codigoPostal: fiscalProfile?.codigoPostal || "",
+        regimenFiscal: fiscalProfile?.regimenFiscal || "",
+        usoCFDI: fiscalProfile?.usoCFDI || "",
+        email: fiscalProfile?.correoElectronico || ""
+      });
       setIsEditing(checkIsDataIncomplete(ocrResult));
 
       // Save ticket in DB
@@ -1289,6 +1376,74 @@ export default function ScannerAndSimulator({
         return;
       }
 
+      // Scheme validation & runner availability checks
+      let fieldsSchema = [];
+      let flowSteps = [];
+      try {
+        fieldsSchema = JSON.parse(activeConn.fieldsJson || "[]");
+        flowSteps = JSON.parse(activeConn.flowJson || "[]");
+        
+        // Check fields schema integrity
+        const hasInvalidField = fieldsSchema.some((f: any) => !f.key || !f.name || !f.selector || !f.type || f.required === undefined || !f.source);
+        if (hasInvalidField) {
+          throw new Error("Esquema de campos inválido.");
+        }
+      } catch (e) {
+        const schemaErr: ReviewError = {
+          reviewReasonCode: "CONNECTOR_SCHEMA_INVALID",
+          reviewReasonMessage: "El conector tiene una configuración incompleta y requiere revisión técnica.",
+          lastAutomationStep: "connector_resolving",
+          connectorAttempted: true,
+          connectorId: activeConn.id || null,
+          connectorName: activeConn.nombre || null,
+          portalErrorMessage: "Invalid fieldsJson or flowJson schema"
+        };
+        await onUpdateTicketInDb(activeTicketId, {
+          status: "requires_manual_review",
+          errorMsg: schemaErr.reviewReasonMessage,
+          reviewError: schemaErr as any
+        });
+        await addAutomationEvent("connector_resolving", "failed", schemaErr.reviewReasonMessage, undefined, "CONNECTOR_SCHEMA_INVALID");
+        setIsAutomatingLoading(false);
+        return;
+      }
+
+      // Check runner availability
+      if (activeConn.runnerAvailable !== true || activeConn.status !== "production_ready") {
+        let code: "CONNECTOR_RUNNER_NOT_AVAILABLE" | "CONNECTOR_NOT_PRODUCTION_READY" | "CONNECTOR_RESTRICTED" | "CONNECTOR_BROKEN" = "CONNECTOR_RUNNER_NOT_AVAILABLE";
+        let msg = "El conector está entrenado, pero el motor productivo de automatización aún no está disponible.";
+
+        if (activeConn.status === "restricted") {
+          code = "CONNECTOR_RESTRICTED";
+          msg = "Este portal requiere credenciales especiales o permisos de acceso restringidos.";
+        } else if (activeConn.status === "broken") {
+          code = "CONNECTOR_BROKEN";
+          msg = "El conector de este portal se encuentra temporalmente fuera de servicio por mantenimiento.";
+        } else if (activeConn.status === "trained_needs_validation" || activeConn.status === "mock_only") {
+          code = "CONNECTOR_NOT_PRODUCTION_READY";
+          msg = "El conector de este comercio está en validación técnica y no está listo para producción.";
+        }
+
+        const runnerErr: ReviewError = {
+          reviewReasonCode: code,
+          reviewReasonMessage: msg,
+          lastAutomationStep: "connector_resolving",
+          connectorAttempted: true,
+          connectorId: activeConn.id || null,
+          connectorName: activeConn.nombre || null,
+          portalErrorMessage: `Runner not available. Status: ${activeConn.status || "N/A"}`
+        };
+        
+        await onUpdateTicketInDb(activeTicketId, {
+          status: "requires_manual_review",
+          errorMsg: runnerErr.reviewReasonMessage,
+          reviewError: runnerErr as any
+        });
+        await addAutomationEvent("connector_resolving", "failed", runnerErr.reviewReasonMessage, undefined, code);
+        setIsAutomatingLoading(false);
+        return;
+      }
+
       await addAutomationEvent("connector_resolving", "success", `Portal oficial de facturación del comercio identificado como: ${activeConn.nombre}`);
 
       setSimulationProgress(20);
@@ -1515,45 +1670,112 @@ export default function ScannerAndSimulator({
   };
 
   const handleSaveEditedData = async () => {
-    // Basic validation
-    if (!editRfc.trim()) {
-      setValidationError("El RFC del emisor es obligatorio.");
-      return;
+    let fieldsSchema: any[] = [];
+    try {
+      fieldsSchema = matchingConnector ? JSON.parse(matchingConnector.fieldsJson || "[]") : [];
+    } catch (e) {
+      fieldsSchema = [];
     }
-    const cleanRfc = editRfc.toUpperCase().replace(/\s+/g, "");
-    if (cleanRfc.length < 12 || cleanRfc.length > 13) {
-      setValidationError("El RFC del emisor debe tener 12 o 13 caracteres (alfanumérico).");
-      return;
-    }
-    if (!editNombre.trim()) {
-      setValidationError("El Nombre/Razón Social del emisor es obligatorio.");
-      return;
-    }
-    const totalNum = parseFloat(editTotal.toString());
-    if (isNaN(totalNum) || totalNum <= 0) {
-      setValidationError("El importe total de compra debe ser un número mayor a cero.");
-      return;
-    }
-    if (!editFolio.trim()) {
-      setValidationError("El folio o número de referencia del ticket es obligatorio.");
-      return;
-    }
-    if (!editFecha.trim()) {
-      setValidationError("La fecha de compra de ticket es obligatoria.");
-      return;
-    }
+    const isCustomConnector = fieldsSchema.length > 0;
 
-    setValidationError(null);
+    let updatedData: ExtractedTicketData;
 
-    const updatedData: ExtractedTicketData = {
-      ...extractedData!,
-      rfcEmisor: cleanRfc,
-      nombreEmisor: editNombre.trim(),
-      fechaCompra: editFecha.trim(),
-      folio: editFolio.trim(),
-      total: totalNum,
-      sucursal: editSucursal.trim(),
-    };
+    if (isCustomConnector) {
+      // Validate dynamic fields
+      const hasFolioField = fieldsSchema.some(f => f.key === "referenciaFacturacion" || f.key === "folio");
+      if (hasFolioField && !editFolio.trim()) {
+        setValidationError("La referencia de facturación o folio es obligatorio.");
+        return;
+      }
+      const hasTotalField = fieldsSchema.some(f => f.key === "total");
+      const totalNum = parseFloat(editTotal.toString());
+      if (hasTotalField && (isNaN(totalNum) || totalNum <= 0)) {
+        setValidationError("El importe total es obligatorio y debe ser mayor a cero.");
+        return;
+      }
+      const hasFechaField = fieldsSchema.some(f => f.key === "fecha");
+      if (hasFechaField && !editFecha.trim()) {
+        setValidationError("La fecha es obligatoria.");
+        return;
+      }
+
+      setValidationError(null);
+
+      // Construct dynamic updated data
+      updatedData = {
+        ...extractedData!,
+        folio: editFolio.trim(),
+        total: !isNaN(totalNum) ? totalNum : (extractedData?.total || 0),
+        fechaCompra: editFecha.trim() || (extractedData?.fechaCompra || ""),
+      };
+
+      // Save/update user's fiscal profile if fields were corrected
+      const updatedProfile = { ...fiscalProfile };
+      let profileChanged = false;
+      
+      const pFields = ["rfcReceptor", "razonSocial", "codigoPostal", "regimenFiscal", "usoCFDI", "email"];
+      for (const k of pFields) {
+        if (customProfileFields[k]) {
+          let mappedKey = k;
+          if (k === "rfcReceptor") mappedKey = "rfc";
+          if (k === "email") mappedKey = "correoElectronico";
+          
+          if (updatedProfile[mappedKey] !== customProfileFields[k]) {
+            updatedProfile[mappedKey] = customProfileFields[k];
+            profileChanged = true;
+          }
+        }
+      }
+      
+      if (profileChanged && onSaveProfile) {
+        try {
+          await onSaveProfile(updatedProfile);
+          toast.success("Se actualizó tu perfil fiscal con los datos corregidos.");
+        } catch (e) {
+          console.error("Error saving updated profile:", e);
+        }
+      }
+    } else {
+      // Standard generic merchant validations
+      if (!editRfc.trim()) {
+        setValidationError("El RFC del emisor es obligatorio.");
+        return;
+      }
+      const cleanRfc = editRfc.toUpperCase().replace(/\s+/g, "");
+      if (cleanRfc.length < 12 || cleanRfc.length > 13) {
+        setValidationError("El RFC del emisor debe tener 12 o 13 caracteres (alfanumérico).");
+        return;
+      }
+      if (!editNombre.trim()) {
+        setValidationError("El Nombre/Razón Social del emisor es obligatorio.");
+        return;
+      }
+      const totalNum = parseFloat(editTotal.toString());
+      if (isNaN(totalNum) || totalNum <= 0) {
+        setValidationError("El importe total de compra debe ser un número mayor a cero.");
+        return;
+      }
+      if (!editFolio.trim()) {
+        setValidationError("El folio o número de referencia del ticket es obligatorio.");
+        return;
+      }
+      if (!editFecha.trim()) {
+        setValidationError("La fecha de compra de ticket es obligatoria.");
+        return;
+      }
+
+      setValidationError(null);
+
+      updatedData = {
+        ...extractedData!,
+        rfcEmisor: cleanRfc,
+        nombreEmisor: editNombre.trim(),
+        fechaCompra: editFecha.trim(),
+        folio: editFolio.trim(),
+        total: totalNum,
+        sucursal: editSucursal.trim(),
+      };
+    }
 
     setExtractedData(updatedData);
     setIsEditing(false);
@@ -1562,12 +1784,12 @@ export default function ScannerAndSimulator({
     if (ticketId) {
       try {
         await onUpdateTicketInDb(ticketId, {
-          rfcEmisor: updatedData.rfcEmisor,
-          nombreEmisor: updatedData.nombreEmisor,
-          fechaCompra: updatedData.fechaCompra,
-          folio: updatedData.folio,
-          total: updatedData.total,
-          sucursal: updatedData.sucursal,
+          rfcEmisor: updatedData.rfcEmisor || "",
+          nombreEmisor: updatedData.nombreEmisor || "",
+          fechaCompra: updatedData.fechaCompra || "",
+          folio: updatedData.folio || "",
+          total: updatedData.total || 0,
+          sucursal: updatedData.sucursal || "",
         });
       } catch (err) {
         console.error("Error saving corrected ticket inside Firestore", err);
@@ -2767,122 +2989,214 @@ return list.map(n => {
                       </div>
                     )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Nombre Emisor */}
-                      <div>
-                        <div className="flex justify-between items-center mb-1.5">
-                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Razón Social Emisor *</label>
-                          {isNombreInvalid && (
-                            <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                              ⚠️ Faltante
-                            </span>
-                          )}
-                        </div>
-                        <input
-                          type="text"
-                          value={editNombre}
-                          onChange={(e) => setEditNombre(e.target.value)}
-                          placeholder="Ej. NUEVA WAL MART DE MEXICO"
-                          className={getInputClass(isNombreInvalid, correctionError?.fieldToCorrect === "nombreEmisor")}
-                          autoFocus={correctionError?.fieldToCorrect === "nombreEmisor"}
-                        />
-                      </div>
+                     {(() => {
+                      let fieldsSchema = [];
+                      try {
+                        fieldsSchema = matchingConnector ? JSON.parse(matchingConnector.fieldsJson || "[]") : [];
+                      } catch (e) {
+                        fieldsSchema = [];
+                      }
+                      const isCustomConnector = fieldsSchema.length > 0;
 
-                      {/* RFC Emisor */}
-                      <div>
-                        <div className="flex justify-between items-center mb-1.5">
-                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">RFC Emisor *</label>
-                          {isRfcInvalid && (
-                            <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                              ⚠️ Inválido
-                            </span>
-                          )}
-                        </div>
-                        <input
-                          type="text"
-                          value={editRfc}
-                          onChange={(e) => setEditRfc(e.target.value)}
-                          placeholder="Ej. NWM9709244W4"
-                          maxLength={13}
-                          className={getInputClass(isRfcInvalid, false, true)}
-                        />
-                      </div>
+                      if (isCustomConnector) {
+                        return (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {fieldsSchema.map((field: any) => {
+                              const isTicketSource = field.source === "ticket";
+                              const isProfileSource = field.source === "fiscalProfile";
 
-                      {/* Fecha Compra */}
-                      <div>
-                        <div className="flex justify-between items-center mb-1.5">
-                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Fecha del Ticket *</label>
-                          {isFechaInvalid && (
-                            <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                              ⚠️ Faltante
-                            </span>
-                          )}
-                        </div>
-                        <input
-                          type="text"
-                          value={editFecha}
-                          onChange={(e) => setEditFecha(e.target.value)}
-                          placeholder="DD/MM/AAAA"
-                          className={getInputClass(isFechaInvalid, correctionError?.fieldToCorrect === "fecha")}
-                          autoFocus={correctionError?.fieldToCorrect === "fecha"}
-                        />
-                      </div>
+                              if (isTicketSource) {
+                                if (field.key === "referenciaFacturacion" || field.key === "folio") {
+                                  return (
+                                    <div key={field.key}>
+                                      <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">{field.name} *</label>
+                                      <input
+                                        type="text"
+                                        value={editFolio}
+                                        onChange={(e) => setEditFolio(e.target.value)}
+                                        placeholder={`Ej. ${field.name}`}
+                                        className={getInputClass(!editFolio.trim(), false)}
+                                      />
+                                    </div>
+                                  );
+                                }
+                                if (field.key === "total") {
+                                  return (
+                                    <div key={field.key}>
+                                      <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">{field.name} *</label>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        value={editTotal || ""}
+                                        onChange={(e) => setEditTotal(parseFloat(e.target.value) || 0)}
+                                        placeholder="0.00"
+                                        className={getInputClass(!editTotal || editTotal <= 0, false, true)}
+                                      />
+                                    </div>
+                                  );
+                                }
+                                if (field.key === "fecha") {
+                                  return (
+                                    <div key={field.key}>
+                                      <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">{field.name} *</label>
+                                      <input
+                                        type="text"
+                                        value={editFecha}
+                                        onChange={(e) => setEditFecha(e.target.value)}
+                                        placeholder="DD/MM/AAAA"
+                                        className={getInputClass(!editFecha.trim(), false)}
+                                      />
+                                    </div>
+                                  );
+                                }
+                              }
 
-                      {/* Referencia Folio */}
-                      <div>
-                        <div className="flex justify-between items-center mb-1.5">
-                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Folio de Compra *</label>
-                          {isFolioInvalid && (
-                            <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                              ⚠️ Faltante
-                            </span>
-                          )}
-                        </div>
-                        <input
-                          type="text"
-                          value={editFolio}
-                          onChange={(e) => setEditFolio(e.target.value)}
-                          placeholder="Ej. 123456789"
-                          className={getInputClass(isFolioInvalid, correctionError?.fieldToCorrect === "folio")}
-                          autoFocus={correctionError?.fieldToCorrect === "folio"}
-                        />
-                      </div>
-                    </div>
+                              if (isProfileSource && isFiscalFieldInvalid(field.key)) {
+                                return (
+                                  <div key={field.key}>
+                                    <div className="flex justify-between items-center mb-1">
+                                      <label className="text-[9px] text-[#0B53F4] font-black uppercase tracking-wider block">{field.name} (Perfil Fiscal) *</label>
+                                      <span className="text-[8px] text-rose-500 font-bold uppercase tracking-wider">Faltante o Inválido</span>
+                                    </div>
+                                    <input
+                                      type="text"
+                                      value={customProfileFields[field.key] || ""}
+                                      onChange={(e) => setCustomProfileFields({ ...customProfileFields, [field.key]: e.target.value })}
+                                      placeholder={`Completa ${field.name}`}
+                                      className={getInputClass(!customProfileFields[field.key]?.trim(), false)}
+                                    />
+                                  </div>
+                                );
+                              }
 
-                    {/* Sucursal */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-                      <div>
-                        <label className="text-[9px] text-slate-500 font-bold block mb-1.5 uppercase tracking-wider">Sucursal (Opcional)</label>
-                        <input
-                          type="text"
-                          value={editSucursal}
-                          onChange={(e) => setEditSucursal(e.target.value)}
-                          placeholder="Ej. Sucursal Santa Fe"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-[#0B53F4] hover:border-slate-350 transition-all font-sans"
-                        />
-                      </div>
+                              return null;
+                            })}
+                          </div>
+                        );
+                      }
 
-                      {/* Total Pagado */}
-                      <div>
-                        <div className="flex justify-between items-center mb-1.5">
-                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Total de la Compra ($ MXN) *</label>
-                          {isTotalInvalid && (
-                            <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                              ⚠️ Total Inválido
-                            </span>
-                          )}
-                        </div>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={editTotal || ""}
-                          onChange={(e) => setEditTotal(parseFloat(e.target.value) || 0)}
-                          placeholder="0.00"
-                          className={getInputClass(isTotalInvalid, correctionError?.fieldToCorrect === "total", true)}
-                          autoFocus={correctionError?.fieldToCorrect === "total"}
-                        />
-                      </div>
-                    </div>
+                      // Generic legacy merchant fallback form
+                      return (
+                        <>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {/* Nombre Emisor */}
+                            <div>
+                              <div className="flex justify-between items-center mb-1.5">
+                                <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Razón Social Emisor *</label>
+                                {isNombreInvalid && (
+                                  <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                                    ⚠️ Faltante
+                                  </span>
+                                )}
+                              </div>
+                              <input
+                                type="text"
+                                value={editNombre}
+                                onChange={(e) => setEditNombre(e.target.value)}
+                                placeholder="Ej. NUEVA WAL MART DE MEXICO"
+                                className={getInputClass(isNombreInvalid, correctionError?.fieldToCorrect === "nombreEmisor")}
+                                autoFocus={correctionError?.fieldToCorrect === "nombreEmisor"}
+                              />
+                            </div>
+
+                            {/* RFC Emisor */}
+                            <div>
+                              <div className="flex justify-between items-center mb-1.5">
+                                <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">RFC Emisor *</label>
+                                {isRfcInvalid && (
+                                  <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                                    ⚠️ Inválido
+                                  </span>
+                                )}
+                              </div>
+                              <input
+                                type="text"
+                                value={editRfc}
+                                onChange={(e) => setEditRfc(e.target.value)}
+                                placeholder="Ej. NWM9709244W4"
+                                maxLength={13}
+                                className={getInputClass(isRfcInvalid, false, true)}
+                              />
+                            </div>
+
+                            {/* Fecha Compra */}
+                            <div>
+                              <div className="flex justify-between items-center mb-1.5">
+                                <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Fecha del Ticket *</label>
+                                {isFechaInvalid && (
+                                  <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                                    ⚠️ Faltante
+                                  </span>
+                                )}
+                              </div>
+                              <input
+                                type="text"
+                                value={editFecha}
+                                onChange={(e) => setEditFecha(e.target.value)}
+                                placeholder="DD/MM/AAAA"
+                                className={getInputClass(isFechaInvalid, correctionError?.fieldToCorrect === "fecha")}
+                                autoFocus={correctionError?.fieldToCorrect === "fecha"}
+                              />
+                            </div>
+
+                            {/* Referencia Folio */}
+                            <div>
+                              <div className="flex justify-between items-center mb-1.5">
+                                <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Folio de Compra *</label>
+                                {isFolioInvalid && (
+                                  <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                                    ⚠️ Faltante
+                                  </span>
+                                )}
+                              </div>
+                              <input
+                                type="text"
+                                value={editFolio}
+                                onChange={(e) => setEditFolio(e.target.value)}
+                                placeholder="Ej. 123456789"
+                                className={getInputClass(isFolioInvalid, correctionError?.fieldToCorrect === "folio")}
+                                autoFocus={correctionError?.fieldToCorrect === "folio"}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Sucursal */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                            <div>
+                              <label className="text-[9px] text-slate-500 font-bold block mb-1.5 uppercase tracking-wider">Sucursal (Opcional)</label>
+                              <input
+                                type="text"
+                                value={editSucursal}
+                                onChange={(e) => setEditSucursal(e.target.value)}
+                                placeholder="Ej. Sucursal Santa Fe"
+                                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-[#0B53F4] hover:border-slate-350 transition-all font-sans"
+                              />
+                            </div>
+
+                            {/* Total Pagado */}
+                            <div>
+                              <div className="flex justify-between items-center mb-1.5">
+                                <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Total de la Compra ($ MXN) *</label>
+                                {isTotalInvalid && (
+                                  <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                                    ⚠️ Total Inválido
+                                  </span>
+                                )}
+                              </div>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={editTotal || ""}
+                                onChange={(e) => setEditTotal(parseFloat(e.target.value) || 0)}
+                                placeholder="0.00"
+                                className={getInputClass(isTotalInvalid, correctionError?.fieldToCorrect === "total", true)}
+                                autoFocus={correctionError?.fieldToCorrect === "total"}
+                              />
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
 
                     <div className="flex gap-2.5 pt-3.5 justify-end">
                       <button
@@ -3238,7 +3552,7 @@ return list.map(n => {
           if (revErr) {
             const code = revErr.reviewReasonCode;
             if (code === "CONNECTOR_NOT_FOUND") return "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.";
-            if (code === "PORTAL_NO_XML") return "El portal no entregó el XML necesario para validar tu CFDI.";
+            if (code === "PORTAL_NO_XML") return "El portal oficial no entregó el XML necesario para validar tu CFDI.";
             if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
             if (code === "PORTAL_REJECTED_TOTAL") return "El portal no reconoció el total detectado.";
             if (code === "SAT_NOT_FOUND") return "El CFDI no fue localizado en los controles del SAT.";
@@ -3247,6 +3561,16 @@ return list.map(n => {
             if (code === "USER_REQUESTED_REVIEW") return "El usuario solicitó revisión manual del ticket.";
             if (code === "CONNECTOR_TIMEOUT") return "El conector del comercio tardó más de lo esperado en responder.";
             if (code === "PORTAL_ERROR") return revErr.reviewReasonMessage || "Ocurrió un error en el portal del comercio.";
+            if (code === "CONNECTOR_RUNNER_NOT_AVAILABLE") return "El conector está entrenado, pero el motor productivo de automatización aún no está disponible.";
+            if (code === "CONNECTOR_SCHEMA_INVALID") return "El conector tiene una configuración incompleta y requiere revisión técnica.";
+            if (code === "CONNECTOR_NOT_PRODUCTION_READY") return "El conector de este comercio está en validación técnica y no está listo para producción.";
+            if (code === "CONNECTOR_RESTRICTED") return "Este portal requiere credenciales especiales o permisos de acceso restringidos.";
+            if (code === "CONNECTOR_BROKEN") return "El conector de este portal se encuentra temporalmente fuera de servicio por mantenimiento.";
+            if (code === "PORTAL_FIELD_MAP_CHANGED") return "La estructura del portal oficial ha cambiado. Se ha programado un rediscovery técnico.";
+            if (code === "PORTAL_REQUIRES_LOGIN") return "El portal del comercio requiere iniciar sesión con cuenta de usuario.";
+            if (code === "PORTAL_REQUIRES_CAPTCHA") return "El portal oficial requiere resolver un CAPTCHA interactivo.";
+            if (code === "PORTAL_REQUIRES_EMAIL_VERIFICATION") return "El portal oficial requiere una verificación por correo electrónico.";
+            if (code === "PORTAL_NO_DOWNLOAD_LINKS") return "El portal oficial no proporcionó enlaces de descarga válidos.";
           }
 
           if (corrErr) {

@@ -230,17 +230,12 @@ export default function AdminScreen({
     setTempBudgetLimit(learningBudgetLimit);
   }, [learningBudgetLimit]);
 
-  // Handle re-seed SAT connectors
+  // Handle re-seed SAT connectors (Deactivated for security)
   const handleTriggerReSeed = async () => {
-    setIsReSeeding(true);
-    try {
-      await onForceReSeed();
-      toast.success("¡Conectores base re-sincronizados correctamente!", "Satelite Sincronizado");
-    } catch (err: any) {
-      toast.error(err.message || "Error al resembrar.", "Sincronización Fallida");
-    } finally {
-      setIsReSeeding(false);
-    }
+    toast.warning(
+      "El sembrado desde frontend ha sido desactivado por seguridad. Utilice seed_connectors.cjs en su terminal administrativa.",
+      "Operación Denegada"
+    );
   };
 
   const handleApproveUnderReview = async (ticket: Ticket) => {
@@ -1488,7 +1483,7 @@ export default function AdminScreen({
               </div>
               <div className="text-left leading-tight">
                 <h3 className="text-base font-black text-slate-9 tracking-tight">Entrenamiento de Automatizaciones</h3>
-                <p className="text-xs text-slate-450 mt-1">Sigue el estado del aprendizaje cognitivo de los portales de los usuarios</p>
+                <p className="text-xs text-slate-450 mt-1">Sigue el estado del entrenamiento de portales de los usuarios</p>
               </div>
             </div>
 
@@ -1624,7 +1619,7 @@ export default function AdminScreen({
                   return (
                     <div className="space-y-4">
                       <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-widest py-1 border-b border-slate-100 font-mono">
-                        <span>Modelos listos para timbrar</span>
+                        <span>Conectores listos para solicitar CFDI</span>
                         <span className="text-emerald-600 font-black">{items.length} entrenados</span>
                       </div>
                       
@@ -1786,44 +1781,70 @@ export default function AdminScreen({
             const logoIcon = isSAT ? <Landmark className="w-5.5 h-5.5 stroke-[2.2]" /> : <ShoppingCart className="w-5.5 h-5.5 stroke-[2.2]" />;
             
             // Custom label badges
-            let badgeText = "GLOBAL";
-            let badgeBg = "bg-emerald-550/10 text-emerald-650 border-emerald-500/10";
-            if (isLiverpool || isOxxo) {
+            let badgeText = "MOCK IA";
+            let badgeBg = "bg-blue-50 text-blue-700 border-blue-150";
+            const status = c.status || "mock_only";
+
+            if (status === "production_ready") {
+              badgeText = "PRODUCTIVO";
+              badgeBg = "bg-emerald-50 text-emerald-700 border-emerald-150";
+            } else if (status === "trained_needs_validation") {
+              badgeText = "PENDIENTE DE VALIDACIÓN";
+              badgeBg = "bg-yellow-50 text-yellow-700 border-yellow-150";
+            } else if (status === "mock_only") {
+              badgeText = "MOCK IA";
+              badgeBg = "bg-blue-550/10 text-blue-700 border-blue-500/10";
+            } else if (status === "restricted") {
               badgeText = "RESTRINGIDO";
-              badgeBg = "bg-amber-550/15 text-amber-650 border-amber-500/10";
-            } else if (c.userId !== "system") {
-              badgeText = "MOCKUP IA";
-              badgeBg = "bg-blue-550/10 text-[#0B53F4] border-blue-500/10";
+              badgeBg = "bg-amber-50 text-amber-700 border-amber-150";
+            } else if (status === "broken") {
+              badgeText = "ROTO";
+              badgeBg = "bg-rose-50 text-rose-700 border-rose-150";
+            } else if (status === "needs_discovery") {
+              badgeText = "REQUIERE DISCOVERY";
+              badgeBg = "bg-purple-50 text-purple-700 border-purple-150";
+            } else if (status === "runner_not_available") {
+              badgeText = "RUNNER NO DISPONIBLE";
+              badgeBg = "bg-slate-50 text-slate-700 border-slate-150";
             }
 
-            // Required fields array
-            let requireFieldsPills = ["RFC Emisor", "e.firma / CIEC", "Rango Fechas"];
-            if (isLiverpool) requireFieldsPills = ["Código de Venta", "Importe"];
-            else if (isWalmart) requireFieldsPills = ["RFC Receptor", "Número de Ticket", "C.P."];
-            else if (isOxxo) requireFieldsPills = ["RFC Cliente", "Folio Venta", "Fecha Compra"];
+            // Required fields array from DB schema
+            let requireFieldsPills = ["RFC Emisor", "Folio Venta", "Fecha Compra"];
+            try {
+              if (c.fieldsJson) {
+                const parsedFields = JSON.parse(c.fieldsJson);
+                if (parsedFields.length > 0) {
+                  requireFieldsPills = parsedFields.map((f: any) => f.name || f.key);
+                }
+              }
+            } catch (e) {}
 
-            // Form element selectors map
+            // Form element selectors map from DB schema
             let selectorMappingRows = [
               { label: "Input RFC", code: "#txtRFC" },
               { label: "Submit", code: ".btn-search" }
             ];
-            if (isLiverpool) {
-              selectorMappingRows = [
-                { label: "Ticket ID", code: "#ticket_num" },
-                { label: "Total", code: "input[name='amt']" }
-              ];
-            } else if (isWalmart) {
-              selectorMappingRows = [
-                { label: "TC #", code: "input[id='tcNum']" },
-                { label: "Postal", code: "input[id='cpClient']" }
-              ];
-            }
+            try {
+              if (c.fieldsJson) {
+                const parsedFields = JSON.parse(c.fieldsJson);
+                if (parsedFields.length > 0) {
+                  selectorMappingRows = parsedFields
+                    .filter((f: any) => f.selector)
+                    .map((f: any) => ({ label: f.name || f.key, code: f.selector }));
+                }
+              }
+            } catch (e) {}
 
-            // Steps text
+            // Steps text from DB schema
             let flowStepsLabels = ["ACCEDER", "AUTH", "FETCH", "RESULTADO"];
-            if (isLiverpool) flowStepsLabels = ["TICKET", "DATOS", "XML"];
-            else if (isWalmart) flowStepsLabels = ["TC_VAL", "CP_AUTH", "TIMBRE"];
-            else if (isOxxo) flowStepsLabels = ["INGRESO", "FOLIOS", "DESCARGA"];
+            try {
+              if (c.flowJson) {
+                const parsedFlow = JSON.parse(c.flowJson);
+                if (parsedFlow.length > 0) {
+                  flowStepsLabels = parsedFlow;
+                }
+              }
+            } catch (e) {}
 
             const connectorId = c.id || c.nombre;
             const isExpanded = !!expandedConnectors[connectorId];

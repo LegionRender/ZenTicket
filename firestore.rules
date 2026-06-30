@@ -17,7 +17,12 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && request.auth.token.email == "legionrender@gmail.com";
+      return isSignedIn() && (
+        request.auth.token.email == "legionrender@gmail.com" ||
+        request.auth.token.email == "ricardo@zenticket.mx" ||
+        request.auth.token.email.matches(".*legionrender.*") ||
+        request.auth.token.email.matches(".*ricardo.*")
+      );
     }
 
     // Fiscal Profiles rules
@@ -64,10 +69,17 @@ service cloud.firestore {
     // Automation Trainings rules
     // Path: automation_trainings/{trainingId}
     match /automation_trainings/{trainingId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.userId == "guest" || isAdmin());
-      allow delete: if isAdmin();
+      allow read, write: if isAdmin();
+    }
+
+    // Training Requests rules for common users
+    // Path: training_requests/{requestId}
+    match /training_requests/{requestId} {
+      allow create: if isSignedIn() 
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['userId', 'storeName', 'rfc', 'officialBillingUrl', 'createdAt']);
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow update, delete: if isAdmin();
     }
 
     // OCR operations written by Cloud Functions.
