@@ -675,8 +675,8 @@ export default function TicketsListScreen({
                            .header-info-row {
                              width: 100%;
                              display: grid;
-                             grid-template-columns: 1fr 1fr;
-                             gap: 40px;
+                             grid-template-columns: 1.15fr 0.85fr;
+                             gap: 30px;
                              align-items: flex-start;
                            }
 
@@ -993,21 +993,6 @@ export default function TicketsListScreen({
                             z-index: 10;
                           }
 
-                          @media print {
-                            body {
-                              background-color: #ffffff;
-                              padding: 0 !important;
-                              margin: 0 !important;
-                            }
-                            .page-wrapper {
-                              border: none !important;
-                              box-shadow: none !important;
-                              padding: 0 !important;
-                              margin: 0 !important;
-                              max-width: 100% !important;
-                              border-radius: 0 !important;
-                            }
-                          }
                         </style>
                                       <div class="page-wrapper">
                           
