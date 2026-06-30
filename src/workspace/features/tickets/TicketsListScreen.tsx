@@ -1448,7 +1448,7 @@ export default function TicketsListScreen({
             type="button"
             onClick={() => {
               const ticketStatus = associatedTicket ? associatedTicket.status : "cfdi_validated";
-              const isAllowed = ticketStatus === "merchant_cfdi_downloaded" || ticketStatus === "cfdi_validated";
+              const isAllowed = ticketStatus === "cfdi_validated";
               
               if (!isAllowed || !activeInvoiceData.xmlContent) {
                 toast.error(
@@ -2145,7 +2145,7 @@ export default function TicketsListScreen({
                           onClick={() => {
                             const associatedT = tickets.find(t => t.id === inv.ticketId || t.invoiceId === inv.folioFiscal);
                             const ticketStatus = associatedT ? associatedT.status : "cfdi_validated";
-                            const isAllowed = ticketStatus === "merchant_cfdi_downloaded" || ticketStatus === "cfdi_validated";
+                            const isAllowed = ticketStatus === "cfdi_validated";
                             
                             if (!isAllowed || !inv.xmlContent) {
                               toast.error(
@@ -2187,7 +2187,7 @@ export default function TicketsListScreen({
                         onClick={() => {
                           const associatedT = tickets.find(t => t.id === inv.ticketId || t.invoiceId === inv.folioFiscal);
                           const ticketStatus = associatedT ? associatedT.status : "cfdi_validated";
-                          const isAllowed = ticketStatus === "merchant_cfdi_downloaded" || ticketStatus === "cfdi_validated";
+                          const isAllowed = ticketStatus === "cfdi_validated";
                           
                           if (!isAllowed || !inv.xmlContent) {
                             toast.error(

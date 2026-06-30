@@ -85,11 +85,70 @@ export interface ExtractedTicketData {
   ocrError?: string;
 }
 
+export type TicketStatus = 
+  | "uploaded"
+  | "ocr_processing"
+  | "connector_detected"
+  | "missing_required_fields"
+  | "queued_for_runner"
+  | "runner_processing"
+  | "merchant_cfdi_downloaded"
+  | "xml_structure_validated"
+  | "sat_validation_pending"
+  | "cfdi_validated"
+  | "requires_manual_review"
+  | "failed"
+  // Backwards compatibility
+  | "extracted"
+  | "processing"
+  | "completed"
+  | "review"
+  | "requires_user_correction"
+  | "cancelled_by_user";
+
+export type InvoiceJobStatus = 
+  | "pending"
+  | "locked"
+  | "running"
+  | "waiting_user_input"
+  | "downloaded"
+  | "validating_xml"
+  | "validating_sat"
+  | "succeeded"
+  | "failed"
+  | "manual_review"
+  | "cancelled";
+
+export type ReviewReasonCode = 
+  | "CONNECTOR_NOT_FOUND"
+  | "CONNECTOR_NOT_PRODUCTION_READY"
+  | "CONNECTOR_RUNNER_NOT_AVAILABLE"
+  | "PORTAL_MAP_NOT_FOUND"
+  | "PORTAL_MAP_NOT_APPROVED"
+  | "MISSING_REQUIRED_FIELDS"
+  | "CAPTCHA_DETECTED"
+  | "PORTAL_TIMEOUT"
+  | "PORTAL_CHANGED"
+  | "PORTAL_RETURNED_ERROR"
+  | "XML_NOT_DOWNLOADED"
+  | "PDF_NOT_DOWNLOADED"
+  | "XML_STRUCTURE_INVALID"
+  | "XML_RFC_MISMATCH"
+  | "XML_TOTAL_MISMATCH"
+  | "XML_UUID_MISSING"
+  | "SAT_STATUS_NOT_FOUND"
+  | "SAT_STATUS_CANCELLED"
+  | "SAT_VALIDATION_UNAVAILABLE"
+  | "UNKNOWN_RUNNER_ERROR"
+  // Backwards compatibility
+  | "CONNECTOR_SCHEMA_INVALID"
+  | "USER_REQUESTED_REVIEW";
+
 export interface Ticket {
   id?: string;
   userId: string;
   imageUrl: string;
-  status: "extracted" | "processing" | "completed" | "failed" | "review" | "requires_user_correction" | "requires_manual_review" | "cfdi_validated" | "cancelled_by_user";
+  status: TicketStatus;
   rfcEmisor?: string;
   nombreEmisor?: string;
   fechaCompra?: string;
@@ -112,6 +171,39 @@ export interface Ticket {
   processingMessage?: string;
   startedAt?: string;
   finishedAt?: string;
+  updatedAt?: string;
+}
+
+export interface InvoiceJob {
+  id?: string;
+  ticketId: string;
+  userId: string;
+  status: InvoiceJobStatus;
+  connectorId: string;
+  ticketDataSnapshot: ExtractedTicketData;
+  fiscalProfileSnapshot: FiscalProfile;
+  lockedBy?: string | null;
+  lockedAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  attempts: number;
+  maxAttempts?: number;
+  lastError?: string | null;
+  lastErrorTime?: string | null;
+  waitingForFields?: string[];
+  userInputData?: Record<string, string>;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface PortalMap {
+  id?: string;
+  connectorId: string;
+  url: string;
+  selectorsJson: string; // CSS selectors
+  isApproved: boolean;
+  approvedBy?: string;
+  createdAt: string;
   updatedAt?: string;
 }
 

@@ -36,7 +36,7 @@ const connectorsSeed = [
       "5. Guardar documentos PDF y XML generados"
     ]),
     createdAt: new Date().toISOString(),
-    status: "runner_not_available", // Corrected classification (no active runner)
+    status: "runner_not_available",
     isProductionReady: false,
     isMock: false,
     isRestricted: false,
@@ -61,7 +61,7 @@ const connectorsSeed = [
       "5. Consolidar documentos digitales en almacén"
     ]),
     createdAt: new Date().toISOString(),
-    status: "runner_not_available", // Corrected classification
+    status: "runner_not_available",
     isProductionReady: false,
     isMock: false,
     isRestricted: false,
@@ -86,7 +86,7 @@ const connectorsSeed = [
       "5. Almacenar facturas PDF y XML"
     ]),
     createdAt: new Date().toISOString(),
-    status: "runner_not_available", // Corrected classification
+    status: "runner_not_available",
     isProductionReady: false,
     isMock: false,
     isRestricted: false,
@@ -150,27 +150,64 @@ async function seedConnectors() {
   console.log("Starting administrative connectors seed run...");
   try {
     for (const item of connectorsSeed) {
+      let connectorId;
       const snapshot = await db.collection("connectors")
         .where("rfc", "==", item.rfc)
         .get();
 
       if (!snapshot.empty) {
         const docRef = snapshot.docs[0].ref;
+        connectorId = docRef.id;
         await docRef.update({
           ...item,
           userId: "system"
         });
-        console.log(`Updated existing conector: ${item.nombre} (ID: ${docRef.id})`);
+        console.log(`Updated existing conector: ${item.nombre} (ID: ${connectorId})`);
       } else {
         const docRef = db.collection("connectors").doc();
+        connectorId = docRef.id;
         await docRef.set({
           ...item,
           userId: "system"
         });
-        console.log(`Created new seed conector: ${item.nombre} (ID: ${docRef.id})`);
+        console.log(`Created new seed conector: ${item.nombre} (ID: ${connectorId})`);
+      }
+
+      // Seed corresponding PortalMap
+      // Oxxo & Walmart -> Approved
+      // Starbucks -> Unapproved
+      // Farmacias Similares -> No portal map seeded (to test not found)
+      if (item.rfc !== "FSI120304XYZ" && item.rfc !== "SOR990805111") {
+        const isApproved = item.rfc !== "SHE190630TX1"; // Starbucks unapproved
+        const portalMapSnapshot = await db.collection("portal_maps")
+          .where("connectorId", "==", connectorId)
+          .get();
+
+        const portalMapData = {
+          connectorId,
+          url: item.portalUrl,
+          selectorsJson: JSON.stringify({
+            txtRfc: "input#rfc",
+            btnSubmit: "button#submit"
+          }),
+          isApproved,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        if (!portalMapSnapshot.empty) {
+          await portalMapSnapshot.docs[0].ref.update({
+            isApproved,
+            updatedAt: new Date().toISOString()
+          });
+          console.log(`Updated portal map for: ${item.nombre} (Approved: ${isApproved})`);
+        } else {
+          await db.collection("portal_maps").add(portalMapData);
+          console.log(`Created portal map for: ${item.nombre} (Approved: ${isApproved})`);
+        }
       }
     }
-    console.log("Connectors seed run successfully completed!");
+    console.log("Connectors and Portal Maps seed run successfully completed!");
   } catch (err) {
     console.error("Critical seed failure:", err.message);
   }

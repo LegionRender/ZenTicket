@@ -1,0 +1,17 @@
+{
+  "name": "zenticket-runner",
+  "version": "1.0.0",
+  "description": "Production runner backend infrastructure for Playwright robotization",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "tsc && node dist/index.js",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

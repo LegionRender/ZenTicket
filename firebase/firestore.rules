@@ -96,5 +96,23 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
       allow create: if isAdmin();
     }
+    // Invoice Jobs rules
+    match /invoice_jobs/{jobId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // Portal Maps rules
+    match /portal_maps/{mapId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Runner Logs rules
+    match /runner_logs/{logId} {
+      allow read, write: if isAdmin();
+    }
   }
 }

@@ -12,7 +12,7 @@ import {
 import { useToast } from "@/shared/feedback/Toast";
 import { db, auth } from "@/services/firebase/firebase";
 import { handleFirestoreError, OperationType } from "@/services/firebase/firestore-helper";
-import { doc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, setDoc, updateDoc, collection, query, where, getDocs, addDoc } from "firebase/firestore";
 import { AnimatePresence, motion } from "motion/react";
 import { useAuth } from "@/auth/context/AuthContext";
 import logoLight from "@/assets/logos/logo-light.png";
@@ -1376,14 +1376,12 @@ export default function ScannerAndSimulator({
         return;
       }
 
-      // Scheme validation & runner availability checks
+      // Scheme validation
       let fieldsSchema = [];
       let flowSteps = [];
       try {
         fieldsSchema = JSON.parse(activeConn.fieldsJson || "[]");
         flowSteps = JSON.parse(activeConn.flowJson || "[]");
-        
-        // Check fields schema integrity
         const hasInvalidField = fieldsSchema.some((f: any) => !f.key || !f.name || !f.selector || !f.type || f.required === undefined || !f.source);
         if (hasInvalidField) {
           throw new Error("Esquema de campos inválido.");
@@ -1409,19 +1407,36 @@ export default function ScannerAndSimulator({
       }
 
       // Check runner availability
-      if (activeConn.runnerAvailable !== true || activeConn.status !== "production_ready") {
-        let code: "CONNECTOR_RUNNER_NOT_AVAILABLE" | "CONNECTOR_NOT_PRODUCTION_READY" | "CONNECTOR_RESTRICTED" | "CONNECTOR_BROKEN" = "CONNECTOR_RUNNER_NOT_AVAILABLE";
-        let msg = "El conector está entrenado, pero el motor productivo de automatización aún no está disponible.";
+      if (activeConn.runnerAvailable !== true) {
+        const runnerErr: ReviewError = {
+          reviewReasonCode: "CONNECTOR_RUNNER_NOT_AVAILABLE",
+          reviewReasonMessage: "El conector está entrenado, pero el motor productivo de automatización aún no está disponible.",
+          lastAutomationStep: "connector_resolving",
+          connectorAttempted: true,
+          connectorId: activeConn.id || null,
+          connectorName: activeConn.nombre || null,
+          portalErrorMessage: "Runner not available"
+        };
+        await onUpdateTicketInDb(activeTicketId, {
+          status: "requires_manual_review",
+          errorMsg: runnerErr.reviewReasonMessage,
+          reviewError: runnerErr as any
+        });
+        await addAutomationEvent("connector_resolving", "failed", runnerErr.reviewReasonMessage, undefined, "CONNECTOR_RUNNER_NOT_AVAILABLE");
+        setIsAutomatingLoading(false);
+        return;
+      }
 
+      // Check connector status
+      if (activeConn.status !== "production_ready") {
+        let code: "CONNECTOR_NOT_PRODUCTION_READY" | "CONNECTOR_RESTRICTED" | "CONNECTOR_BROKEN" = "CONNECTOR_NOT_PRODUCTION_READY";
+        let msg = "El conector de este comercio está en validación técnica y no está listo para producción.";
         if (activeConn.status === "restricted") {
           code = "CONNECTOR_RESTRICTED";
           msg = "Este portal requiere credenciales especiales o permisos de acceso restringidos.";
         } else if (activeConn.status === "broken") {
           code = "CONNECTOR_BROKEN";
           msg = "El conector de este portal se encuentra temporalmente fuera de servicio por mantenimiento.";
-        } else if (activeConn.status === "trained_needs_validation" || activeConn.status === "mock_only") {
-          code = "CONNECTOR_NOT_PRODUCTION_READY";
-          msg = "El conector de este comercio está en validación técnica y no está listo para producción.";
         }
 
         const runnerErr: ReviewError = {
@@ -1431,9 +1446,8 @@ export default function ScannerAndSimulator({
           connectorAttempted: true,
           connectorId: activeConn.id || null,
           connectorName: activeConn.nombre || null,
-          portalErrorMessage: `Runner not available. Status: ${activeConn.status || "N/A"}`
+          portalErrorMessage: `Connector status: ${activeConn.status}`
         };
-        
         await onUpdateTicketInDb(activeTicketId, {
           status: "requires_manual_review",
           errorMsg: runnerErr.reviewReasonMessage,
@@ -1444,87 +1458,147 @@ export default function ScannerAndSimulator({
         return;
       }
 
+      // Check portalMap
+      await addLog("🔌 Verificando mapa de navegación oficial (portalMap)...", 500);
+      const portalMapsRef = collection(db, "portal_maps");
+      const q = query(portalMapsRef, where("connectorId", "==", activeConn.id || ""));
+      const portalMapsSnap = await getDocs(q);
+
+      if (portalMapsSnap.empty) {
+        const mapErr: ReviewError = {
+          reviewReasonCode: "PORTAL_MAP_NOT_FOUND",
+          reviewReasonMessage: "No se encontró el mapa de navegación oficial para este portal.",
+          lastAutomationStep: "connector_resolving",
+          connectorAttempted: true,
+          connectorId: activeConn.id || null,
+          connectorName: activeConn.nombre || null,
+          portalErrorMessage: "Portal map not found"
+        };
+        await onUpdateTicketInDb(activeTicketId, {
+          status: "requires_manual_review",
+          errorMsg: mapErr.reviewReasonMessage,
+          reviewError: mapErr as any
+        });
+        await addAutomationEvent("connector_resolving", "failed", mapErr.reviewReasonMessage, undefined, "PORTAL_MAP_NOT_FOUND");
+        setIsAutomatingLoading(false);
+        return;
+      }
+
+      const pMap = portalMapsSnap.docs[0].data();
+      if (!pMap.isApproved) {
+        const mapErr: ReviewError = {
+          reviewReasonCode: "PORTAL_MAP_NOT_APPROVED",
+          reviewReasonMessage: "El mapa de navegación del portal aún no ha sido aprobado por el administrador.",
+          lastAutomationStep: "connector_resolving",
+          connectorAttempted: true,
+          connectorId: activeConn.id || null,
+          connectorName: activeConn.nombre || null,
+          portalErrorMessage: "Portal map not approved"
+        };
+        await onUpdateTicketInDb(activeTicketId, {
+          status: "requires_manual_review",
+          errorMsg: mapErr.reviewReasonMessage,
+          reviewError: mapErr as any
+        });
+        await addAutomationEvent("connector_resolving", "failed", mapErr.reviewReasonMessage, undefined, "PORTAL_MAP_NOT_APPROVED");
+        setIsAutomatingLoading(false);
+        return;
+      }
+
       await addAutomationEvent("connector_resolving", "success", `Portal oficial de facturación del comercio identificado como: ${activeConn.nombre}`);
+      await addLog(`✅ Mapa de navegación verificado y aprobado.`, 400);
 
-      setSimulationProgress(20);
-      await onUpdateTicketInDb(activeTicketId, { status: "pending_portal_submission" });
-      await addAutomationEvent("submitting_to_portal", "processing", `Enviando datos al portal oficial de ${activeConn.nombre}...`);
-      await addLog("🌐 Abriendo puerto seguro proxy para ingresar al portal", 800);
-      await addLog(`🌍 Conectando de forma segura con: ${activeConn.portalUrl}`, 1200);
-      setSimulationProgress(30);
-      await addLog("⌛ Esperando respuesta del portal de facturación oficial...", 1000);
+      // Validate required fields
+      await addLog("⚙️ Validando campos requeridos del ticket y perfil fiscal...", 400);
+      const missingFields: string[] = [];
 
-      // Simulate entering fields
       for (const field of fieldsSchema) {
-        let val = "";
-        if (field.key === "rfc") val = fiscalProfile.rfc;
-        else if (field.key === "folio") val = activeExtractedData.folio;
-        else if (field.key === "total") val = activeExtractedData.total.toString();
-        else if (field.key === "fecha") val = activeExtractedData.fechaCompra;
-        else val = "VAL_AUTO__";
-
-        await addLog(
-          `✏️ Llenando campo '${field.name}' (Selector: ${field.selector}) con valor '${val}'`,
-          1400
-        );
-      }
-      setSimulationProgress(50);
-      await onUpdateTicketInDb(activeTicketId, { status: "submitted_to_merchant" });
-      await addAutomationEvent("waiting_portal_result", "processing", "Esperando respuesta y descarga de archivos desde el portal...");
-
-      await addLog(`🚀 Presionando botón de consulta en el portal...`, 1200);
-      await addLog(`✅ Registro de Ticket validado en el portal corporativo exitosamente.`, 900);
-      setSimulationProgress(60);
-
-      await addLog(`🔄 Redirigiendo a pantalla de Datos Fiscales del Receptor...`, 1200);
-      await addLog(`✏️ Llenando RFC del cliente: '${fiscalProfile.rfc}' (Régimen: ${fiscalProfile.regimenFiscal})`, 1005);
-      await addLog(`✏️ Inyectando Razón Social: '${fiscalProfile.razonSocial}' (Código Postal: ${fiscalProfile.codigoPostal})`, 1001);
-      setSimulationProgress(75);
-
-      await addLog(`🔔 Procesando datos fiscales y validando Uso CFDI: '${fiscalProfile.usoCFDI}'`, 1200);
-      await addLog(`🖨️ Presionando botón 'Generar Factura / CFDI 4.0' en el portal emisor...`, 1500);
-      setSimulationProgress(90);
-
-      await addLog("📥 Solicitando descarga del comprobante generado desde el portal oficial del comercio...", 1200);
-
-      // Fire actual backend composition to build real XML & visually responsive PDF HTML layouts
-      const response = await runAutomation({
-        ticket: activeExtractedData,
-        profile: fiscalProfile,
-        connector: activeConn,
-      });
-
-      if (!response.ok) {
-        throw new Error("No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.");
+        if (field.required) {
+          if (field.source === "ticket") {
+            let val = "";
+            if (field.key === "referenciaFacturacion" || field.key === "folio") val = editFolio || activeExtractedData.folio || "";
+            else if (field.key === "total") val = (editTotal || activeExtractedData.total || "").toString();
+            else if (field.key === "fecha") val = editFecha || activeExtractedData.fechaCompra || "";
+            if (!val.trim()) {
+              missingFields.push(field.key);
+            }
+          } else if (field.source === "fiscalProfile") {
+            let val = "";
+            if (field.key === "rfcReceptor" || field.key === "rfc") val = fiscalProfile.rfc || "";
+            else if (field.key === "razonSocial") val = fiscalProfile.razonSocial || "";
+            else if (field.key === "codigoPostal") val = fiscalProfile.codigoPostal || "";
+            else if (field.key === "regimenFiscal") val = fiscalProfile.regimenFiscal || "";
+            else if (field.key === "usoCFDI") val = fiscalProfile.usoCFDI || "";
+            else if (field.key === "email") val = fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || "";
+            
+            if (!val.trim()) {
+              missingFields.push(field.key);
+            }
+          }
+        }
       }
 
-      const invoiceData = await response.json();
+      if (missingFields.length > 0) {
+        await addLog(`❌ Faltan campos requeridos: ${missingFields.join(", ")}`, 400);
+        await onUpdateTicketInDb(activeTicketId, {
+          status: "missing_required_fields",
+          errorMsg: `Faltan campos requeridos para este portal: ${missingFields.join(", ")}`,
+          missingFields: missingFields
+        } as any);
+        await addAutomationEvent("connector_resolving", "failed", `Faltan campos requeridos: ${missingFields.join(", ")}`, undefined, "MISSING_REQUIRED_FIELDS");
+        setIsAutomatingLoading(false);
+        return;
+      }
 
-      // Save Invoice data to Firestore
-      await onSaveInvoiceToDb(
-        activeTicketId,
-        invoiceData.xmlContent,
-        invoiceData.pdfHtml,
-        invoiceData.folioFiscal,
-        activeExtractedData.rfcEmisor,
-        activeExtractedData.nombreEmisor,
-        activeExtractedData.total,
-        invoiceData.cost !== undefined ? invoiceData.cost : (isConnectorNewlyLearned ? 15.00 : 2.50),
-        isConnectorNewlyLearned ? "nuevo" : "existente",
-        invoiceData.rawCost !== undefined ? invoiceData.rawCost : 0
-      );
+      await addLog("✅ Todos los campos requeridos validados.", 300);
+      setSimulationProgress(40);
 
-      // update ticket state
+      // Create snapshots
+      await addLog("📥 Creando ticketDataSnapshot y fiscalProfileSnapshot...", 300);
+      const ticketDataSnapshot: ExtractedTicketData = {
+        rfcEmisor: activeExtractedData.rfcEmisor || "",
+        nombreEmisor: activeExtractedData.nombreEmisor || "",
+        fechaCompra: editFecha || activeExtractedData.fechaCompra || "",
+        folio: editFolio || activeExtractedData.folio || "",
+        total: parseFloat((editTotal || activeExtractedData.total || 0).toString()),
+        sucursal: editSucursal || activeExtractedData.sucursal || "",
+        items: activeExtractedData.items || []
+      };
+
+      const fiscalProfileSnapshot: FiscalProfile = {
+        userId: fiscalProfile.userId,
+        rfc: fiscalProfile.rfc,
+        razonSocial: fiscalProfile.razonSocial,
+        regimenFiscal: fiscalProfile.regimenFiscal,
+        codigoPostal: fiscalProfile.codigoPostal,
+        usoCFDI: fiscalProfile.usoCFDI,
+        correoElectronico: fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || "",
+        createdAt: fiscalProfile.createdAt
+      };
+
+      // Create the invoice_job document
+      await addLog("📥 Encolando job en la colección invoice_jobs...", 400);
+      const jobData = {
+        ticketId: activeTicketId,
+        userId: fiscalProfile.userId,
+        status: "pending",
+        connectorId: activeConn.id || "",
+        ticketDataSnapshot,
+        fiscalProfileSnapshot,
+        attempts: 0,
+        createdAt: new Date().toISOString()
+      };
+
+      const jobsCollection = collection(db, "invoice_jobs");
+      await addDoc(jobsCollection, jobData);
+      
       await onUpdateTicketInDb(activeTicketId, {
-        status: "merchant_cfdi_downloaded",
-        invoiceId: invoiceData.folioFiscal,
+        status: "queued_for_runner",
+        connectorId: activeConn.id || ""
       });
-      await addAutomationEvent("sat_verifying", "processing", "Factura obtenida. Validando autenticidad y vigencia ante el SAT...");
 
-      await addLog("CFDI obtenido desde el portal del comercio.", 800);
-      await addLog(`📥 Archivos PDF & XML descargados en almacén virtual de ZenTicket.`, 500);
-      await addLog(`🎉 ¡Procesamiento completado con éxito!`, 200);
-
+      await addAutomationEvent("connector_resolving", "success", "Ticket encolado para procesamiento por el motor robotizado.");
+      await addLog("🎉 ¡Ticket encolado con éxito para procesamiento automático!", 400);
       setSimulationProgress(100);
 
       // Redirect immediately to tickets tab and trigger the highlight
@@ -1539,38 +1613,20 @@ export default function ScannerAndSimulator({
     } catch (err: any) {
       console.error(err);
       const errMessage = err.message || "";
-      await addLog(`❌ ERROR: ${errMessage || "No fue posible completar la solicitud en el portal de facturación del comercio."}`, 200);
-
-      let reasonCode: "CONNECTOR_NOT_FOUND" | "CONNECTOR_TIMEOUT" | "PORTAL_ERROR" | "PORTAL_NO_XML" | "SAT_NOT_FOUND" | "SAT_CANCELED" | "SAT_TIMEOUT" | "SAT_VERIFICATION_ERROR" | "INVALID_XML_STRUCTURE" = "PORTAL_ERROR";
-
-      if (errMessage.includes("timeout") || errMessage.includes("Timeout")) {
-        reasonCode = "CONNECTOR_TIMEOUT";
-      } else if (errMessage.includes("XML") && (errMessage.includes("no") || errMessage.includes("sin"))) {
-        reasonCode = "PORTAL_NO_XML";
-      } else if (errMessage.includes("SAT") && errMessage.includes("no localizado")) {
-        reasonCode = "SAT_NOT_FOUND";
-      } else if (errMessage.includes("SAT") && errMessage.includes("cancelado")) {
-        reasonCode = "SAT_CANCELED";
-      } else if (errMessage.includes("SAT") && errMessage.includes("timeout")) {
-        reasonCode = "SAT_TIMEOUT";
-      } else if (errMessage.includes("SAT") && errMessage.includes("error")) {
-        reasonCode = "SAT_VERIFICATION_ERROR";
-      } else if (errMessage.includes("estructura") || errMessage.includes("XML inválido") || errMessage.includes("structure")) {
-        reasonCode = "INVALID_XML_STRUCTURE";
-      }
+      await addLog(`❌ ERROR: ${errMessage}`, 200);
 
       const reviewErr: ReviewError = {
-        reviewReasonCode: reasonCode,
-        reviewReasonMessage: errMessage || "No fue posible completar la solicitud en el portal de facturación del comercio.",
-        lastAutomationStep: "waiting_portal_result",
+        reviewReasonCode: "UNKNOWN_RUNNER_ERROR",
+        reviewReasonMessage: errMessage || "Error desconocido al encolar el job.",
+        lastAutomationStep: "connector_resolving",
         connectorAttempted: true,
         connectorId: activeConn?.id || null,
         connectorName: activeConn?.nombre || null,
-        portalErrorMessage: errMessage ? errMessage.replace(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi, "***") : "Portal error"
+        portalErrorMessage: errMessage
       };
 
       if (activeTicketId) {
-        await addAutomationEvent("waiting_portal_result", "failed", reviewErr.reviewReasonMessage, undefined, reasonCode);
+        await addAutomationEvent("connector_resolving", "failed", reviewErr.reviewReasonMessage, undefined, "UNKNOWN_RUNNER_ERROR");
         await onUpdateTicketInDb(activeTicketId, {
           status: "requires_manual_review",
           errorMsg: reviewErr.reviewReasonMessage,
