@@ -3,20 +3,17 @@ import { getFirestore } from "firebase-admin/firestore";
 let activeJobId: string | null = null;
 let activeTicketId: string | null = null;
 let activeConnectorId: string | null = null;
-let activeJobPilotMode = false;
 let activeEnvironment: string | null = null;
 
 export function setActiveJobContext(
   jobId: string | null,
   ticketId: string | null,
   connectorId: string | null,
-  pilotMode: boolean,
   environment: string | null
 ) {
   activeJobId = jobId;
   activeTicketId = ticketId;
   activeConnectorId = connectorId;
-  activeJobPilotMode = pilotMode;
   activeEnvironment = environment;
 }
 
@@ -41,9 +38,8 @@ export async function createRunnerLog(
     createdAt: timestamp
   };
 
-  // Inject pilot context details if this is the active running job
+  // Inject context details if this is the active running job
   if (activeJobId === jobId) {
-    payload.pilotMode = activeJobPilotMode;
     payload.connectorId = activeConnectorId;
     if (activeEnvironment) {
       payload.environment = activeEnvironment;

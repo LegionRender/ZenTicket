@@ -155,13 +155,6 @@ export default function AdminScreen({
   const [isTrackerActivosModalOpen, setIsTrackerActivosModalOpen] = useState(false);
   const [isTrackerAprendidosModalOpen, setIsTrackerAprendidosModalOpen] = useState(false);
 
-  // Pilot Mode state variables
-  const [pilotConnector, setPilotConnector] = useState<Connector | null>(null);
-  const [selectedPilotTicketId, setSelectedPilotTicketId] = useState<string>("");
-  const [manualPilotTicketId, setManualPilotTicketId] = useState<string>("");
-  const [confirmPilotTerms, setConfirmPilotTerms] = useState<boolean>(false);
-  const [isPilotEnqueuing, setIsPilotEnqueuing] = useState<boolean>(false);
-
   useEffect(() => {
     const q = query(collection(db, "automation_trainings"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(
@@ -293,169 +286,7 @@ export default function AdminScreen({
     }
   };
 
-  const enqueuePilotInvoiceJob = async (ticketId: string, connectorId: string) => {
-    const emailLower = auth.currentUser?.email?.toLowerCase() || "";
-    const isAdmin = emailLower && (emailLower.includes("legionrender") || emailLower.includes("ricardo"));
-    if (!isAdmin) {
-      toast.error("Acción denegada: Solo los administradores pueden ejecutar pruebas piloto.");
-      return;
-    }
 
-    setIsPilotEnqueuing(true);
-    try {
-      // 1. Read fresh ticket from Firestore
-      const ticketRef = doc(db, "tickets", ticketId);
-      const ticketSnap = await getDoc(ticketRef);
-      if (!ticketSnap.exists()) {
-        toast.error("El ticket seleccionado no existe.");
-        return;
-      }
-      const ticketData = ticketSnap.data();
-
-      // 2. Read connector
-      const connRef = doc(db, "connectors", connectorId);
-      const connSnap = await getDoc(connRef);
-      if (!connSnap.exists()) {
-        toast.error("El conector seleccionado no existe.");
-        return;
-      }
-      const connData = connSnap.data();
-
-      // 3. Read portalMap
-      const pmQuery = query(collection(db, "portal_maps"), where("connectorId", "==", connectorId));
-      const pmSnap = await getDocs(pmQuery);
-      if (pmSnap.empty) {
-        toast.error("No se encontró el mapa de navegación (portalMap) para este conector.");
-        return;
-      }
-      const portalMapData = pmSnap.docs[0].data();
-      if (!portalMapData.isApproved) {
-        toast.error("El mapa de navegación (portalMap) aún no ha sido aprobado por el administrador.");
-        return;
-      }
-
-      // 4. Validate portalFields
-      const pFields = ticketData.portalFields || {};
-      const fieldsSchema = JSON.parse(connData.fieldsJson || "[]");
-
-      // 5. Read target user's fiscal profile
-      const profilesQuery = query(collection(db, "fiscal_profiles"), where("userId", "==", ticketData.userId));
-      const profilesSnap = await getDocs(profilesQuery);
-      if (profilesSnap.empty) {
-        toast.error("El usuario del ticket no tiene un perfil fiscal registrado.");
-        return;
-      }
-      const fiscalProfile = profilesSnap.docs[0].data();
-
-      const missingFields: string[] = [];
-      for (const field of fieldsSchema) {
-        if (field.required) {
-          if (field.source === "ticket") {
-            let val = "";
-            if (field.key === "referenciaFacturacion" || field.key === "folio") {
-              val = pFields.billingReference || "";
-            } else if (field.key === "total") {
-              val = (pFields.total || "").toString();
-            } else if (field.key === "fecha" || field.key === "date") {
-              val = pFields.date || "";
-            } else if (field.key === "ticketNumber") {
-              val = pFields.ticketNumber || "";
-            }
-            if (!val.trim()) {
-              missingFields.push(field.key);
-            }
-          } else if (field.source === "fiscalProfile") {
-            let val = "";
-            if (field.key === "rfcReceptor" || field.key === "rfc") {
-              val = fiscalProfile.rfc || "";
-              if (val.trim().length < 12) val = "";
-            } else if (field.key === "razonSocial") {
-              val = fiscalProfile.razonSocial || "";
-            } else if (field.key === "codigoPostal") {
-              val = fiscalProfile.codigoPostal || "";
-              if (val.trim().length !== 5) val = "";
-            } else if (field.key === "regimenFiscal") {
-              val = fiscalProfile.regimenFiscal || "";
-            } else if (field.key === "usoCFDI") {
-              val = fiscalProfile.usoCFDI || "";
-            } else if (field.key === "email") {
-              val = fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || "";
-              if (!val.includes("@")) val = "";
-            }
-            if (!val.trim()) {
-              missingFields.push(field.key);
-            }
-          }
-        }
-      }
-
-      if (missingFields.length > 0) {
-        toast.error(`Faltan campos requeridos en el ticket o perfil fiscal: ${missingFields.join(", ")}`);
-        return;
-      }
-
-      // 6. Create snapshots
-      const ticketDataSnapshot = {
-        merchantName: ticketData.nombreEmisor || "",
-        billingReference: pFields.billingReference || ticketData.folio || "",
-        total: parseFloat(pFields.total || ticketData.total || 0),
-        ticketNumber: pFields.ticketNumber || ticketData.folio || "",
-        date: pFields.date || ticketData.fechaCompra || "",
-        barcode: ticketData.barcode || "",
-        rawOcrText: ticketData.rawOcrText || "",
-        folio: pFields.billingReference || ticketData.folio || "",
-        fechaCompra: pFields.date || ticketData.fechaCompra || "",
-      };
-
-      const fiscalProfileSnapshot = {
-        userId: fiscalProfile.userId,
-        rfc: fiscalProfile.rfc,
-        razonSocial: fiscalProfile.razonSocial,
-        regimenFiscal: fiscalProfile.regimenFiscal,
-        codigoPostal: fiscalProfile.codigoPostal,
-        usoCFDI: fiscalProfile.usoCFDI,
-        correoElectronico: fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || "",
-        createdAt: fiscalProfile.createdAt
-      };
-
-      // 7. Enqueue pilot invoice_job doc
-      const jobData = {
-        ticketId: ticketId,
-        userId: ticketData.userId,
-        status: "pending",
-        connectorId: connectorId,
-        ticketDataSnapshot,
-        fiscalProfileSnapshot,
-        attempts: 0,
-        createdAt: new Date().toISOString(),
-        pilotMode: true,
-        environment: "pilot",
-        connectorStatusAtRun: "trained_needs_validation",
-        triggeredBy: auth.currentUser?.uid || "admin",
-        triggeredAt: new Date().toISOString(),
-        testRun: true
-      };
-
-      await addDoc(collection(db, "invoice_jobs"), jobData);
-
-      // 8. Update ticket
-      await updateDoc(ticketRef, {
-        status: "queued_for_runner",
-        connectorId: connectorId
-      });
-
-      toast.success("Job piloto encolado con éxito. El motor robotizado lo procesará.");
-      setPilotConnector(null);
-      setSelectedPilotTicketId("");
-      setManualPilotTicketId("");
-      setConfirmPilotTerms(false);
-    } catch (e: any) {
-      console.error(e);
-      toast.error(`Error al encolar job piloto: ${e.message}`);
-    } finally {
-      setIsPilotEnqueuing(false);
-    }
-  };
 
   // Handle learn new portal
   const handleLearnSubmit = async (e: React.FormEvent) => {
@@ -1959,9 +1790,18 @@ export default function AdminScreen({
             if (status === "production_ready") {
               badgeText = "PRODUCTIVO";
               badgeBg = "bg-emerald-50 text-emerald-700 border-emerald-150";
+            } else if (status === "real_validation") {
+              badgeText = "EN VALIDACIÓN REAL";
+              badgeBg = "bg-indigo-50 text-indigo-700 border-indigo-150";
             } else if (status === "trained_needs_validation") {
-              badgeText = "PENDIENTE DE VALIDACIÓN";
+              badgeText = "REQUIERE ENTRENAMIENTO";
               badgeBg = "bg-yellow-50 text-yellow-700 border-yellow-150";
+            } else if (status === "runner_not_available") {
+              badgeText = "RUNNER NO DISPONIBLE";
+              badgeBg = "bg-slate-50 text-slate-700 border-slate-150";
+            } else if (status === "disabled") {
+              badgeText = "DESHABILITADO";
+              badgeBg = "bg-slate-50 text-slate-700 border-slate-150";
             } else if (status === "mock_only") {
               badgeText = "MOCK IA";
               badgeBg = "bg-blue-550/10 text-blue-700 border-blue-500/10";
@@ -1974,9 +1814,6 @@ export default function AdminScreen({
             } else if (status === "needs_discovery") {
               badgeText = "REQUIERE DISCOVERY";
               badgeBg = "bg-purple-50 text-purple-700 border-purple-150";
-            } else if (status === "runner_not_available") {
-              badgeText = "RUNNER NO DISPONIBLE";
-              badgeBg = "bg-slate-50 text-slate-700 border-slate-150";
             }
 
             // Required fields array from DB schema
@@ -2192,23 +2029,6 @@ export default function AdminScreen({
                       </div>
                     </div>
 
-                    {c.status === "trained_needs_validation" && c.runnerAvailable === false && c.isProductionReady === false && (
-                      <div className="pt-4 border-t border-slate-200/60 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPilotConnector(c);
-                            setSelectedPilotTicketId("");
-                            setManualPilotTicketId("");
-                            setConfirmPilotTerms(false);
-                          }}
-                          className="bg-[#0B53F4] text-white hover:opacity-95 text-[11px] font-black uppercase tracking-wider px-5 py-2.5 rounded-xl transition duration-150 cursor-pointer shadow-sm flex items-center gap-1.5"
-                        >
-                          <Play className="w-3.5 h-3.5 fill-current" />
-                          <span>Ejecutar prueba piloto</span>
-                        </button>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
@@ -2711,147 +2531,7 @@ export default function AdminScreen({
             </motion.div>
           </div>
         )}
-        {/* Pilot Mode Modal */}
-        {pilotConnector && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setPilotConnector(null)}
-              className="absolute inset-0 bg-slate-900/35 backdrop-blur-md cursor-zoom-out"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 w-full max-w-lg relative z-10 flex flex-col max-h-[85vh] text-left"
-            >
-              <div className="flex justify-between items-center pb-4 border-b border-slate-100 shrink-0">
-                <div className="flex items-center gap-2">
-                  <Play className="w-4 h-4 text-[#0B53F4] fill-current" />
-                  <h3 className="text-sm font-black text-slate-805 uppercase tracking-wider font-sans">
-                    Prueba Piloto: {pilotConnector.nombre}
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setPilotConnector(null)}
-                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 flex items-center justify-center cursor-pointer transition"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
 
-              <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1 text-slate-700 font-sans">
-                <div className="text-xs font-semibold leading-relaxed text-slate-500">
-                  Configure una ejecución controlada en el motor de Playwright usando los snapshots persistidos del ticket.
-                </div>
-
-                {/* Ticket Selector */}
-                <div className="space-y-2">
-                  <label className="block text-[9.5px] font-black text-slate-450 uppercase tracking-widest font-mono">
-                    Seleccionar Ticket Existente del Comercio
-                  </label>
-                  <select
-                    value={selectedPilotTicketId}
-                    onChange={(e) => {
-                      setSelectedPilotTicketId(e.target.value);
-                      if (e.target.value) {
-                        setManualPilotTicketId("");
-                      }
-                    }}
-                    className="w-full text-xs font-semibold bg-slate-50 border border-slate-200 focus:border-[#0B53F4] focus:outline-none rounded-xl p-3 cursor-pointer"
-                  >
-                    <option value="">-- Seleccionar ticket --</option>
-                    {tickets
-                      .filter(t => 
-                        t.connectorId === pilotConnector.id || 
-                        t.nombreEmisor?.toLowerCase().includes(pilotConnector.nombre.toLowerCase())
-                      )
-                      .map(t => (
-                        <option key={t.id} value={t.id}>
-                          Ticket #{t.id?.slice(0, 10)} - Total: ${t.total} ({t.status})
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-3 py-1">
-                  <div className="h-px bg-slate-200 flex-1" />
-                  <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider font-mono">o</span>
-                  <div className="h-px bg-slate-200 flex-1" />
-                </div>
-
-                {/* Manual Ticket ID input */}
-                <div className="space-y-2">
-                  <label className="block text-[9.5px] font-black text-slate-450 uppercase tracking-widest font-mono">
-                    Ingresar ID de Ticket de forma manual
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej. test-ticket-similares-1782811922851"
-                    value={manualPilotTicketId}
-                    onChange={(e) => {
-                      setManualPilotTicketId(e.target.value);
-                      if (e.target.value) {
-                        setSelectedPilotTicketId("");
-                      }
-                    }}
-                    className="w-full text-xs font-semibold bg-slate-50 border border-slate-200 focus:border-[#0B53F4] focus:outline-none rounded-xl p-3"
-                  />
-                </div>
-
-                {/* Warning alerts using alert styles */}
-                <div className="bg-amber-50 border border-amber-200/50 rounded-2xl p-4 space-y-2 text-xs">
-                  <span className="font-extrabold text-amber-800 uppercase tracking-wider block text-[9.5px] font-mono">
-                    ⚠️ Advertencia de Seguridad
-                  </span>
-                  <div className="text-amber-850 font-semibold leading-relaxed">
-                    Esta acción encolará un job de facturación en <strong>Modo Piloto</strong>. No afectará a usuarios finales comunes ni activará el conector de forma pública.
-                  </div>
-                  <div className="text-amber-850 font-semibold leading-relaxed">
-                    Asegúrese de usar un ticket real con referencia de facturación vigente.
-                  </div>
-                </div>
-
-                {/* Consent Checkbox */}
-                <div className="pt-2">
-                  <label className="flex items-start gap-3 text-xs text-slate-700 font-bold select-none cursor-pointer leading-normal">
-                    <input
-                      type="checkbox"
-                      checked={confirmPilotTerms}
-                      onChange={(e) => setConfirmPilotTerms(e.target.checked)}
-                      className="mt-0.5 rounded border-slate-300 text-[#0B53F4] focus:ring-[#0B53F4]/20 cursor-pointer"
-                    />
-                    <span>
-                      Confirmo que usaré un ticket real vigente y entiendo que esto no activa producción automáticamente.
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Actions Footer */}
-              <div className="flex gap-3 pt-4 border-t border-slate-100 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setPilotConnector(null)}
-                  className="flex-1 py-3 px-4 bg-slate-50 hover:bg-slate-100/90 active:bg-slate-200/60 border border-slate-200 text-slate-700 font-extrabold text-xs uppercase tracking-wider rounded-xl transition duration-150 cursor-pointer text-center"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  disabled={isPilotEnqueuing || !confirmPilotTerms || (!selectedPilotTicketId && !manualPilotTicketId.trim())}
-                  onClick={() => enqueuePilotInvoiceJob(selectedPilotTicketId || manualPilotTicketId.trim(), pilotConnector.id!)}
-                  className="flex-1 py-3 px-4 bg-[#0B53F4] hover:opacity-95 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition duration-150 cursor-pointer text-center flex items-center justify-center gap-1.5"
-                >
-                  {isPilotEnqueuing ? "Procesando..." : "Ejecutar Prueba"}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
       </AnimatePresence>
 
       {/* 12. BOTTOM RED DE EXTRACCIÓN HARDWARE STATUS CARD CARD */}

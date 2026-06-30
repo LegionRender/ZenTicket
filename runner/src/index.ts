@@ -37,7 +37,7 @@ async function processJob(jobId: string) {
   const jobRef = db.collection("invoice_jobs").doc(jobId);
   const bucket = getStorage().bucket();
 
-  setActiveJobContext(jobId, ticketId, lockedJob.connectorId, !!lockedJob.pilotMode, lockedJob.environment || null);
+  setActiveJobContext(jobId, ticketId, lockedJob.connectorId, lockedJob.environment || null);
 
   let connector: any = null;
 
@@ -111,7 +111,7 @@ async function processJob(jobId: string) {
         });
 
         await createRunnerLog(jobId, ticketId, "WARNING", `Validación SAT indisponible en reintento ${attempts}/3. Reencolando para posterior consulta.`);
-        setActiveJobContext(null, null, null, false, null);
+        setActiveJobContext(null, null, null, null);
         return;
       }
 
@@ -158,7 +158,7 @@ async function processJob(jobId: string) {
       });
 
       await createRunnerLog(jobId, ticketId, "INFO", "Validación SAT tardía completada con éxito. Factura activada.");
-      setActiveJobContext(null, null, null, false, null);
+      setActiveJobContext(null, null, null, null);
       return;
     }
 
@@ -272,7 +272,7 @@ async function processJob(jobId: string) {
       });
 
       await createRunnerLog(jobId, ticketId, "WARNING", "Servicio del SAT no disponible. Job en espera de reintento.");
-      setActiveJobContext(null, null, null, false, null);
+      setActiveJobContext(null, null, null, null);
       return;
     }
 
@@ -319,13 +319,13 @@ async function processJob(jobId: string) {
     });
 
     await createRunnerLog(jobId, ticketId, "INFO", "Procesamiento y timbrado finalizado exitosamente.");
-    setActiveJobContext(null, null, null, false, null);
+    setActiveJobContext(null, null, null, null);
   } catch (err: any) {
     const errorCode = err.code || "UNKNOWN_RUNNER_ERROR";
     const errorMessage = err.message || "Error interno del runner.";
 
     await createRunnerLog(jobId, ticketId, "ERROR", `Procesamiento fallido: ${errorMessage} (Código: ${errorCode})`);
-    setActiveJobContext(null, null, null, false, null);
+    setActiveJobContext(null, null, null, null);
 
     const isRejected = errorCode === "PORTAL_RETURNED_ERROR";
     const finalJobStatus = isRejected ? "manual_review" : "failed";

@@ -28,7 +28,7 @@ async function auditConnectors() {
     }
 
     console.log(`\nConectores encontrados: ${snapshot.size}\n`);
-    console.log("| ID | Nombre | RFC | Status | Prod Ready | Runner Avail | Fields Valid | Flow Valid | Last Pilot Run | Last Pilot Result | Last Valid XML | Last SAT Status | Eligible For Production |");
+    console.log("| ID | Nombre | RFC | Status | Runner Available | Production Ready | Fields Valid | Flow Valid | Last Real Run | Last Result | Last Valid XML | Last SAT Status | Eligible For Production |");
     console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
 
     for (const doc of snapshot.docs) {
@@ -53,32 +53,34 @@ async function auditConnectors() {
       const pmSnap = await db.collection("portal_maps").where("connectorId", "==", doc.id).get();
       const portalMapApproved = !pmSnap.empty && pmSnap.docs[0].data().isApproved === true;
 
-      // 2. Fetch pilot jobs and sort in memory
+      // 2. Fetch real jobs and sort in memory
       const jobsSnap = await db.collection("invoice_jobs")
         .where("connectorId", "==", doc.id)
-        .where("pilotMode", "==", true)
         .get();
 
-      let latestPilotJob = null;
+      let latestRealJob = null;
       if (!jobsSnap.empty) {
         const jobs = [];
         jobsSnap.forEach(jobDoc => {
-          jobs.push({ id: jobDoc.id, ...jobDoc.data() });
+          const jobData = jobDoc.data();
+          if (!jobData.pilotMode) { // Exclude legacy pilot runs to report only real production/validation runs
+            jobs.push({ id: jobDoc.id, ...jobData });
+          }
         });
         jobs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        latestPilotJob = jobs[0];
+        latestRealJob = jobs[0];
       }
 
-      // 3. Map pilot values
-      const lastPilotRun = latestPilotJob ? new Date(latestPilotJob.createdAt).toLocaleString("es-MX") : "N/A";
-      const lastPilotResult = latestPilotJob ? latestPilotJob.status : "N/A";
-      const lastValidXml = (latestPilotJob && latestPilotJob.result) ? (latestPilotJob.result.uuid || "N/A") : "N/A";
-      const lastSatStatus = (latestPilotJob && latestPilotJob.result) ? (latestPilotJob.result.satStatus || "N/A") : "N/A";
+      // 3. Map real values
+      const lastRealRun = latestRealJob ? new Date(latestRealJob.createdAt).toLocaleString("es-MX") : "N/A";
+      const lastResult = latestRealJob ? latestRealJob.status : "N/A";
+      const lastValidXml = (latestRealJob && latestRealJob.result) ? (latestRealJob.result.uuid || "N/A") : "N/A";
+      const lastSatStatus = (latestRealJob && latestRealJob.result) ? (latestRealJob.result.satStatus || "N/A") : "N/A";
 
       // 4. Calculate Eligibility
-      const eligibleForProd = portalMapApproved && latestPilotJob && latestPilotJob.status === "succeeded" && latestPilotJob.result && latestPilotJob.result.satStatus === "valid" ? "Sí" : "No";
+      const eligibleForProd = portalMapApproved && latestRealJob && latestRealJob.status === "succeeded" && latestRealJob.result && latestRealJob.result.satStatus === "valid" ? "Sí" : "No";
 
-      console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${data.status || "mock_only"} | ${data.isProductionReady || false} | ${data.runnerAvailable || false} | ${fieldsValid} | ${flowValid} | ${lastPilotRun} | ${lastPilotResult} | ${lastValidXml} | ${lastSatStatus} | ${eligibleForProd} |`);
+      console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${data.status || "mock_only"} | ${data.runnerAvailable || false} | ${data.isProductionReady || false} | ${fieldsValid} | ${flowValid} | ${lastRealRun} | ${lastResult} | ${lastValidXml} | ${lastSatStatus} | ${eligibleForProd} |`);
     }
   } catch (err) {
     console.error("Fallo al auditar conectores:", err.message);

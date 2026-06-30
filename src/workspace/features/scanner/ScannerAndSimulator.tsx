@@ -1402,7 +1402,7 @@ export default function ScannerAndSimulator({
       if (activeConn.runnerAvailable !== true) {
         const runnerErr: ReviewError = {
           reviewReasonCode: "CONNECTOR_RUNNER_NOT_AVAILABLE",
-          reviewReasonMessage: "El conector está entrenado, pero el motor productivo de automatización aún no está disponible.",
+          reviewReasonMessage: "Este comercio aún no está disponible para facturación automática.",
           lastAutomationStep: "connector_resolving",
           connectorAttempted: true,
           connectorId: activeConn.id || null,
@@ -1420,7 +1420,7 @@ export default function ScannerAndSimulator({
       }
 
       // Check connector status
-      if (activeConn.status !== "production_ready") {
+      if (activeConn.status !== "production_ready" && activeConn.status !== "real_validation") {
         let code: "CONNECTOR_NOT_PRODUCTION_READY" | "CONNECTOR_RESTRICTED" | "CONNECTOR_BROKEN" = "CONNECTOR_NOT_PRODUCTION_READY";
         let msg = "El conector de este comercio está en validación técnica y no está listo para producción.";
         if (activeConn.status === "restricted") {
@@ -1619,10 +1619,13 @@ export default function ScannerAndSimulator({
         userId: fiscalProfile.userId,
         status: "pending",
         connectorId: activeConn.id || "",
+        portalMapId: portalMapsSnap.docs[0].id || "",
+        connectorStatusAtRun: activeConn.status || "real_validation",
         ticketDataSnapshot,
         fiscalProfileSnapshot,
         attempts: 0,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
 
       const jobsCollection = collection(db, "invoice_jobs");
@@ -3712,15 +3715,16 @@ return list.map(n => {
             if (code === "PORTAL_NO_XML") return "El portal oficial no entregó el XML necesario para validar tu CFDI.";
             if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
             if (code === "PORTAL_REJECTED_TOTAL") return "El portal no reconoció el total detectado.";
+            if (code === "PORTAL_REJECTED_TICKET_DATA") return "Necesitamos corregir un dato del ticket. Verifica la referencia de facturación y el total.";
             if (code === "SAT_NOT_FOUND") return "El CFDI no fue localizado en los controles del SAT.";
             if (code === "SAT_CANCELED") return "El CFDI aparece cancelado ante el SAT.";
             if (code === "SAT_TIMEOUT") return "No pudimos verificar el CFDI ante el SAT en este momento.";
             if (code === "USER_REQUESTED_REVIEW") return "El usuario solicitó revisión manual del ticket.";
             if (code === "CONNECTOR_TIMEOUT") return "El conector del comercio tardó más de lo esperado en responder.";
             if (code === "PORTAL_ERROR") return revErr.reviewReasonMessage || "Ocurrió un error en el portal del comercio.";
-            if (code === "CONNECTOR_RUNNER_NOT_AVAILABLE") return "El conector está entrenado, pero el motor productivo de automatización aún no está disponible.";
+            if (code === "CONNECTOR_RUNNER_NOT_AVAILABLE") return "Este comercio aún no está disponible para facturación automática.";
             if (code === "CONNECTOR_SCHEMA_INVALID") return "El conector tiene una configuración incompleta y requiere revisión técnica.";
-            if (code === "CONNECTOR_NOT_PRODUCTION_READY") return "El conector de este comercio está en validación técnica y no está listo para producción.";
+            if (code === "CONNECTOR_NOT_PRODUCTION_READY") return "Este comercio todavía está en validación técnica. Aún no está disponible para facturación automática.";
             if (code === "CONNECTOR_RESTRICTED") return "Este portal requiere credenciales especiales o permisos de acceso restringidos.";
             if (code === "CONNECTOR_BROKEN") return "El conector de este portal se encuentra temporalmente fuera de servicio por mantenimiento.";
             if (code === "PORTAL_FIELD_MAP_CHANGED") return "La estructura del portal oficial ha cambiado. Se ha programado un rediscovery técnico.";
