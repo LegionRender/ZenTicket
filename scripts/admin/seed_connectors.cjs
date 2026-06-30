@@ -245,6 +245,41 @@ async function seedConnectors() {
             source: "fiscalProfile",
             required: true,
             userEditable: true
+          },
+          {
+            key: "fiscalProfile.businessName",
+            label: "Razón Social",
+            source: "fiscalProfile",
+            required: true,
+            userEditable: true
+          },
+          {
+            key: "fiscalProfile.postalCode",
+            label: "Código Postal",
+            source: "fiscalProfile",
+            required: true,
+            userEditable: true
+          },
+          {
+            key: "fiscalProfile.taxRegime",
+            label: "Régimen Fiscal",
+            source: "fiscalProfile",
+            required: true,
+            userEditable: true
+          },
+          {
+            key: "fiscalProfile.cfdiUse",
+            label: "Uso CFDI",
+            source: "fiscalProfile",
+            required: true,
+            userEditable: true
+          },
+          {
+            key: "fiscalProfile.email",
+            label: "Correo electrónico",
+            source: "fiscalProfile",
+            required: true,
+            userEditable: true
           }
         ];
 

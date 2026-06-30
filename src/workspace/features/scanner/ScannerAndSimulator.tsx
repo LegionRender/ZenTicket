@@ -1965,7 +1965,7 @@ export default function ScannerAndSimulator({
       // Validate dynamic fields
       const hasFolioField = fieldsSchema.some(f => f.key === "referenciaFacturacion" || f.key === "folio" || f.key === "ticketNumber");
       if (hasFolioField && !editFolio.trim()) {
-        setValidationError("La referencia de facturación o folio es obligatorio.");
+        setValidationError("Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura.");
         return;
       }
       const hasTotalField = fieldsSchema.some(f => f.key === "total");
@@ -2063,7 +2063,7 @@ export default function ScannerAndSimulator({
         return;
       }
       if (!editFolio.trim()) {
-        setValidationError("El folio o número de referencia del ticket es obligatorio.");
+        setValidationError("Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura.");
         return;
       }
       if (!editFecha.trim()) {
