@@ -16,8 +16,13 @@ export function resolveValue(
 
     if (base === "ticket") {
       if (key === "total") return (ticketData.total || 0).toString();
-      if (key === "billingReference" || key === "folio" || key === "ticketNumber") return ticketData.folio || "";
+      if (key === "billingReference" || key === "folio" || key === "ticketNumber") return ticketData.folio || ticketData.billingReference || "";
       if (key === "date") return ticketData.fechaCompra || "";
+      return ticketData[key] || "";
+    } else if (base === "portalFields") {
+      if (key === "billingReference") return ticketData.billingReference || ticketData.folio || "";
+      if (key === "total") return (ticketData.total || 0).toString();
+      if (key === "date") return ticketData.fechaCompra || ticketData.date || "";
       return ticketData[key] || "";
     } else if (base === "fiscalProfile") {
       if (key === "rfc") return fiscalProfile.rfc || "";
@@ -45,8 +50,13 @@ export function resolveValue(
       const key = parts[1];
       if (base === "ticket") {
         if (key === "total") resolved = (ticketData.total || 0).toString();
-        else if (key === "billingReference" || key === "folio" || key === "ticketNumber") resolved = ticketData.folio || "";
+        else if (key === "billingReference" || key === "folio" || key === "ticketNumber") resolved = ticketData.folio || ticketData.billingReference || "";
         else if (key === "date") resolved = ticketData.fechaCompra || "";
+        else resolved = ticketData[key] || "";
+      } else if (base === "portalFields") {
+        if (key === "billingReference") resolved = ticketData.billingReference || ticketData.folio || "";
+        else if (key === "total") resolved = (ticketData.total || 0).toString();
+        else if (key === "date") resolved = ticketData.fechaCompra || ticketData.date || "";
         else resolved = ticketData[key] || "";
       } else if (base === "fiscalProfile") {
         if (key === "rfc") resolved = fiscalProfile.rfc || "";

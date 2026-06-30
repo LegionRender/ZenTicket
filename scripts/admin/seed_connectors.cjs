@@ -224,11 +224,35 @@ async function seedConnectors() {
           ];
         }
 
+        const reqFieldsList = [
+          {
+            key: "portalFields.billingReference",
+            label: "Referencia de facturación",
+            source: "portalFields",
+            required: true,
+            userEditable: true
+          },
+          {
+            key: "portalFields.total",
+            label: "Total facturado",
+            source: "portalFields",
+            required: true,
+            userEditable: true
+          },
+          {
+            key: "fiscalProfile.rfc",
+            label: "RFC receptor",
+            source: "fiscalProfile",
+            required: true,
+            userEditable: true
+          }
+        ];
+
         const portalMapData = {
           connectorId,
           entryUrl: item.portalUrl,
           url: item.portalUrl,
-          requiredFields: ["ticket.billingReference", "ticket.total"],
+          requiredFields: reqFieldsList,
           fiscalFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"],
           captchaSelectorsJson: JSON.stringify(["iframe[src*='recaptcha']", ".g-recaptcha", "#captcha"]),
           errorSelectorsJson: JSON.stringify([".swal-text", ".alert-danger", "#error-msg", ".text-danger"]),

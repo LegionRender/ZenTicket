@@ -148,6 +148,123 @@ function getFieldSource(f: any): "ticket" | "fiscalProfile" {
   return "fiscalProfile";
 }
 
+function isInternalIdLike(value: string | undefined | null, rawOcrText?: string): boolean {
+  if (!value) return true;
+  const val = value.trim();
+  if (!val) return true;
+
+  // 1. UUID v4 / standard UUID format: 8-4-4-4-12 characters
+  const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  if (uuidRegex.test(val)) return true;
+
+  // 2. Starts with ticket_ or job_ or similar internal prefixes
+  if (val.startsWith("ticket_") || val.startsWith("job_") || val.startsWith("pilot-") || val.startsWith("OFFLINE-")) {
+    return true;
+  }
+
+  // 3. If rawOcrText is provided, check if the value is in the raw OCR text.
+  // If it's a generated ID or UUID not present in the original OCR text, reject it.
+  if (rawOcrText) {
+    const cleanOcr = rawOcrText.toLowerCase();
+    const cleanVal = val.toLowerCase();
+    if (!cleanOcr.includes(cleanVal)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function sanitizePortalFieldsForConnector(
+  connectorId: string | undefined | null,
+  detectedData: any,
+  rawOcrText: string | undefined | null
+): { billingReference: string; total: number; date: string; ticketNumber: string } {
+  const ocrText = rawOcrText || "";
+  let billingRef = detectedData.billingReference || detectedData.folio || "";
+
+  // Reject UUID or internal ID like values
+  if (isInternalIdLike(billingRef, ocrText)) {
+    billingRef = "";
+  }
+
+  // Attempt to extract reference from rawOcrText for Farmacias Similares if not found
+  if (!billingRef && ocrText) {
+    // Similares references are 12-digit numeric sequences
+    const matches = ocrText.match(/\b\d{12}\b/g);
+    if (matches && matches.length > 0) {
+      billingRef = matches[0];
+    }
+  }
+
+  const total = parseFloat(String(detectedData.total || 0));
+  const date = detectedData.fechaCompra || detectedData.date || "";
+  const ticketNumber = billingRef;
+
+  return {
+    billingReference: billingRef,
+    total: isNaN(total) ? 0 : total,
+    date,
+    ticketNumber
+  };
+}
+
+function validatePortalFieldsAgainstPortalMap(
+  ticket: any,
+  portalMap: any
+): { isValid: boolean; missingFields: string[] } {
+  const missingFields: string[] = [];
+  const pFields = ticket.portalFields || {};
+
+  let requiredFields = portalMap.requiredFields || [];
+  if (typeof requiredFields === "string") {
+    try {
+      requiredFields = JSON.parse(requiredFields);
+    } catch (_) {
+      requiredFields = [];
+    }
+  }
+
+  for (const field of requiredFields) {
+    let fieldKey = "";
+    let isRequired = true;
+    if (typeof field === "string") {
+      fieldKey = field;
+    } else if (field && typeof field === "object") {
+      fieldKey = field.key;
+      isRequired = field.required !== false;
+    }
+
+    if (!isRequired) continue;
+
+    if (fieldKey === "portalFields.billingReference" || fieldKey === "ticket.billingReference") {
+      if (!pFields.billingReference || !pFields.billingReference.trim()) {
+        missingFields.push("portalFields.billingReference");
+      }
+    } else if (fieldKey === "portalFields.total" || fieldKey === "ticket.total") {
+      if (pFields.total === undefined || pFields.total === null || isNaN(pFields.total) || pFields.total <= 0) {
+        missingFields.push("portalFields.total");
+      }
+    } else if (fieldKey === "portalFields.date" || fieldKey === "ticket.date") {
+      if (!pFields.date || !pFields.date.trim()) {
+        missingFields.push("portalFields.date");
+      }
+    }
+  }
+
+  // Also enforce basic billingReference check for Similares if not explicitly listed
+  if (!pFields.billingReference || !pFields.billingReference.trim()) {
+    if (!missingFields.includes("portalFields.billingReference")) {
+      missingFields.push("portalFields.billingReference");
+    }
+  }
+
+  return {
+    isValid: missingFields.length === 0,
+    missingFields
+  };
+}
+
 export default function ScannerAndSimulator({
   fiscalProfile,
   connectors,
@@ -605,12 +722,16 @@ export default function ScannerAndSimulator({
         items: parsedItems,
       };
       setExtractedData(data);
+      const found = matchConnector(ticket.nombreEmisor, ticket.rfcEmisor);
+      const sanitized = sanitizePortalFieldsForConnector(found?.id, ticket.portalFields || data, ticket.rawOcrText);
+      const initialBillingRef = ticket.portalFields?.billingReference || sanitized.billingReference || "";
+
       setEditNombre(data.nombreEmisor || "");
       setEditRfc(data.rfcEmisor || "");
       setEditFecha(data.fechaCompra || "");
-      setEditFolio(data.folio || "");
+      setEditFolio(initialBillingRef);
       setEditSucursal(data.sucursal || "");
-      setEditTotal(data.total || 0);
+      setEditTotal(ticket.portalFields?.total !== undefined ? ticket.portalFields.total : (data.total || 0));
       setCustomProfileFields({
         rfcReceptor: fiscalProfile?.rfc || "",
         razonSocial: fiscalProfile?.razonSocial || "",
@@ -619,7 +740,6 @@ export default function ScannerAndSimulator({
         usoCFDI: fiscalProfile?.usoCFDI || "",
         email: fiscalProfile?.correoElectronico || ""
       });
-      const found = matchConnector(ticket.nombreEmisor, ticket.rfcEmisor);
       setMatchingConnector(found);
 
       if (ticket.status === "requires_user_correction") {
@@ -880,13 +1000,16 @@ export default function ScannerAndSimulator({
       if (ocrResult.ocrFailed) {
         toast.warning(ocrResult.ocrError || "El OCR no pudo leer este ticket. Por favor, completa los campos manualmente.", "Captura Manual Activada");
       }
+      const foundConnector = findMatchingConnector(ocrResult);
+      const sanitized = sanitizePortalFieldsForConnector(foundConnector?.id, ocrResult, ocrResult.rawOcrText);
+
       setExtractedData(ocrResult);
       setEditNombre(ocrResult.nombreEmisor || "");
       setEditRfc(ocrResult.rfcEmisor || "");
       setEditFecha(ocrResult.fechaCompra || "");
-      setEditFolio(ocrResult.folio || "");
+      setEditFolio(sanitized.billingReference || "");
       setEditSucursal(ocrResult.sucursal || "");
-      setEditTotal(ocrResult.total || 0);
+      setEditTotal(sanitized.total || 0);
       setIsEditing(checkIsDataIncomplete(ocrResult));
 
       // Auto-save this ticket in Firebase with status "extracted"
@@ -911,8 +1034,7 @@ export default function ScannerAndSimulator({
       } as any);
       setTicketId(tId);
 
-      // Seek matching connector
-      const foundConnector = findMatchingConnector(ocrResult);
+      // Seek matching connector (already matched above)
 
       stopSimulation();
       // Wait for completion callback to trigger
@@ -1081,13 +1203,16 @@ export default function ScannerAndSimulator({
       if (ocrResult.ocrFailed) {
         toast.warning(ocrResult.ocrError || "El OCR no pudo leer este ticket. Por favor, completa los campos manualmente.", "Captura Manual Activada");
       }
+      const foundConnector = findMatchingConnector(ocrResult);
+      const sanitized = sanitizePortalFieldsForConnector(foundConnector?.id, ocrResult, ocrResult.rawOcrText);
+
       setExtractedData(ocrResult);
       setEditNombre(ocrResult.nombreEmisor || "");
       setEditRfc(ocrResult.rfcEmisor || "");
       setEditFecha(ocrResult.fechaCompra || "");
-      setEditFolio(ocrResult.folio || "");
+      setEditFolio(sanitized.billingReference || "");
       setEditSucursal(ocrResult.sucursal || "");
-      setEditTotal(ocrResult.total || 0);
+      setEditTotal(sanitized.total || 0);
       setCustomProfileFields({
         rfcReceptor: fiscalProfile?.rfc || "",
         razonSocial: fiscalProfile?.razonSocial || "",
@@ -1120,8 +1245,7 @@ export default function ScannerAndSimulator({
       } as any);
       setTicketId(tId);
 
-      // Find match
-      const foundConnector = findMatchingConnector(ocrResult);
+      // Find match (already matched above)
 
       stopSimulation();
       // Wait for completion callback to trigger
@@ -1533,11 +1657,17 @@ export default function ScannerAndSimulator({
       
       let pFields = currentTicketData.portalFields;
       if (!pFields) {
+        const sanitized = sanitizePortalFieldsForConnector(activeConn.id, {
+          billingReference: activeExtractedData.folio,
+          total: activeExtractedData.total,
+          fechaCompra: activeExtractedData.fechaCompra
+        }, currentTicketData.rawOcrText);
+
         pFields = {
-          billingReference: activeExtractedData.folio || "",
-          total: parseFloat((activeExtractedData.total || 0).toString()),
-          ticketNumber: activeExtractedData.folio || "",
-          date: activeExtractedData.fechaCompra || ""
+          billingReference: sanitized.billingReference || "",
+          total: sanitized.total || 0,
+          ticketNumber: sanitized.billingReference || "",
+          date: sanitized.date || ""
         };
         await updateDoc(ticketDocRef, {
           portalFields: pFields
@@ -1550,35 +1680,50 @@ export default function ScannerAndSimulator({
       const freshTicketData = freshTicketDoc.data()!;
       pFields = freshTicketData.portalFields || {};
 
-      // Validate required fields and documents from database snapshot (Task 4)
-      const missingFields: string[] = [];
-      if (!fiscalProfile.userId) missingFields.push("userId");
-      if (!activeConn.id) missingFields.push("connectorId");
-      
-      // Enforce the A/B enqueuing rules (Task 3)
+      // First check technical configuration of the connector (Rule 11)
       const isProductionRuleMatch = activeConn.status === "production_ready" && activeConn.runnerAvailable === true && activeConn.isProductionReady === true;
       const isRealValidationRuleMatch = activeConn.status === "real_validation" && activeConn.runnerAvailable === true && activeConn.isProductionReady === false && pMap && (pMap.isApproved === true || pMap.status === "approved");
-      
-      if (!isProductionRuleMatch && !isRealValidationRuleMatch) {
-        if (activeConn.status !== "production_ready" && activeConn.status !== "real_validation") {
-          missingFields.push("connector.status");
-        }
-        if (activeConn.runnerAvailable !== true) {
-          missingFields.push("connector.runnerAvailable");
-        }
-        if (activeConn.status === "production_ready" && !activeConn.isProductionReady) {
-          missingFields.push("connector.isProductionReady");
-        }
-        if (!pMap) {
-          missingFields.push("portalMap");
-        } else if (!pMap.isApproved && pMap.status !== "approved") {
-          missingFields.push("portalMap.isApproved");
-        }
+      const isTechnicalConfigIncomplete = !activeConn.id || !pMap || (!pMap.isApproved && pMap.status !== "approved") || !pMap.stepsJson || (!isProductionRuleMatch && !isRealValidationRuleMatch);
+
+      if (isTechnicalConfigIncomplete) {
+        const configErr: ReviewError = {
+          reviewReasonCode: "CONNECTOR_SCHEMA_INVALID",
+          reviewReasonMessage: "El conector tiene una configuración incompleta y requiere revisión técnica.",
+          lastAutomationStep: "connector_resolving",
+          connectorAttempted: true,
+          connectorId: activeConn.id || null,
+          connectorName: activeConn.nombre || null,
+          portalErrorMessage: `Configuración técnica incompleta.`,
+          reviewError: {
+            connectorStatus: activeConn.status || "undefined",
+            runnerAvailable: activeConn.runnerAvailable || false,
+            isProductionReady: activeConn.isProductionReady || false,
+            portalMapFound: !!pMap,
+            portalMapApproved: pMap ? (pMap.isApproved === true || pMap.status === "approved") : false,
+            hasStepsJson: pMap ? !!pMap.stepsJson : false,
+            missingFields: ["technical_config"],
+            blockingReason: "CONFIG_INCOMPLETE: Technical fields missing"
+          } as any
+        };
+        await onUpdateTicketInDb(activeTicketId, {
+          status: "requires_manual_review",
+          reviewReasonCode: "CONNECTOR_SCHEMA_INVALID",
+          errorMsg: configErr.reviewReasonMessage,
+          reviewError: configErr as any
+        });
+        await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, "CONNECTOR_SCHEMA_INVALID");
+        setIsAutomatingLoading(false);
+        return;
       }
 
-      if (!pFields.billingReference || !pFields.billingReference.trim()) missingFields.push("portalFields.billingReference");
-      if (pFields.total === undefined || pFields.total === null || isNaN(pFields.total)) missingFields.push("portalFields.total");
-
+      // Check required fields from portalMap and user fiscal profile (Rule 6)
+      const validationResult = validatePortalFieldsAgainstPortalMap(
+        { ...freshTicketData, portalFields: pFields },
+        pMap
+      );
+      const missingFields: string[] = [...validationResult.missingFields];
+      
+      if (!fiscalProfile.userId) missingFields.push("userId");
       if (!fiscalProfile.rfc || !fiscalProfile.rfc.trim()) missingFields.push("fiscalProfile.rfc");
       if (!fiscalProfile.razonSocial || !fiscalProfile.razonSocial.trim()) missingFields.push("fiscalProfile.businessName");
       if (!fiscalProfile.codigoPostal || !fiscalProfile.codigoPostal.trim()) missingFields.push("fiscalProfile.postalCode");
@@ -1592,33 +1737,35 @@ export default function ScannerAndSimulator({
         await addLog(`❌ Faltan campos requeridos: ${missingFields.join(", ")}`, 400);
         
         const configErr: ReviewError = {
-          reviewReasonCode: "CONFIG_INCOMPLETE",
-          reviewReasonMessage: `Configuración incompleta: falta registrar ${missingFields.join(", ")}.`,
+          reviewReasonCode: "MISSING_REQUIRED_FIELDS",
+          reviewReasonMessage: missingFields.includes("portalFields.billingReference")
+            ? "Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura en el portal oficial."
+            : `Necesitamos completar algunos datos antes de solicitar la factura: ${missingFields.join(", ")}.`,
           lastAutomationStep: "connector_resolving",
           connectorAttempted: true,
           connectorId: activeConn.id || null,
           connectorName: activeConn.nombre || null,
-          portalErrorMessage: `Configuración incompleta: ${missingFields.join(", ")}`,
+          portalErrorMessage: `Campos requeridos faltantes: ${missingFields.join(", ")}`,
           reviewError: {
             connectorStatus: activeConn.status || "undefined",
             runnerAvailable: activeConn.runnerAvailable || false,
             isProductionReady: activeConn.isProductionReady || false,
             portalMapFound: !!pMap,
-            portalMapApproved: pMap ? !!pMap.isApproved : false,
+            portalMapApproved: pMap ? (pMap.isApproved === true || pMap.status === "approved") : false,
             hasStepsJson: pMap ? !!pMap.stepsJson : false,
             missingFields: missingFields,
-            blockingReason: "CONFIG_INCOMPLETE: " + missingFields.join(", ")
+            blockingReason: "MISSING_REQUIRED_FIELDS: " + missingFields.join(", ")
           } as any
         };
 
         await onUpdateTicketInDb(activeTicketId, {
           status: "requires_manual_review",
-          reviewReasonCode: "CONFIG_INCOMPLETE",
+          reviewReasonCode: "MISSING_REQUIRED_FIELDS",
           errorMsg: configErr.reviewReasonMessage,
           reviewError: configErr as any,
           missingFields: missingFields
         } as any);
-        await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, "CONFIG_INCOMPLETE");
+        await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, "MISSING_REQUIRED_FIELDS");
         setIsAutomatingLoading(false);
         return;
       }
@@ -1995,6 +2142,9 @@ export default function ScannerAndSimulator({
     setMessage(null);
     setActiveStep("upload");
   };
+
+  const isSimilares = matchingConnector?.rfc === "FSI120304XYZ" || matchingConnector?.nombre?.toLowerCase().includes("similares") || extractedData?.nombreEmisor?.toLowerCase().includes("similares") || extractedData?.rfcEmisor === "FSI120304XYZ";
+  const folioLabel = isSimilares ? "Referencia de facturación" : "Folio del ticket";
 
   return (
     <div className="bg-transparent min-h-[500px] flex flex-col relative overflow-hidden select-none gap-6">
@@ -3342,7 +3492,7 @@ return list.map(n => {
                             {/* Referencia Folio */}
                             <div>
                               <div className="flex justify-between items-center mb-1.5">
-                                <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Folio de Compra *</label>
+                                <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">{folioLabel} *</label>
                                 {isFolioInvalid && (
                                   <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
                                     ⚠️ Faltante
@@ -4285,7 +4435,7 @@ return list.map(n => {
                   </div>
 
                   <div className="border-t border-slate-800/60 pt-2.5 col-span-1 sm:col-span-2">
-                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">Folio del Ticket</span>
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block font-mono">{folioLabel}</span>
                     <span className="text-xs font-mono font-extrabold text-slate-200 block mt-0.5 select-all">
                       {extractedData.folio || "No detectado"}
                     </span>
