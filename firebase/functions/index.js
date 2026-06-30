@@ -1989,7 +1989,7 @@ app.post("/api/billing/cancel-subscription", authenticateFirebaseToken, async (r
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-
+});
 
 app.post("/api/cfdi/verify-sat", async (req, res) => {
   const { xmlContent } = req.body;
