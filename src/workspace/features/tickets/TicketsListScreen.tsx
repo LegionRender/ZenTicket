@@ -471,7 +471,7 @@ export default function TicketsListScreen({
     if (revErr) {
       const code = revErr.reviewReasonCode;
       if (code === "CONNECTOR_NOT_FOUND") return "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.";
-      if (code === "PORTAL_NO_XML") return "El portal oficial no entregó el XML necesario para validar tu CFDI.";
+      if (code === "PORTAL_NO_XML") return "Este comercio requiere revisión manual o no entregó el XML/PDF en el proceso automatizado. ZenTicket no genera documentos sustitutos si el portal del comercio no entrega el XML.";
       if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
       if (code === "PORTAL_REJECTED_TOTAL") return "El portal no reconoció el total detectado.";
       if (code === "SAT_NOT_FOUND") return "El CFDI no fue localizado en los controles del SAT.";
@@ -725,7 +725,7 @@ export default function TicketsListScreen({
                 navigator.clipboard.writeText(`https://sat.gob.mx/cfdi/${uuidVal}`);
                 toast.success("Enlace oficial CFDI SAT copiado con éxito.", "Compartir Factura");
               } else {
-                toast.info(`UUID: ${uuidVal}`, "Detalle de Emisión");
+                toast.info(`UUID: ${uuidVal}`, "Detalle de Factura");
               }
             }}
             className="p-2 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] rounded-full cursor-pointer transition"
@@ -781,7 +781,7 @@ export default function TicketsListScreen({
             </div>
 
             <div className="space-y-0.5 text-left">
-              <span className="text-slate-400 font-extrabold uppercase tracking-wide block">Fecha Emisión</span>
+              <span className="text-slate-400 font-extrabold uppercase tracking-wide block">Fecha de Facturación</span>
               <span className="text-slate-800 font-black block">{formattedDate}</span>
             </div>
 
@@ -880,7 +880,7 @@ export default function TicketsListScreen({
               const ticketStatus = associatedTicket ? associatedTicket.status : "";
               if (ticketStatus !== "cfdi_validated" || !activeInvoiceData.xmlContent) {
                 toast.error(
-                  "El PDF de la factura solo está disponible después de validar con éxito el comprobante ante el SAT (estado: cfdi_validated). El XML es obligatorio.",
+                  "El PDF de la factura solo está disponible después de obtener el comprobante desde el portal del comercio. El XML es obligatorio.",
                   "Descarga no disponible"
                 );
                 return;
@@ -2167,7 +2167,7 @@ export default function TicketsListScreen({
 
                     {/* Lower metadata footer details */}
                     <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-[10px] text-slate-400 font-bold select-none">
-                      <span>Emisión: {dateStr}</span>
+                       <span>Fecha de Factura: {dateStr}</span>
                       <span className="font-mono">RFC: {inv.rfcEmisor || "S/D"}</span>
                     </div>
 

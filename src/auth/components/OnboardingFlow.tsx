@@ -259,7 +259,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
         mimeType,
       });
 
-      if (!res.ok) throw new Error("Fallo en el servicio del SAT con IA");
+      if (!res.ok) throw new Error("Fallo en el servicio de extracción de constancia fiscal con IA");
 
       const data = await res.json();
       if (data.rfc) setRfc(data.rfc.toUpperCase().trim());
@@ -572,7 +572,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                     Plan de Suscripción Integral
                   </h2>
                   <p className="text-xs md:text-sm text-slate-500">
-                    Asigna la cuota mensual de facturación y simulación SAT. Puedes alternar tu plan o cancelarlo en el futuro.
+                    Asigna la cuota mensual de solicitudes de facturas automatizadas. Puedes alternar tu plan o cancelarlo en el futuro.
                   </p>
                 </div>
 
@@ -774,7 +774,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                     <div>
                       <h4 className="text-xs font-black text-amber-800 uppercase tracking-wider">Requiere Activación de Pago</h4>
                       <p className="text-[10.5px] text-amber-700 leading-relaxed font-semibold mt-0.5">
-                        Has seleccionado un plan de pago. Para poder timbrar tus facturas del SAT, deberás activar tu suscripción mediante Mercado Pago o PayPal en la pestaña de Cuenta una vez completes el registro.
+                        Has seleccionado un plan de pago. Para poder automatizar tus solicitudes de facturas de comercios, deberás activar tu suscripción mediante Mercado Pago o PayPal en la pestaña de Cuenta una vez completes el registro.
                       </p>
                     </div>
                   </div>
@@ -794,10 +794,10 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
               >
                 <div className="text-center md:text-left space-y-1.5 pb-2">
                   <h2 className="text-2xl md:text-3xl font-display font-black tracking-tight text-[#0b1020]">
-                    Credenciales de Identidad Fiscal
+                    Datos de Identificación Fiscal
                   </h2>
                   <p className="text-xs md:text-sm text-slate-500">
-                    Introduce los datos obligatorios para cumplir con las normativas SAT en tus emisiones automatizadas.
+                    Introduce tus datos fiscales para solicitar facturas en los portales oficiales de los comercios.
                   </p>
                 </div>
 
@@ -835,7 +835,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                       {isParsingConstancia ? (
                         <>
                           <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          <span>Asimilando SAT...</span>
+                          <span>Leyendo datos fiscales...</span>
                         </>
                       ) : (
                         <>
@@ -884,7 +884,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                     {/* Régimen Fiscal */}
                     <div className="space-y-1 text-left col-span-2">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-                        Régimen Fiscal (SAT)
+                        Régimen Fiscal
                       </label>
                       <select
                         value={regimenFiscal}
@@ -979,7 +979,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                       ¡Listo, {name}!
                     </h2>
                     <p className="text-xs text-slate-500 leading-relaxed">
-                      Tu perfil fiscal ha sido sincronizado virtualmente en la nube. Todo el ecosistema de facturación está disponible sin candados.
+                      Tu perfil fiscal ha sido configurado. El sistema ya está listo para realizar las solicitudes de facturas en los portales de los comercios.
                     </p>
                   </div>
                 </div>
@@ -1011,7 +1011,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                       <span className="text-[#0b1020] font-black capitalize">{plan}</span>
                     </div>
                     <div>
-                      <span className="text-slate-400 block uppercase tracking-wider text-[9px] font-bold">RFC SAT:</span>
+                      <span className="text-slate-400 block uppercase tracking-wider text-[9px] font-bold">RFC:</span>
                       <span className="text-[#0b1020] font-mono font-bold uppercase">{rfc || "Omitido"}</span>
                     </div>
                     <div className="col-span-2">
@@ -1019,7 +1019,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                       <span className="text-[#0b1020] font-bold uppercase block truncate">{razonSocial || "Empresa No Suministrada"}</span>
                     </div>
                     <div className="col-span-2">
-                      <span className="text-slate-400 block uppercase tracking-wider text-[9px] font-bold">Correo Receptor de CFDI:</span>
+                      <span className="text-slate-400 block uppercase tracking-wider text-[9px] font-bold">Correo Receptor de Facturas:</span>
                       <span className="text-[#0b1020] font-semibold block truncate">{correoRecepcion}</span>
                     </div>
                   </div>

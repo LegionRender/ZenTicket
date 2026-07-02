@@ -5,7 +5,7 @@ import { createRunnerLog } from "../logging/createRunnerLog";
  * Atomically locks a job in Firestore using a transaction to avoid multiple workers picking it up.
  */
 export async function lockJob(jobId: string, workerId: string): Promise<any | null> {
-  const db = getFirestore();
+  const db = getFirestore("ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee");
   const jobRef = db.collection("invoice_jobs").doc(jobId);
 
   try {

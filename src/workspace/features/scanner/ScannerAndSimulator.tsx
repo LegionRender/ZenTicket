@@ -321,7 +321,7 @@ export default function ScannerAndSimulator({
         });
         setIsProcessingRenewalPay(false);
         setShowRenewalBlocker(false);
-        toast.success(`¡Renovación completada por $${cost} MXN! Tu cupo mensual de facturas ha sido restablecido.`, "Plan Renovado");
+        toast.success(`¡Renovación completada por $${cost} MXN! Tu cupo mensual de solicitudes de facturas ha sido restablecido.`, "Plan Renovado");
       } catch (err) {
         setIsProcessingRenewalPay(false);
         toast.error("Error al registrar el pago de renovación.");
@@ -465,7 +465,7 @@ export default function ScannerAndSimulator({
         category: "cuenta",
         criticality: "critica",
         title: "Perfil Fiscal Incompleto",
-        message: "Debe rellenar sus datos oficiales (RFC, Razón Social, Régimen) en la pestaña ⚙️ Perfil Fiscal para poder habilitar el proceso de facturación de sus comprobantes.",
+        message: "Debe rellenar sus datos oficiales (RFC, Razón Social, Régimen) en la pestaña ⚙️ Perfil Fiscal para poder habilitar la obtención automática de sus comprobantes desde los portales de los comercios.",
         createdAt: new Date(),
         read: readNotifIds.includes("profile-warning-alert"),
         actionText: "Completar Perfil ⚙️",
@@ -524,9 +524,9 @@ export default function ScannerAndSimulator({
             id: `completed-${ticketId}`,
             category: "facturas",
             criticality: "informativa",
-            title: wasOffline ? `Factura Obtenida (Sincronización Offline)` : `CFDI Obtenido - ${t.nombreEmisor || "Establecimiento"}`,
+            title: wasOffline ? `CFDI Obtenido (Sincronización Offline)` : `CFDI Obtenido - ${t.nombreEmisor || "Establecimiento"}`,
             message: wasOffline
-              ? `El ticket sin conexión de ${t.nombreEmisor || "Establecimiento"} por $${(t.total || 0).toFixed(2)} MXN ha sido procesado y facturado automáticamente.`
+              ? `El ticket sin conexión de ${t.nombreEmisor || "Establecimiento"} por $${(t.total || 0).toFixed(2)} MXN ha sido procesado y obtenido automáticamente desde el portal del comercio.`
               : `Se obtuvo exitosamente el CFDI 4.0 para ${t.nombreEmisor || "Establecimiento"} por un monto de $${(t.total || 0).toFixed(2)} MXN de manera limpia.`,
             createdAt: timestamp,
             read: readNotifIds.includes(`completed-${ticketId}`),
@@ -620,8 +620,8 @@ export default function ScannerAndSimulator({
       }` },
       { p: 60, l: "🔌 Configurando parámetros de conexión..." },
       { p: 80, l: "🔑 Conexión segura establecida con el portal..." },
-      { p: 95, l: "📨 Solicitud certificada. Procesando solicitud de facturación..." },
-      { p: 100, l: "✅ ¡Proceso de facturación finalizado con éxito! Registro actualizado." }
+      { p: 95, l: "📨 Solicitud certificada. Procesando solicitud en el portal..." },
+      { p: 100, l: "✅ ¡Proceso de solicitud finalizado con éxito! Registro de CFDI obtenido actualizado." }
     ];
 
     for (const step of steps) {
@@ -638,7 +638,7 @@ export default function ScannerAndSimulator({
           invoiceId: `INV-${Math.floor(100000 + Math.random() * 900000)}`
         });
       }
-      toast.success(`Ticket de ${ticket.nombreEmisor} autocorregido y facturado exitosamente sin re-subir.`, "Resolución Completa ✅");
+      toast.success(`Ticket de ${ticket.nombreEmisor} autocorregido y solicitado exitosamente en el portal sin re-subir.`, "Resolución Completa ✅");
       setSelectedContingencyTicket(null);
     } catch (err) {
       toast.error("Ocurrió un error al persistir la solución del ticket en la base de datos.");
@@ -911,7 +911,7 @@ export default function ScannerAndSimulator({
       "Extrayendo conceptos y desglosando impuestos...",
       "Validando importes y consistencia aritmética...",
       "Identificando RFC del emisor y dirección...",
-      "Comprobando integridad y facturación preliminar...",
+      "Comprobando integridad y solicitud preliminar...",
       "Casi listo. Generando respuesta estructurada..."
     ];
     let msg98Index = 0;
@@ -1166,7 +1166,7 @@ export default function ScannerAndSimulator({
         });
         setTicketId(offlineTicketId);
         toast.warning(
-          "No tienes conexión a internet en este momento. No te preocupes: hemos guardado la foto de tu ticket de forma segura y realizaremos todo el proceso de facturación automáticamente en cuanto recuperes tu conexión. ¡Nosotros nos encargamos! 🌐",
+          "No tienes conexión a internet en este momento. No te preocupes: hemos guardado la foto de tu ticket de forma segura y realizaremos la solicitud automatizada de tu factura en cuanto recuperes tu conexión. ¡Nosotros nos encargamos! 🌐",
           "Captura Sin Conexión"
         );
         setIsOcrLoading(false);
@@ -1337,7 +1337,7 @@ export default function ScannerAndSimulator({
       }
     } catch (err: any) {
       console.error(err);
-      setMessage(err.message || "Error al aprender el portal remoto de autofactura.");
+      setMessage(err.message || "Error al aprender el portal de facturación del comercio.");
     } finally {
       setIsLearningLoading(false);
     }
@@ -1894,12 +1894,12 @@ export default function ScannerAndSimulator({
     }
 
     const steps = [
-      { progress: 15, step: "Buscando portal de facturación..." },
+      { progress: 15, step: "Buscando portal del comercio..." },
       { progress: 35, step: "Preparando la solicitud..." },
       { progress: 55, step: "Configurando conector..." },
       { progress: 75, step: "Estableciendo conexión segura..." },
       { progress: 95, step: "Registrando conector..." },
-      { progress: 100, step: "¡Configuración completada con éxito! Iniciando facturación..." }
+      { progress: 100, step: "¡Configuración completada con éxito! Iniciando solicitud en el portal..." }
     ];
 
     let currentStepIdx = 0;
@@ -1936,10 +1936,10 @@ export default function ScannerAndSimulator({
 
           // 3. Trigger immediate billing
           await handleTriggerAutomation(newlyCreatedConnector);
-          toast.success("🧠 ¡Entrenamiento de IA completado! Factura procesada de inmediato.");
+          toast.success("🧠 ¡Entrenamiento de IA completado! Solicitud enviada de inmediato.");
         } catch (err: any) {
           console.error("Error after training complete:", err);
-          toast.error("La configuración finalizó pero no se pudo obtener la factura automáticamente.");
+          toast.error("La configuración finalizó pero no se pudo obtener la factura desde el portal automáticamente.");
           setIsTrainingModel(false);
         }
       }
@@ -1961,7 +1961,7 @@ export default function ScannerAndSimulator({
       // Validate dynamic fields
       const hasFolioField = fieldsSchema.some(f => f.key === "referenciaFacturacion" || f.key === "folio" || f.key === "ticketNumber");
       if (hasFolioField && !editFolio.trim()) {
-        setValidationError("Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura.");
+        setValidationError("Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura en el portal del comercio.");
         return;
       }
       const hasTotalField = fieldsSchema.some(f => f.key === "total");
@@ -2059,7 +2059,7 @@ export default function ScannerAndSimulator({
         return;
       }
       if (!editFolio.trim()) {
-        setValidationError("Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura.");
+        setValidationError("Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura en el portal del comercio.");
         return;
       }
       if (!editFecha.trim()) {
@@ -2160,7 +2160,7 @@ export default function ScannerAndSimulator({
               <p className="text-xs text-slate-500 leading-relaxed font-semibold">
                 {blockerReason === "limit"
                   ? `Has alcanzado el límite de tu plan actual (${fiscalProfile?.plan === "brisa" ? "10" : fiscalProfile?.plan === "serenidad" ? "30" : fiscalProfile?.plan === "nirvana" ? "100" : "5"} facturas).`
-                  : "Tu cobertura mensual de facturación ha vencido desde tu última fecha de pago."
+                  : "Tu cobertura mensual de obtención de facturas ha vencido desde tu última fecha de pago."
                 } Para seguir obteniendo facturas, debes de actualizar o renovar tu paquete desde la sección de facturación.
               </p>
             </div>
@@ -2279,7 +2279,7 @@ export default function ScannerAndSimulator({
               </div>
 
               <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed text-center">
-                El motor OCR lee pixeles refractarios en 3D para deducir montos, folios de facturación, fecha y el RFC corporativo.
+                El motor OCR lee pixeles refractarios en 3D para deducir montos, referencias de facturación, fecha y el RFC corporativo.
               </p>
             </div>
           ) : (
@@ -2442,7 +2442,7 @@ export default function ScannerAndSimulator({
                 </div>
 
                  <p className="text-xs text-slate-450 leading-relaxed font-medium">
-                  Bitácora inteligente en tiempo real para flujos técnicos, de facturación y de integraciones bancarias. Organiza alertas operativas críticas del conector y el SAT.
+                  Bitácora inteligente en tiempo real para flujos técnicos, de obtención de facturas y de integraciones bancarias. Organiza alertas operativas críticas del conector y el SAT.
                 </p>
 
                 {/* Categories Tab Bar */}
@@ -3585,7 +3585,7 @@ return list.map(n => {
                             <div className="space-y-1">
                               <span className="font-extrabold text-[10px] uppercase tracking-wider block text-rose-700">⚠️ ¡Atención! Ticket Ya Facturado</span>
                               <p className="font-semibold text-[11.5px] text-rose-900 leading-normal">
-                                Este ticket con Folio <strong className="font-black underline select-text">{extractedData?.folio}</strong> y RFC Emisor <strong className="font-black select-text">{extractedData?.rfcEmisor}</strong> ya fue facturado anteriormente en su cuenta.
+                                Este ticket con Folio <strong className="font-black underline select-text">{extractedData?.folio}</strong> y RFC Emisor <strong className="font-black select-text">{extractedData?.rfcEmisor}</strong> ya fue obtenido anteriormente desde el portal en su cuenta.
                               </p>
                               <p className="text-[10px] text-rose-700 font-medium pb-2.5">
                                 Recomendamos no procesarlo nuevamente para evitar duplicados fiscales ante el SAT.
@@ -3979,7 +3979,7 @@ return list.map(n => {
             return "Validando CFDI";
           }
           if (tStatus === "cfdi_validated" || tStatus === "completed") {
-            return "Factura lista";
+            return "Solicitud completada";
           }
           if (tStatus === "requires_manual_review" || tStatus === "failed") {
             return "Revisión requerida";
@@ -4001,10 +4001,10 @@ return list.map(n => {
                   </span>
                 </div>
                 <h3 className="text-lg font-black text-slate-900 font-display tracking-tight">
-                  Estamos procesando tu ticket...
+                  Estamos procesando tu ticket en el portal del comercio...
                 </h3>
                 <p className="text-xs text-slate-500 font-medium mt-1">
-                  ZenTicket está solicitando la factura en el portal oficial de facturación del comercio.
+                  ZenTicket está solicitando la factura en el portal oficial del comercio.
                 </p>
               </div>
               <div className="text-left sm:text-right sm:border-l sm:border-slate-100 sm:pl-5">

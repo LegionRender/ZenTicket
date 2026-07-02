@@ -409,8 +409,8 @@ export const Dashboard = () => {
               "1. Acceder al portal de facturación Alsea",
               "2. Capturar RFC receptor y datos del ticket de compra",
               "3. Indicar Uso de CFDI correspondiente",
-              "4. Obtener CFDI certificado",
-              "5. Guardar documentos PDF y XML generados"
+              "4. Obtener CFDI oficial",
+              "5. Guardar documentos PDF y XML obtenidos desde el portal"
             ]),
             createdAt: new Date().toISOString()
           },
@@ -430,8 +430,8 @@ export const Dashboard = () => {
               "1. Cargar el portal oficial de facturas de Tiendas OXXO",
               "2. Capturar los datos de ticket correspondientes",
               "3. Ingresar RFC de receptor fiscal",
-              "4. Autorizar emisión de CFDI con sello SAT",
-              "5. Consolidar documentos digitales en almacén"
+              "4. Solicitar el CFDI del comercio emisor",
+              "5. Descargar los documentos XML y PDF obtenidos"
             ]),
             createdAt: new Date().toISOString()
           },
@@ -451,8 +451,8 @@ export const Dashboard = () => {
               "1. Ingresar al portal de facturas Walmart México",
               "2. Suministrar TR y RFC receptor",
               "3. Suministrar código de sucursal de compra",
-              "4. Obtener CFDI certificado",
-              "5. Almacenar facturas PDF y XML"
+              "4. Obtener CFDI oficial",
+              "5. Almacenar facturas PDF y XML obtenidas"
             ]),
             createdAt: new Date().toISOString()
           }
@@ -599,7 +599,7 @@ export const Dashboard = () => {
         });
 
         if (!authResponse.ok) {
-          throw new Error("El motor del SAT reportó un error al certificar el CFDI.");
+          throw new Error("El portal del comercio reportó un error al solicitar la factura.");
         }
 
         const invoiceData = await authResponse.json();
@@ -1055,10 +1055,10 @@ export const Dashboard = () => {
         return next;
       });
 
-      toast.success("¡Certificado CFDI guardado con éxito en sus Gastos!");
+      toast.success("¡CFDI guardado con éxito en sus Gastos!");
     } catch (e) {
       console.error("Error saving CFDI:", e);
-      toast.error("Error al registrar factura certificada.");
+      toast.error("Error al registrar factura.");
       throw e;
     }
   };
@@ -1104,8 +1104,8 @@ export const Dashboard = () => {
       "1. Acceder al portal remoto de facturación corporativa",
       "2. Ingresar código de referencia y RFC de receptor",
       "3. Configurar Uso de CFDI 4.0 seleccionado",
-      "4. Obtener CFDI certificado",
-      "5. Sincronizar comprobantes PDF y XML oficiales"
+      "4. Obtener CFDI oficial",
+      "5. Sincronizar comprobantes PDF y XML obtenidos"
     ];
 
     const newConnector = {
@@ -1508,7 +1508,7 @@ export const Dashboard = () => {
                   Límite de Base de Datos Diaria Excedido (Modo Local Seguro Activado)
                 </h4>
                 <p className="text-[11px] text-rose-700/95 leading-relaxed font-semibold max-w-4xl text-left font-sans">
-                  La base de datos en tiempo real de Firebase para este proyecto ha superado la cuota de lectura gratuita diaria (Free daily read units quota exceeded). Para evitar que pierdas tus avances o tu sesión de navegación, <strong>hemos activado de forma transparente el almacenamiento y la simulación local segura (Contingencia Cached)</strong>. Tus datos, tickets escaneados y comprobantes generados se conservarán de manera persistente en la memoria de tu navegador.
+                  La base de datos en tiempo real de Firebase para este proyecto ha superado la cuota de lectura gratuita diaria (Free daily read units quota exceeded). Para evitar que pierdas tus avances o tu sesión de navegación, <strong>hemos activado de forma transparente el almacenamiento y la simulación local segura (Contingencia Cached)</strong>. Tus datos, tickets escaneados y comprobantes obtenidos se conservarán de manera persistente en la memoria de tu navegador.
                 </p>
                 {isAdmin && (
                   <p className="text-[10px] text-rose-500 font-mono mt-1 text-left">

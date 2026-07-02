@@ -26,7 +26,7 @@ if (fs.existsSync(serviceAccountPath)) {
   });
 }
 
-const db = getFirestore();
+const db = getFirestore("ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee");
 
 async function processJob(jobId: string) {
   const lockedJob = await lockJob(jobId, workerId);

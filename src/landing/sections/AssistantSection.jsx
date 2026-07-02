@@ -8,7 +8,7 @@ import { TID } from "@/shared/utils/testIds";
 const chips = [
   { icon: MapPin, label: "Encuentra el portal correcto" },
   { icon: FileEdit, label: "Llena tus datos por ti" },
-  { icon: FileCheck2, label: "Genera tu factura en segundos" },
+  { icon: FileCheck2, label: "Obtiene tu factura en segundos" },
 ];
 
 const AssistantSection = () => {
@@ -79,7 +79,7 @@ const AssistantSection = () => {
 
             <h2 className="font-display font-extrabold mt-5 text-[34px] sm:text-[42px] lg:text-[48px] leading-[1.05] tracking-tight text-slate-900">
               Tu asistente personal{" "}
-              <br className="hidden sm:inline" /> de <span className="text-blue-600">facturación</span>
+              <br className="hidden sm:inline" /> para <span className="text-blue-600">obtener facturas</span>
             </h2>
 
             <p className="mt-5 text-[15px] sm:text-[16px] leading-7 text-slate-600 max-w-[520px]">

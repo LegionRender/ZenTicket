@@ -14,7 +14,7 @@ const faqs = [
   },
   {
     q: "¿Qué pasa si mi ticket no tiene QR?",
-    a: "Nuestra IA es capaz de leer tickets impresos sin QR. Identifica automáticamente el RFC, total, fecha y comercio para generar tu factura sin necesidad de código.",
+    a: "Nuestra IA es capaz de leer tickets impresos sin QR. Identifica automáticamente el RFC, total, fecha y comercio para solicitar tu factura en el portal del comercio sin necesidad de código.",
   },
   {
     q: "¿Qué comercios son compatibles?",

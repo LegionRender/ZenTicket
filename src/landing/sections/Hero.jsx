@@ -43,15 +43,15 @@ const Hero = ({ onCtaClick }) => {
             </div>
 
             <h1 className="font-display font-extrabold mt-5 text-[36px] sm:text-[56px] lg:text-[68px] leading-[1.05] tracking-[-0.025em] text-white">
-              Convierte tus{" "}
-              <br className="hidden sm:inline" /> tickets en facturas.{" "}
+              Obtén tus{" "}
+              <br className="hidden sm:inline" /> facturas de tickets.{" "}
               <br className="hidden sm:inline" />
               <span className="zt-grad-text">Sin estrés.</span>
             </h1>
 
             <p className="mt-5 text-[15px] sm:text-[16px] leading-7 text-white/70 max-w-[560px]">
-              Toma una foto. ZenTicket encuentra el portal correcto,
-              completa tus datos y genera tu factura automáticamente.{" "}
+              Toma una foto. ZenTicket encuentra el portal del comercio,
+              completa tu solicitud con tus datos fiscales de receptor y obtiene tu factura automáticamente.{" "}
               <br className="hidden sm:inline" />
               Tú sigue con tu día, nosotros hacemos el resto.
             </p>
@@ -195,7 +195,7 @@ const PhoneMock = () => {
             />
             <StepCard
               icon={<ShieldCheck size={14} className="text-emerald-400" />}
-              title="3. Factura generada"
+              title="3. Factura obtenida"
               subtitle="Factura_1234.pdf"
               tint="emerald"
             />

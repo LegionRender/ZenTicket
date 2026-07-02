@@ -6,29 +6,29 @@ const steps = [
   {
     n: "01",
     icon: Camera,
-    title: "Escanea tu ticket",
+    title: "Sube tu ticket",
     desc: "Toma una foto o sube una captura desde tu celular.",
     color: "from-sky-400 to-sky-500",
   },
   {
     n: "02",
     icon: Cpu,
-    title: "ZenTicket analiza",
-    desc: "Nuestra IA identifica el comercio y extrae toda la información necesaria.",
+    title: "Identificación",
+    desc: "Nuestra IA identifica el comercio y los datos principales del ticket.",
     color: "from-blue-500 to-blue-600",
   },
   {
     n: "03",
     icon: Zap,
-    title: "Automatización inteligente",
-    desc: "Ingresamos al portal correcto, completamos los datos y enviamos la solicitud.",
+    title: "Solicitud automatizada",
+    desc: "El sistema completa la solicitud en el portal del comercio con tus datos de receptor.",
     color: "from-indigo-500 to-indigo-600",
   },
   {
     n: "04",
     icon: Check,
-    title: "Factura lista",
-    desc: "Recibe tu factura en segundos en tu correo y en la app.",
+    title: "CFDI obtenido",
+    desc: "Si el portal entrega el XML/PDF, se guarda y descarga en tu cuenta automáticamente.",
     color: "from-emerald-500 to-emerald-600",
   },
 ];
@@ -71,6 +71,13 @@ const HowItWorks = () => {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Aviso de Responsabilidad Fiscal */}
+        <div className="mt-14 max-w-2xl mx-auto bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center">
+          <p className="text-[11.5px] text-slate-500 leading-relaxed font-semibold">
+            <strong className="text-[#0B53F4]">Aviso importante:</strong> ZenTicket no emite CFDI por cuenta propia. Los CFDI son obtenidos desde los portales oficiales de los comercios emisores.
+          </p>
         </div>
       </div>
     </section>

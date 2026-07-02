@@ -2302,7 +2302,7 @@ export default function ProfileForm({
                 CONFIGURACION FISCAL MANDATORIA
               </h4>
               <p className="text-[11.5px] text-slate-600 leading-relaxed font-semibold">
-                Es mandatorio completar tus datos fiscales certificados (RFC, Razón Social, Régimen y Código Postal) al crear una cuenta nueva antes de poder digitalizar tus tickets de compra o automatizar tus facturaciones.
+                Es mandatorio completar tus datos fiscales certificados (RFC, Razón Social, Régimen y Código Postal) al crear una cuenta nueva antes de poder digitalizar tus tickets de compra o automatizar tus solicitudes de facturación en los portales de los comercios.
               </p>
             </div>
           </div>
@@ -2442,7 +2442,7 @@ export default function ProfileForm({
                 ) : (
                   <>
                     <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-                    <span>Cargar Constancia SAT</span>
+                    <span>Cargar Constancia Fiscal</span>
                   </>
                 )}
               </button>
@@ -3553,7 +3553,7 @@ export default function ProfileForm({
                 {[
                   {
                     q: "¿Cómo se descargan automáticamente las facturas?",
-                    a: "ZenTicket lee los datos de tu ticket de compra y automatiza el proceso ingresando tus datos fiscales de receptor directamente en el portal oficial del comercio emisor para descargar el XML y PDF oficiales de forma 100% segura."
+                    a: "ZenTicket lee los datos de tu ticket de compra y automatiza el proceso ingresando tus datos fiscales de receptor directamente en el portal oficial del comercio emisor para obtener y descargar el XML y PDF oficiales de forma 100% segura."
                   },
                   {
                     q: "¿La solicitud de facturación consume saldo o timbres adicionales?",
@@ -3565,7 +3565,7 @@ export default function ProfileForm({
                   },
                   {
                     q: "¿Necesito proporcionar mi firma electrónica o sellos CSD?",
-                    a: "No. ZenTicket nunca te solicitará tu E-Firma, archivos .key, .cer o contraseñas del SAT. Toda la facturación se realiza a través de los portales oficiales de los comercios usando tus datos fiscales de receptor estándar (RFC, Razón Social, Régimen y CP)."
+                    a: "No. ZenTicket nunca te solicitará tu E-Firma, CSD, archivos .key, .cer o contraseñas del SAT. Toda la obtención de facturas se realiza automatizando la solicitud en los portales oficiales de los comercios usando tus datos fiscales de receptor estándar (RFC, Razón Social, Régimen y CP)."
                   }
                 ].map((item, index) => {
                   const isOpen = openFaqIndex === index;
@@ -3816,7 +3816,7 @@ export default function ProfileForm({
               CONFIGURACION FISCAL MANDATORIA REQUERIDA
             </h4>
             <p className="text-xs text-slate-600 leading-relaxed font-semibold">
-              Tu cuenta se encuentra en estado inactivo. Es mandatorio completar el registro de tus datos fiscales oficiales de contribuyente (RFC, Razón Social, Régimen y Código Postal) para poder digitalizar tickets de compra y solicitar facturaciones.
+              Tu cuenta se encuentra en estado inactivo. Es mandatorio completar el registro de tus datos fiscales oficiales como receptor (RFC, Razón Social, Régimen y Código Postal) para poder digitalizar tickets de compra y solicitar facturaciones en los portales de los comercios.
             </p>
             <button
               onClick={() => setIsEditingFiscal(true)}
@@ -4037,8 +4037,8 @@ export default function ProfileForm({
                         <Shield className="w-5 h-5 stroke-[2]" />
                       </div>
                       <div className="text-left leading-tight">
-                        <span className="text-sm font-bold text-slate-800 block">Datos Fiscales (SAT)</span>
-                        <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">Seguridad y validación CFDI v4.0</span>
+                        <span className="text-sm font-bold text-slate-800 block">Datos Fiscales del Receptor</span>
+                        <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">Datos para solicitar CFDI v4.0</span>
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-[#0B53F4]" />
@@ -4112,7 +4112,7 @@ export default function ProfileForm({
               ¡Sincronización de Memoria Inactiva!
             </h4>
             <p className="text-[11px] text-slate-600 leading-relaxed font-semibold">
-              Por seguridad fiscal, límites de consumo y prevención de cuentas múltiples fraudulentas, ZenTicket mantendrá una copia de seguridad segura de tus datos fiscales y comprobantes emitidos. Si confirmas, tu sesión finalizará y tu cuenta se desactivará, pero conservaremos todo tu historial si inicias sesión nuevamente.
+              Por seguridad fiscal, límites de consumo y prevención de cuentas múltiples fraudulentas, ZenTicket mantendrá una copia de seguridad segura de tus datos fiscales y comprobantes obtenidos. Si confirmas, tu sesión finalizará y tu cuenta se desactivará, pero conservaremos todo tu historial si inicias sesión nuevamente.
             </p>
             <div className="flex gap-2.5 pt-1">
               <button
