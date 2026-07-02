@@ -1780,10 +1780,10 @@ export default function TicketsListScreen({
           {/* DYNAMIC SMTP CONFIGURATION NOTIFICATION */}
           <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800/80 select-none text-left">
             {smtpStatus?.smtpConfigured ? (
-              <div className="flex items-start gap-2 bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-500/10 rounded-xl p-3 text-left">
-                <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-450 shrink-0 mt-0.5" />
+              <div className="flex items-start gap-2 bg-emerald-500/10 border border-emerald-500/35 rounded-xl p-3 text-left text-emerald-700 dark:text-emerald-400">
+                <Check className="w-4 h-4 text-emerald-650 dark:text-emerald-400 shrink-0 mt-0.5" />
                 <div className="leading-tight">
-                  <span className="text-[10.5px] text-emerald-800 dark:text-emerald-400 font-extrabold block">
+                  <span className="text-[10.5px] font-extrabold block">
                     Servidor de Correo SMTP Activo
                   </span>
                   <p className="text-[9.5px] text-emerald-650 dark:text-emerald-300 font-semibold block mt-0.5 leading-normal">
@@ -1792,15 +1792,15 @@ export default function TicketsListScreen({
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col gap-1.5 bg-amber-50/70 dark:bg-amber-950/10 border border-amber-200/50 dark:border-amber-500/10 rounded-xl p-3 text-left">
+              <div className="flex flex-col gap-1.5 bg-amber-500/10 border border-amber-500/35 rounded-xl p-3 text-left text-amber-700 dark:text-amber-400">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse shrink-0" />
-                  <span className="text-[10.5px] text-amber-800 dark:text-amber-400 font-black">
+                  <div className="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-455 animate-pulse shrink-0" />
+                  <span className="text-[10.5px] font-black">
                     Servidor SMTP Desconfigurado
                   </span>
                 </div>
                 <p className="text-[9.5px] text-amber-700 dark:text-amber-350 leading-normal font-semibold">
-                  Si deseas recibir los correos directamente en tu buzón personal o en el de tu contador, configura las claves <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_HOST</code>, <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_USER</code> y <code className="bg-amber-100/80 dark:bg-amber-950/30 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-900 dark:text-amber-350">SMTP_PASS</code> en la pestaña <strong>Settings &gt; Secrets</strong> de AI Studio.
+                  Si deseas recibir los correos directamente en tu buzón personal o en el de tu contador, configura las claves <code className="bg-amber-500/20 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-800 dark:text-amber-350">SMTP_HOST</code>, <code className="bg-amber-500/20 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-800 dark:text-amber-350">SMTP_USER</code> y <code className="bg-amber-500/20 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-800 dark:text-amber-350">SMTP_PASS</code> en la pestaña <strong>Settings &gt; Secrets</strong> de AI Studio.
                 </p>
               </div>
             )}
@@ -1985,12 +1985,12 @@ export default function TicketsListScreen({
 
                     {/* Escalation/Failure Reason Card Block */}
                     {(t.status === "review" || t.status === "requires_manual_review" || t.status === "requires_user_correction" || isFailed) && (
-                      <div className={`text-[11px] p-3 rounded-2xl leading-relaxed font-sans ${
+                      <div className={`text-[11px] p-3.5 rounded-2xl leading-relaxed font-sans border ${
                         t.status === "requires_user_correction"
-                          ? "bg-orange-50 dark:bg-orange-950/30 text-orange-700 dark:text-orange-300 border border-orange-200/50 dark:border-orange-500/20"
+                          ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30 dark:border-orange-500/40"
                           : t.status === "requires_manual_review" || t.status === "review"
-                            ? "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-350 border border-amber-200/50 dark:border-amber-500/20"
-                            : "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-350 border border-rose-200/50 dark:border-rose-500/20"
+                            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 dark:border-amber-500/40"
+                            : "bg-rose-500/10 text-rose-600 dark:text-rose-450 border-rose-500/30 dark:border-rose-500/40"
                       }`}>
                         <span className="font-bold block uppercase text-[9px] mb-1 tracking-wider">
                           {t.status === "requires_user_correction"
