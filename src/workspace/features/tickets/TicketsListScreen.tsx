@@ -21,6 +21,7 @@ interface TicketsListScreenProps {
   newlyAddedTicketId?: string | null;
   onClearNewlyAddedTicketId?: () => void;
   onUpdateTicketInDb?: (ticketId: string, updates: any) => Promise<void>;
+  initialSubTab?: "en-seguimiento" | "cfdi-obtenidos";
 }
 
 // ----------------------------------------------------
@@ -199,7 +200,8 @@ export default function TicketsListScreen({
   onTabChange,
   newlyAddedTicketId,
   onClearNewlyAddedTicketId,
-  onUpdateTicketInDb
+  onUpdateTicketInDb,
+  initialSubTab
 }: TicketsListScreenProps) {
   const toast = useToast();
   
@@ -212,15 +214,22 @@ export default function TicketsListScreen({
       return () => clearTimeout(timer);
     }
   }, [newlyAddedTicketId, onClearNewlyAddedTicketId]);
-  
+
+  // Filter inside list
+  const [activeSubTab, setActiveSubTab] = useState<"en-seguimiento" | "cfdi-obtenidos">(initialSubTab || "en-seguimiento");
+
+  // Sync sub-tab from parent prop
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
   // Outer routing tabs: list or ver-pdf
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [showXmlCode, setShowXmlCode] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [isValidatingSat, setIsValidatingSat] = useState<boolean>(false);
-  
-  // Filter inside list
-  const [activeSubTab, setActiveSubTab] = useState<"en-seguimiento" | "cfdi-obtenidos">("en-seguimiento");
   
   // Interactive inputs
   const [emailTo, setEmailTo] = useState(currentUserEmail || "legionrender@gmail.com");

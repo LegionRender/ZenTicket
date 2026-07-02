@@ -3,84 +3,130 @@ name: ecc-zenticket
 description: Specialized Everything Claude Code (ECC) skill for ZenTicket containing guidelines, instructions, and communication protocols for the 8 project specialists (Tech Lead de Flujo Fiscal, Especialista OCR, UX de Corrección, PortalMap, Playwright Runner, Firebase, CFDI/SAT, QA Tester).
 ---
 
-# ZenTicket ECC Specialized Skill
+# Manual y Memoria Operativa de ZenTicket
 
-Este documento define la estructura, responsabilidades y guías de coordinación para los 8 especialistas encargados de auditar, diseñar, implementar y verificar el sistema de automatización de facturas en ZenTicket.
-
----
-
-## 1. Roles y Responsabilidades de los Especialistas
-
-### 1.1. Tech Lead de Flujo Fiscal
-* **Objetivo principal**: Garantizar la integridad semántica de los datos fiscales a lo largo de todo el ciclo de vida del ticket.
-* **Directrices de Auditoría**:
-  * **No mezclar identificadores**: El ID interno de Firestore (ej. `ticket_1plmibkd`) nunca debe usarse como el folio de facturación (`folio` o `billingReference`), ni confundirse con el UUID fiscal (`folioFiscal`).
-  * **Validación de RFCs**: Verificar constantemente la direccionalidad de los RFCs (el RFC emisor corresponde al comercio, el RFC receptor corresponde al cliente).
-  * **Consistencia de Totales**: Asegurar que los importes totales no sufran pérdidas de precisión decimal ni redondeos incorrectos al convertirse entre strings y floats.
-
-### 1.2. Especialista OCR
-* **Objetivo principal**: Auditar y limpiar la entrada del motor de lectura de tickets (Gemini/OpenAI Vision).
-* **Directrices**:
-  * **Análisis de `rawOcrText`**: Verificar que el texto plano extraído del ticket sea la única fuente para buscar datos estructurados antes de recurrir a heurísticas.
-  * **Prevención de Alucinaciones**: Detectar si el OCR inventó folios, fechas o importes inexistentes en el ticket físico.
-  * **Mapeo a `portalFields`**: Asegurar la correcta extracción de campos específicos requeridos por el conector (referencias de facturación, número de ticket, sucursal, etc.).
-
-### 1.3. Especialista UX de Corrección
-* **Objetivo principal**: Optimizar las pantallas donde el usuario revisa y corrige los datos antes de lanzar la automatización.
-* **Directrices**:
-  * **Claridad en Campos Faltantes**: Si el OCR no detectó un campo requerido (ej. la referencia de facturación), la UI debe marcar de forma clara y destacada qué campo se necesita y dónde encontrarlo en el ticket.
-  * **Flujo del Formulario**: Asegurar un diseño responsivo, limpio (utilizando `bg-slate-50` y tipografías uniformes como Inter) y con micro-animaciones en los estados de carga y error.
-
-### 1.4. Especialista PortalMap
-* **Objetivo principal**: Diseñar y auditar las reglas de navegación del portal del comercio (`portal_maps`).
-* **Directrices**:
-  * **Esquema de Campos**: Definir de forma precisa en el conector cuáles campos son obligatorios (`requiredFields`), mapear sus selectores CSS y definir el comportamiento del flujo (`stepsJson`).
-  * **Control de Errores y Captcha**: Identificar selectores CSS de mensajes de error (`errorSelectors`) y elementos de bloqueo/captcha (`captchaSelectors`).
-
-### 1.5. Especialista Playwright Runner
-* **Objetivo principal**: Mantener el motor de ejecución automatizada (`runner`) robusto ante fallos del portal oficial.
-* **Directrices**:
-  * **Manejo de Tiempos**: Implementar esperas dinámicas (`waitForSelector` con timeouts controlados) en lugar de tiempos muertos estáticos (`sleep`).
-  * **Captura de Evidencias**: Asegurar que en caso de fallo se capturen capturas de pantalla (`screenshots`) y se guarden en Cloud Storage de forma segura, asignando la ruta de la evidencia al error del ticket.
-  * **Descargas Seguras**: Verificar la correcta obtención y guardado en Storage privado del XML y PDF oficial del CFDI.
-
-### 1.6. Especialista Firebase
-* **Objetivo principal**: Velar por el esquema de datos, rendimiento y seguridad de Firestore y Storage.
-* **Directrices**:
-  * **Ruta de Facturas**: Las facturas de los usuarios deben guardarse única y estrictamente en su subcolección dedicada `/users/{userId}/invoices/{invoiceId}` para cumplir con las reglas de privacidad y ser leídas correctamente por el frontend.
-  * **Reglas de Seguridad**: Mantener actualizadas las reglas en `firestore.rules`, garantizando que tanto la base de datos `(default)` como las instancias con nombre (ej. `ai-studio-...`) hereden las mismas reglas de lectura/escritura seguras.
-  * **Snapshots Inmutables**: Al crear un `invoice_job`, capturar snapshots inmutables del ticket y del perfil fiscal para evitar discrepancias si el usuario edita sus datos mientras el runner está procesando el ticket.
-
-### 1.7. Especialista CFDI/SAT
-* **Objetivo principal**: Garantizar que el CFDI XML descargado sea legalmente válido y corresponda al ticket original.
-* **Directrices**:
-  * **Estructura XML**: Validar la existencia del nodo `cfdi:Comprobante` y el complemento `tfd:TimbreFiscalDigital`.
-  * **Validación SAT Real**: Ejecutar consultas HTTP seguras contra el WS de verificación del SAT usando los RFCs, UUID y total para confirmar el estado ("Vigente", "Cancelado").
-
-### 1.8. QA Tester
-* **Objetivo principal**: Coordinar las pruebas de integración con tickets físicos reales y documentar los flujos de estado.
-* **Directrices**:
-  * **Prueba de Transición de Estados**: Verificar que un ticket pase limpiamente por los estados: `ticket_uploaded` -> `connector_resolving` -> `queued_for_runner` -> `runner_processing` -> `completed` (o `requires_manual_review` en caso de un error legítimo del portal).
-  * **Documentación de Fallas**: Reportar con detalle los estados finales de tickets fallidos para retroalimentar al especialista de Playwright o PortalMap.
+Este documento define la estructura técnica, responsabilidades, guías de coordinación y reglas de integridad que rigen el desarrollo, modificación y operación de ZenTicket. Sirve como memoria operativa para asegurar que futuros agentes e ingenieros respeten la lógica del proyecto.
 
 ---
 
-## 2. Flujo de Comunicación y Protocolo de Trabajo
+## 1. Lógica y Ciclo de Automatización Fiscal
 
-Cuando se desarrolle una funcionalidad o se depure un error en ZenTicket, los especialistas deben interactuar siguiendo este flujo secuencial:
+Para evitar errores y asegurar validez legal, el flujo de procesamiento debe seguir estrictamente la siguiente secuencia lineal de transición de estados y datos:
 
-```mermaid
-graph TD
-    A[QA Tester: Identifica y reporta falla en ticket] --> B[Especialista OCR: Revisa rawOcrText and portalFields]
-    B --> C[Tech Lead: Audita consistencia de IDs, Folios y RFCs]
-    C --> D[Especialista Firebase: Confirma escritura en subcolección y evalúa Reglas]
-    D --> E[Especialista PortalMap/Playwright: Corrige navegación o selectores de descarga]
-    E --> F[Especialista CFDI/SAT: Valida estructura XML resultante]
-    F --> G[UX de Corrección: Refina interfaces en caso de faltar datos requeridos]
-    G --> H[QA Tester: Valida el flujo completo de principio a fin]
+```
+[Foto del Ticket]
+       │
+       ▼
+     [OCR] ──► Extracción inicial (rawOcrText)
+       │
+       ▼
+ [portalFields] ──► Mapeo y saneamiento de campos para el portal del comercio
+       │
+       ▼
+ [fiscalProfile] ──► Combinación con el perfil fiscal del receptor (usuario)
+       │
+       ▼
+ [invoice_job] ──► Encolamiento inmutable en Firestore con snapshots
+       │
+       ▼
+[Runner Playwright] ──► Ejecución automatizada en el portal del comercio
+       │
+       ▼
+ [XML/PDF Real] ──► Descarga y persistencia en Cloud Storage
+       │
+       ▼
+[Validación XML] ──► Verificación de estructura y firma digital
+       │
+       ▼
+ [Consulta SAT] ──► Consulta HTTP en el WS de Verificación del SAT
+       │
+       ▼
+[cfdi_validated] ──► Estado final del ticket (SOLO si el SAT reporta estado "Vigente")
 ```
 
-1. **Investigación de Entrada**: El Especialista OCR y el Tech Lead de Flujo Fiscal analizan los datos iniciales y el ticket físico.
-2. **Infraestructura**: El Especialista Firebase asegura que la persistencia en las colecciones y la evaluación de las reglas de seguridad no bloqueen el flujo de encolamiento.
-3. **Automatización**: El Especialista PortalMap y de Playwright aseguran la comunicación limpia con el portal del comercio.
-4. **Verificación**: El Especialista CFDI/SAT y el QA Tester confirman el timbrado oficial y la persistencia de la factura en el historial del usuario.
+### Reglas de Oro de Integridad de Datos:
+1. **Identificadores y Referencias:**
+   * **NUNCA** utilices el `ticketId` de Firestore, un UUID autogenerado en frontend, o el `doc.id` interno como la referencia de facturación o el folio del ticket que se ingresa en el portal del comercio.
+   * La referencia de facturación debe provenir exclusivamente de los datos extraídos del ticket físico (`portalFields.billingReference`) o de la captura manual explícita del usuario.
+2. **Validación y Certificación:**
+   * **NUNCA** marques un ticket con el estado `cfdi_validated` de forma ficticia o simulada.
+   * El estado `cfdi_validated` es un estado final que **requiere obligatoriamente** la presencia del archivo XML real descargado del portal del comercio y una respuesta exitosa con estatus "Vigente" del WS de validación del SAT.
+
+### Glosario del Modelo de Datos:
+* **`ticketData`:** Los metadatos generales del ticket subido (fecha de compra, total, RFC del emisor, nombre del emisor).
+* **`portalFields`:** Los campos específicos de entrada que requiere el conector del comercio (ej. folio, número de ticket, sucursal, ID de transacción, etc.).
+* **`fiscalProfile`:** Los datos de identificación fiscal del usuario receptor (RFC, Razón Social, Régimen Fiscal, Código Postal, Uso de CFDI, Correo).
+* **`connector`:** Configuración del comercio que vincula el nombre y RFC con un `portalMap` específico.
+* **`portalMap`:** Definición de campos requeridos (`requiredFields`), pasos de navegación (`stepsJson`), selectores de captcha, y reglas de descarga del portal oficial.
+* **`invoice_job`:** Documento de cola en Firestore (`/invoice_jobs`) que contiene snapshots inmutables del perfil fiscal y del ticket para que el runner los procese en segundo plano.
+* **`runner_logs`:** Registro detallado de pasos técnicos de navegación de Playwright, errores del portal, y screenshots de evidencia en caso de fallos.
+
+---
+
+## 2. Biblioteca de Conectores y Consola de Administración
+
+ZenTicket posee una consola de administración para monitorear la salud y precisión de los conectores de los comercios.
+
+### Estados de los Conectores:
+* **`production_ready`:** El conector funciona al 100% de manera automatizada, las descargas y el SAT validan limpiamente.
+* **`real_validation`:** Conector activo en producción pero bajo supervisión estrecha y validación en tiempo real.
+* **`trained_needs_validation`:** El conector fue entrenado mediante el sandbox/IA pero requiere verificar que sus selectores funcionen con tickets reales antes de habilitarlo al público.
+* **`runner_not_available`:** El portal del comercio está caído o el runner tiene un problema técnico temporal con sus selectores CSS.
+* **`disabled`:** El conector ha sido desactivado manualmente debido a cambios estructurales en el portal del comercio.
+
+### Herramientas de Auditoría:
+* **Panel "Tickets Reales Recientes":** Bitácora donde el administrador ve fotos reales de tickets subidos junto con sus clasificaciones.
+* **Logs del Runner y Capturas:** Historial detallado de Playwright con screenshots automáticos cuando ocurre un error en el portal (ej. CAPTCHA, datos inválidos).
+* **Reglas para promover un conector a producción (`production_ready`):**
+  1. Debe haber procesado al menos 5 tickets reales de forma exitosa de manera consecutiva.
+  2. Los archivos XML y PDF correspondientes deben estar descargados y con validación del SAT exitosa ("Vigente").
+  3. No debe reportar errores de selectores CSS (timeouts o fallas de navegación) en los últimos 7 días.
+
+---
+
+## 3. Sistema de Diseño y Reglas Visuales
+
+Para mantener la estética premium, consistente y alineada a las capturas oficiales, respeta la siguiente guía visual:
+
+### 3.1. Paleta de Colores
+* **Colores de Marca:**
+  * Azul Premium: `#0B53F4` (Botones primarios, enlaces activos, headers)
+  * Azul Degradado: de `#0546F0` a `#1268FF` (Card de estado del Inicio)
+  * Fondo Oscuro: `#070a16` (Fondo general en tema oscuro)
+  * Fondo Workspace Oscuro: `#0b0d19` (Cards y contenedores en tema oscuro)
+* **Colores de Estado (Semáforos):**
+  * Éxito (Completo / Procesado): Verde esmeralda (`#10B981` / Tailwind `green-500`)
+  * Error (Fallo / Crítico): Rojo rubí (`#EF4444` / Tailwind `rose-500` / `red-500`)
+  * Alerta (Revisión / Pendiente): Ámbar (`#F59E0B` / Tailwind `amber-500`)
+  * Información / Espera: Azul medio (`#3B82F6` / Tailwind `blue-500`)
+
+### 3.2. Tipografía y Jerarquías
+* **Familia Tipográfica:** Inter (principal), Outfit o Roboto para números/headers si corresponde.
+* **Títulos Principales:** `text-[28px]`, font-extrabold o font-black, color azul de la marca (`#1360f8`) o blanco, con `tracking-tight`.
+* **Subtítulos de Sección:** `text-base` o `text-sm`, font-extrabold, uppercase, tracking-wider.
+* **Botones:** `text-xs` o `text-[10px]`, font-black, uppercase, rounded-xl/rounded-2xl, transiciones suaves y cursor-pointer.
+* **Cards:** Bordes suavizados (`rounded-3xl` o `rounded-2xl`), sombras finas (`shadow-2xs` o `shadow-xs`), bordes ligeros (`border border-slate-200/50` o `border-slate-800/80`).
+
+### 3.3. Consistencia Móvil / Escritorio
+* La app debe ser 100% responsiva. Utiliza flex y grids flexibles (`grid-cols-1 lg:grid-cols-12`).
+* En pantallas pequeñas, oculta columnas secundarias o utiliza segmented controls para alternar vistas (ej. las pestañas móviles de tickets "En proceso" y "Listos").
+* Mantén hit areas y botones de al menos `44px` de altura en móvil para facilitar el tacto.
+
+### 3.4. Mensajes al Usuario
+* **Directriz:** Los mensajes deben ser claros, amables, no técnicos y orientados a la acción. Evita mostrar crasheos de código directos, errores de base de datos o stacktraces de Playwright.
+* **Ejemplo Correcto:** *"Este comercio requiere revisión manual o no entregó el XML/PDF. ZenTicket está validando el estado de tu comprobante."*
+* **Ejemplo Incorrecto:** *"Error: Puppeteer selector '#btn-descarga' timeout 30000ms at page.click()."*
+
+---
+
+## 4. Reglas de Modificación Segura (Desarrollo)
+
+1. **Separación de Lógica y Vista:**
+   * No agregues lógica pesada de negocio o llamadas directas de base de datos dentro del renderizado de componentes visuales JSX/TSX. Encapsula las transacciones en servicios y API wrappers (`src/services/api/` y `src/services/firebase/`).
+2. **Políticas de Conectores:**
+   * No modifiques ni reescribas selectores CSS de conectores productivos (`portal_maps`) sin ejecutar antes las pruebas de validación correspondientes en el entorno de desarrollo/runner.
+3. **Seguridad y Firestore:**
+   * Nunca expongas tokens, claves privadas de API (ej. Gemini o Firebase credentials) ni passwords del SAT directamente en el código de cliente.
+   * Todo cambio en la estructura de almacenamiento debe ser validado contra las reglas en `firestore.rules`.
+4. **Validación de Compilación:**
+   * Siempre, antes de dar por terminado un ajuste, ejecuta `npm run build` en el root y `npm run build` en el runner para asegurar que el compilador de TypeScript y Vite no arrojen errores de tipado o importación.

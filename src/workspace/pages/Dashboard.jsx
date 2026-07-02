@@ -112,8 +112,49 @@ export const Dashboard = () => {
   const learningTimeoutRef = useRef(null);
   const isSyncingRef = useRef(false);
 
-  // Track read notification IDs in state at the dashboard level to share with the header bell icon
-  const [readNotifIds, setReadNotifIds] = useState([]);
+  // Track read notification IDs in state at the dashboard level, synced with Firestore/localStorage
+  const readNotifIds = React.useMemo(() => {
+    if (fiscalProfile && Array.isArray(fiscalProfile.readNotificationIds)) {
+      return fiscalProfile.readNotificationIds;
+    }
+    const localSaved = localStorage.getItem("readNotifIds_" + (user?.uid || ""));
+    if (localSaved) {
+      try {
+        return JSON.parse(localSaved);
+      } catch (_) {}
+    }
+    return [];
+  }, [fiscalProfile, user]);
+
+  const handleMarkNotificationRead = async (notifIdOrFunc) => {
+    if (!user) return;
+    
+    let notifId = "";
+    if (typeof notifIdOrFunc === "function") {
+      const prev = fiscalProfile?.readNotificationIds || [];
+      const updated = notifIdOrFunc(prev);
+      const newItems = updated.filter(id => !prev.includes(id));
+      if (newItems.length === 0) return;
+      notifId = newItems[0];
+    } else {
+      notifId = notifIdOrFunc;
+    }
+    
+    const currentReadIds = fiscalProfile?.readNotificationIds || [];
+    if (currentReadIds.includes(notifId)) return;
+    const updatedIds = [...currentReadIds, notifId];
+    
+    // Optimistic local state update in fiscalProfile state
+    setFiscalProfile(prev => prev ? { ...prev, readNotificationIds: updatedIds } : prev);
+    localStorage.setItem("readNotifIds_" + user.uid, JSON.stringify(updatedIds));
+
+    try {
+      const docRef = doc(db, "fiscalProfiles", user.uid);
+      await setDoc(docRef, { readNotificationIds: updatedIds }, { merge: true });
+    } catch (err) {
+      console.warn("Error marking notification read in Firestore:", err);
+    }
+  };
 
   // Compute if there are any unread operational notifications
   const hasUnreadNotifications = React.useMemo(() => {
@@ -1254,7 +1295,9 @@ export const Dashboard = () => {
 
   const isNavigationDisabled = (fiscalProfile?.navigationDisabled || false) && !isProfileComplete;
 
-  const handleTabClick = (tab) => {
+  const [initialTicketsSubTab, setInitialTicketsSubTab] = useState("en-seguimiento");
+
+  const handleTabClick = (tab, subTab) => {
     if (isNavigationDisabled) {
       toast.error("La navegación del contribuyente está desactivada permanentemente por mandato fiscal de datos guardados.", {
         description: "Los datos de facturación se encuentran bloqueados y vigentes."
@@ -1268,6 +1311,9 @@ export const Dashboard = () => {
       setActiveTab("cuenta");
     } else {
       setActiveTab(tab);
+      if (subTab) {
+        setInitialTicketsSubTab(subTab);
+      }
     }
   };
 
@@ -1576,7 +1622,7 @@ export const Dashboard = () => {
               triggerCameraScan={triggerCameraScan}
               onCameraScanTriggered={() => setTriggerCameraScan(false)}
               readNotifIds={readNotifIds}
-              setReadNotifIds={setReadNotifIds}
+              setReadNotifIds={handleMarkNotificationRead}
             />
           )}
 
@@ -1594,6 +1640,7 @@ export const Dashboard = () => {
                 newlyAddedTicketId={newlyAddedTicketId}
                 onClearNewlyAddedTicketId={() => setNewlyAddedTicketId(null)}
                 onUpdateTicketInDb={onUpdateTicketInDb}
+                initialSubTab={initialTicketsSubTab}
               />
             </div>
           )}

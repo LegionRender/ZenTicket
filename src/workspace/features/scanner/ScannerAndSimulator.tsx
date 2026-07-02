@@ -70,7 +70,7 @@ interface ScannerAndSimulatorProps {
   preselectedTicketId: string | null;
   onClearPreselectedTicket: () => void;
   onStartAutomation?: (ticketId: string) => Promise<void>;
-  onTabChange?: (tab: string) => void;
+  onTabChange?: (tab: string, subTab?: string) => void;
   onSetNewlyAddedTicketId?: (id: string | null) => void;
   onSaveProfile?: (profile: any) => Promise<void>;
   triggerCameraScan?: boolean;
@@ -340,6 +340,16 @@ export default function ScannerAndSimulator({
   const [correctionError, setCorrectionError] = useState<CorrectionError | null>(null);
   const [reviewError, setReviewError] = useState<ReviewError | null>(null);
 
+  // Batch upload states
+  const [batchTickets, setBatchTickets] = useState<any[] | null>(null);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [batchSummary, setBatchSummary] = useState({
+    loaded: 0,
+    errors: 0,
+    requiresCorrection: 0,
+    readyForInvoice: 0
+  });
+
   // Extracted Data & Active entities
   const [extractedData, setExtractedData] = useState<ExtractedTicketData | null>(null);
   const [matchingConnector, setMatchingConnector] = useState<Connector | null>(null);
@@ -530,7 +540,7 @@ export default function ScannerAndSimulator({
               : `Se obtuvo exitosamente el CFDI 4.0 para ${t.nombreEmisor || "Establecimiento"} por un monto de $${(t.total || 0).toFixed(2)} MXN de manera limpia.`,
             createdAt: timestamp,
             read: readNotifIds.includes(`completed-${ticketId}`),
-            actionText: "Ver detalles 📄",
+            actionText: "Enterado",
             actionType: "info",
             ticket: t
           });
@@ -1123,11 +1133,241 @@ export default function ScannerAndSimulator({
     return found;
   };
 
+  const tryAutoEnqueueBatchTicket = async (ticketId: string, ocrResult: any, foundConnector: any) => {
+    if (!foundConnector) return false;
+    try {
+      const portalMapsColl = collection(db, "portal_maps");
+      const qMaps = query(portalMapsColl, where("connectorId", "==", foundConnector.id));
+      const pMapsSnap = await getDocs(qMaps);
+      if (pMapsSnap.empty) return false;
+      
+      const pMap = pMapsSnap.docs[0].data();
+      const pFields = sanitizePortalFieldsForConnector(foundConnector.id, ocrResult, ocrResult.rawOcrText);
+      
+      const validationResult = validatePortalFieldsAgainstPortalMap(
+        { ...ocrResult, portalFields: pFields },
+        { ...pMap, id: pMapsSnap.docs[0].id }
+      );
+      const missingFields = [...validationResult.missingFields];
+      
+      if (!fiscalProfile || !fiscalProfile.userId) return false;
+      if (!fiscalProfile.rfc || !fiscalProfile.rfc.trim()) return false;
+      if (!fiscalProfile.razonSocial || !fiscalProfile.razonSocial.trim()) return false;
+      if (!fiscalProfile.codigoPostal || !fiscalProfile.codigoPostal.trim()) return false;
+      if (!fiscalProfile.regimenFiscal || !fiscalProfile.regimenFiscal.trim()) return false;
+      if (!fiscalProfile.usoCFDI || !fiscalProfile.usoCFDI.trim()) return false;
+      
+      const fpEmail = fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || "";
+      if (!fpEmail || !fpEmail.trim() || !fpEmail.includes("@")) return false;
+      
+      if (missingFields.length > 0) return false;
+      
+      const ticketDataSnapshot = {
+        merchantName: ocrResult.nombreEmisor || "",
+        billingReference: pFields.billingReference || ocrResult.folio || "",
+        total: parseFloat(pFields.total || ocrResult.total || 0),
+        ticketNumber: pFields.ticketNumber || ocrResult.folio || "",
+        date: pFields.date || ocrResult.fechaCompra || "",
+        barcode: ocrResult.barcode || "",
+        rawOcrText: ocrResult.rawOcrText || "",
+        folio: pFields.billingReference || ocrResult.folio || "",
+        fechaCompra: pFields.date || ocrResult.fechaCompra || "",
+      };
+      
+      const fiscalProfileSnapshot = {
+        userId: fiscalProfile.userId,
+        rfc: fiscalProfile.rfc,
+        razonSocial: fiscalProfile.razonSocial,
+        regimenFiscal: fiscalProfile.regimenFiscal,
+        codigoPostal: fiscalProfile.codigoPostal,
+        usoCFDI: fiscalProfile.usoCFDI,
+        correoElectronico: fpEmail,
+        createdAt: fiscalProfile.createdAt || new Date().toISOString()
+      };
+      
+      const jobData = {
+        ticketId,
+        userId: fiscalProfile.userId,
+        status: "pending",
+        connectorId: foundConnector.id || "",
+        portalMapId: pMapsSnap.docs[0].id || "",
+        connectorStatusAtRun: foundConnector.status || "real_validation",
+        ticketDataSnapshot,
+        fiscalProfileSnapshot,
+        attempts: 0,
+        maxAttempts: 3,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      const jobsCollection = collection(db, "invoice_jobs");
+      await addDoc(jobsCollection, jobData);
+      
+      await onUpdateTicketInDb(ticketId, {
+        status: "queued_for_runner",
+        connectorId: foundConnector.id || ""
+      });
+      return true;
+    } catch (err) {
+      console.warn("Error auto-enqueueing batch ticket:", err);
+      return false;
+    }
+  };
+
   // Convert files loaded manually or captured from camera to base64, compress, and parse
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
+    if (files.length > 1) {
+      // Multiple file batch upload flow
+      setIsBatchModalOpen(true);
+      
+      // Initialize batch state
+      const initialBatch = files.map((file, idx) => ({
+        id: idx,
+        fileName: file.name,
+        progress: 10,
+        step: "Validando archivo...",
+        status: "pending" as const,
+        error: ""
+      }));
+      setBatchTickets(initialBatch);
+      setBatchSummary({
+        loaded: 0,
+        errors: 0,
+        requiresCorrection: 0,
+        readyForInvoice: 0
+      });
+
+      const updateTicketInBatch = (idx: number, updates: any) => {
+        setBatchTickets(prev => {
+          if (!prev) return null;
+          return prev.map(t => t.id === idx ? { ...t, ...updates } : t);
+        });
+      };
+
+      const processFile = async (file: File, idx: number) => {
+        try {
+          if (!file.type.startsWith("image/")) {
+            throw new Error("El archivo no es una imagen válida.");
+          }
+          if (file.size > 10 * 1024 * 1024) {
+            throw new Error("El tamaño máximo permitido es 10MB.");
+          }
+
+          updateTicketInBatch(idx, { progress: 30, step: "Comprimiendo imagen..." });
+          const compressed = await compressImage(file, 1200, 0.75);
+          const base64Str = compressed.base64Str;
+          const mime = compressed.mimeType;
+
+          updateTicketInBatch(idx, { progress: 50, step: "Analizando con IA OCR..." });
+          const rawBase64 = base64Str.split(",")[1];
+
+          const response = await analyzeTicket({
+            imageBase64: rawBase64,
+            mimeType: mime,
+            personalGeminiKey: fiscalProfile?.personalGeminiKey,
+            userId: user?.uid,
+          });
+
+          if (!response.ok) {
+            let errorMsg = "El motor de lectura reportó un error.";
+            try {
+              const errJson = await response.json();
+              if (errJson.error) {
+                errorMsg = errJson.error;
+              }
+            } catch (e) {}
+            throw new Error(errorMsg);
+          }
+
+          const ocrResult: any = await response.json();
+          updateTicketInBatch(idx, { progress: 75, step: "Buscando comercio..." });
+
+          const foundConnector = findMatchingConnector(ocrResult);
+          const sanitized = sanitizePortalFieldsForConnector(foundConnector?.id, ocrResult, ocrResult.rawOcrText);
+
+          updateTicketInBatch(idx, { progress: 90, step: "Guardando ticket..." });
+          const isDataIncomplete = checkIsDataIncomplete(ocrResult);
+          const ticketStatus = ocrResult.ocrFailed || isDataIncomplete ? "review" : "extracted";
+
+          const tId = await onSaveTicketToDb({
+            userId: user?.uid || "guest",
+            imageUrl: base64Str,
+            status: ticketStatus,
+            rfcEmisor: ocrResult.rfcEmisor,
+            nombreEmisor: ocrResult.nombreEmisor,
+            fechaCompra: ocrResult.fechaCompra,
+            folio: ocrResult.folio,
+            total: ocrResult.total,
+            sucursal: ocrResult.sucursal || "",
+            itemsJson: JSON.stringify(ocrResult.items),
+            createdAt: new Date().toISOString(),
+            cost: ocrResult.cost !== undefined ? ocrResult.cost : 0.50,
+            rawCost: ocrResult.rawCost !== undefined ? ocrResult.rawCost : 0,
+            pipelineLogs: ocrResult.pipelineLogs,
+            confidenceScore: ocrResult.confidenceScore,
+            extractedFields: ocrResult.extractedFields ? JSON.stringify(ocrResult.extractedFields) : "",
+            rawOcrText: ocrResult.rawOcrText || "",
+          } as any);
+
+          let isEnqueued = false;
+          if (foundConnector && !isDataIncomplete) {
+            updateTicketInBatch(idx, { step: "Encolando en el portal del comercio..." });
+            isEnqueued = await tryAutoEnqueueBatchTicket(tId, ocrResult, foundConnector);
+          }
+
+          let finalStep = "Listo";
+          if (isEnqueued) {
+            finalStep = "Solicitud de factura en proceso 🚀";
+          } else if (ticketStatus === "review") {
+            finalStep = "Requiere corregir datos ⚠️";
+          } else {
+            finalStep = "Ticket digitalizado con éxito ✅";
+          }
+
+          updateTicketInBatch(idx, {
+            progress: 100,
+            step: finalStep,
+            status: "success",
+            ticketId: tId
+          });
+
+          setBatchSummary(prev => {
+            const next = { ...prev, loaded: prev.loaded + 1 };
+            if (isEnqueued) {
+              next.readyForInvoice = prev.readyForInvoice + 1;
+            } else {
+              next.requiresCorrection = prev.requiresCorrection + 1;
+            }
+            return next;
+          });
+
+        } catch (err: any) {
+          console.error("Error batch processing file:", err);
+          updateTicketInBatch(idx, {
+            progress: 100,
+            step: "Error al digitalizar",
+            status: "error",
+            error: err?.message || "Error desconocido."
+          });
+          setBatchSummary(prev => ({
+            ...prev,
+            errors: prev.errors + 1
+          }));
+        }
+      };
+
+      // Sequentially process each file to avoid API concurrency rate limits
+      for (let i = 0; i < files.length; i++) {
+        await processFile(files[i], i);
+      }
+      return;
+    }
+
+    // Single file upload flow (existing logic)
+    const file = files[0];
     setIsOcrLoading(true);
     setMessage(null);
 
@@ -1138,8 +1378,6 @@ export default function ScannerAndSimulator({
     });
 
     try {
-      // Compress the image client-side to ensure it occupies less space and satisfies the 1MB Firestore limit.
-      // This reduces 5-10MB mobile uploads to ~100-200KB transparently.
       const compressed = await compressImage(file, 1200, 0.75);
       const base64Str = compressed.base64Str;
       const mime = compressed.mimeType;
@@ -1221,7 +1459,7 @@ export default function ScannerAndSimulator({
 
       // Save ticket in DB
       const tId = await onSaveTicketToDb({
-        userId: "guest",
+        userId: user?.uid || "guest",
         imageUrl: base64Str,
         status: ocrResult.ocrFailed ? "review" : "extracted",
         rfcEmisor: ocrResult.rfcEmisor,
@@ -1240,8 +1478,6 @@ export default function ScannerAndSimulator({
         rawOcrText: ocrResult.rawOcrText || "",
       } as any);
       setTicketId(tId);
-
-      // Find match (already matched above)
 
       stopSimulation();
       // Wait for completion callback to trigger
@@ -2292,21 +2528,21 @@ export default function ScannerAndSimulator({
                 </div>
               </div>
 
-              {/* 1. General Status / Activity Summary Blue Card (Exact screenshot style) - Reduced 50% in height */}
               <div id="general-status-card" className="bg-gradient-to-tr from-[#0546F0] to-[#1268FF] text-white rounded-2xl p-4 shadow-md relative overflow-hidden select-none">
-
+ 
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-bold text-white/70 uppercase tracking-wider text-left">
                     Estado general
                   </span>
-                  <span className="text-xs font-black text-white/90">
-                    Resumen de actividad
-                  </span>
                 </div>
-
+ 
                 <div className="grid grid-cols-2 gap-3">
                   {/* Procesado Card with live calculated values */}
-                  <div className="bg-white/10 backdrop-blur-xs border border-white/10 rounded-xl p-2.5 text-left">
+                  <button
+                    type="button"
+                    onClick={() => onTabChange && onTabChange("tickets", "cfdi-obtenidos")}
+                    className="bg-white/10 hover:bg-white/15 active:bg-white/25 border border-white/15 rounded-xl p-2.5 text-left transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-white/30 w-full block text-left"
+                  >
                     <span className="text-[10px] text-white/70 font-semibold block uppercase tracking-wider">
                       Procesados
                     </span>
@@ -2323,7 +2559,7 @@ export default function ScannerAndSimulator({
                         if (plan === "brisa") limit = 10;
                         else if (plan === "serenidad") limit = 30;
                         else if (plan === "nirvana") limit = 100;
-
+ 
                         const planStartDateStr = fiscalProfile?.planStartDate || fiscalProfile?.createdAt || new Date().toISOString();
                         const planStartDate = new Date(planStartDateStr);
                         const cycleInvoices = (invoices || []).filter(inv => {
@@ -2335,12 +2571,16 @@ export default function ScannerAndSimulator({
                         return `Ciclo: ${compInvoices}/${limit} (Ques: ${rem})`;
                       })()}
                     </span>
-                  </div>
-
+                  </button>
+ 
                   {/* Pendiente Card with live count */}
-                  <div className="bg-white/10 backdrop-blur-xs border border-white/10 rounded-xl p-2.5 text-left">
+                  <button
+                    type="button"
+                    onClick={() => onTabChange && onTabChange("tickets", "en-seguimiento")}
+                    className="bg-white/10 hover:bg-white/15 active:bg-white/25 border border-white/15 rounded-xl p-2.5 text-left transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-white/30 w-full block text-left"
+                  >
                     <span className="text-[10px] text-white/70 font-semibold block uppercase tracking-wider">
-                      En Proceso
+                      En seguimiento
                     </span>
                     <span className="text-base font-black text-white mt-0.5 block">
                       {(tickets || []).filter(t => t.status !== "completed" && t.status !== "cfdi_validated").length} {(tickets || []).filter(t => t.status !== "completed" && t.status !== "cfdi_validated").length === 1 ? "ticket" : "tickets"}
@@ -2348,7 +2588,7 @@ export default function ScannerAndSimulator({
                     <span className="text-[9px] text-blue-200 block mt-0.5 font-bold leading-normal">
                       Pendientes
                     </span>
-                  </div>
+                  </button>
                 </div>
               </div>
 
@@ -2416,6 +2656,7 @@ export default function ScannerAndSimulator({
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 onChange={handleFileUpload}
                 className="hidden"
               />
@@ -2569,18 +2810,6 @@ export default function ScannerAndSimulator({
                                   </div>
 
                                   <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-                                    {!n.read && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setReadNotifIds(prev => prev.includes(n.id) ? prev : [...prev, n.id]);
-                                          toast.success("Notificación marcada como vista.");
-                                        }}
-                                        className="text-[9.5px] font-bold text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 bg-transparent hover:bg-slate-100/50 dark:hover:bg-slate-800/50 px-2.5 py-1.5 rounded-lg cursor-pointer transition grow sm:grow-0 text-center select-none"
-                                      >
-                                        Visto
-                                      </button>
-                                    )}
                                     <button
                                       type="button"
                                       onClick={handleNotifClick}
@@ -2766,7 +2995,7 @@ return list.map(n => {
 
                                  <p className="text-[11.5px] text-slate-600 dark:text-slate-400 leading-relaxed font-sans font-medium">{n.message}</p>
 
-                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
                                    <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
                                      <span className={`text-[8.5px] font-black px-2 py-0.5 rounded-md ${badgeStyle} uppercase font-mono`}>
                                        {n.criticality === "critica" ? "🔴 Crítico" : n.criticality === "importante" ? "🟡 Alerta" : "🔵 Información"}
@@ -2777,18 +3006,6 @@ return list.map(n => {
                                    </div>
 
                                    <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-                                     {!n.read && (
-                                       <button
-                                         type="button"
-                                         onClick={() => {
-                                           setReadNotifIds(prev => prev.includes(n.id) ? prev : [...prev, n.id]);
-                                           toast.success("Notificación marcada como vista.");
-                                         }}
-                                         className="text-[9.5px] font-bold text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 bg-transparent hover:bg-slate-100/50 dark:hover:bg-slate-800/50 px-2.5 py-1.5 rounded-lg cursor-pointer transition grow sm:grow-0 text-center select-none"
-                                       >
-                                         Visto
-                                       </button>
-                                     )}
                                      <button
                                        type="button"
                                        onClick={handleNotifClickModal}
@@ -2802,6 +3019,137 @@ return list.map(n => {
                              );
                           });
                         })()}
+                      </div>
+                    </motion.div>
+                  </div>
+                )}
+              </AnimatePresence>
+
+              {/* BATCH UPLOAD DIALOG MODAL */}
+              <AnimatePresence>
+                {isBatchModalOpen && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      onClick={() => setIsBatchModalOpen(false)}
+                      className="absolute inset-0 bg-slate-900/35 backdrop-blur-md cursor-zoom-out"
+                    />
+
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                      className="bg-white dark:bg-[#0b0d19] border border-slate-200/80 dark:border-slate-800/80 rounded-3xl p-6 shadow-xl relative max-w-2xl w-full z-10 flex flex-col max-h-[85vh] text-left"
+                    >
+                      {/* Header block */}
+                      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 bg-blue-50 dark:bg-blue-950/40 rounded-xl">
+                            <Sparkles className="w-5 h-5 text-blue-500 animate-pulse" />
+                          </div>
+                          <div>
+                            <h3 className="text-base font-black text-slate-800 dark:text-white uppercase tracking-tight">
+                              Procesamiento Múltiple de Tickets
+                            </h3>
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mt-0.5">
+                              Digitalización inteligente en lote
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsBatchModalOpen(false)}
+                          className="p-1 text-slate-450 hover:bg-slate-50 dark:hover:bg-slate-800/80 rounded-lg cursor-pointer transition select-none border-none bg-transparent"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      {/* Summary Metrics */}
+                      <div className="grid grid-cols-4 gap-3 bg-slate-50/50 dark:bg-slate-900/40 p-4 rounded-2xl border border-slate-200/40 dark:border-slate-800/60 my-4 text-center animate-fade-in">
+                        <div>
+                          <span className="text-[9px] text-slate-500 font-bold block uppercase tracking-wider">Cargados</span>
+                          <span className="text-lg font-black text-[#0b53f4] dark:text-blue-400 mt-0.5 block">{batchSummary.loaded}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-500 font-bold block uppercase tracking-wider">En proceso</span>
+                          <span className="text-lg font-black text-green-500 mt-0.5 block">{batchSummary.readyForInvoice}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-500 font-bold block uppercase tracking-wider">Por Corregir</span>
+                          <span className="text-lg font-black text-amber-500 mt-0.5 block">{batchSummary.requiresCorrection}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-500 font-bold block uppercase tracking-wider">Con Error</span>
+                          <span className="text-lg font-black text-rose-500 mt-0.5 block">{batchSummary.errors}</span>
+                        </div>
+                      </div>
+
+                      {/* Ticket list */}
+                      <div className="flex-1 overflow-y-auto space-y-3 pr-1 max-h-[300px]">
+                        {batchTickets?.map((t) => (
+                          <div
+                            key={t.id}
+                            className="border border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/10 rounded-xl p-3.5 space-y-2"
+                          >
+                            <div className="flex items-center justify-between gap-4">
+                              <div className="truncate flex-1">
+                                <span className="text-xs font-extrabold text-slate-700 dark:text-slate-200 block truncate">{t.fileName}</span>
+                                <span className="text-[9.5px] text-slate-450 block mt-0.5">{t.step}</span>
+                              </div>
+                              <div className="shrink-0 flex items-center">
+                                {t.status === "pending" && (
+                                  <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+                                )}
+                                {t.status === "success" && (
+                                  <Check className="w-4.5 h-4.5 text-green-500" />
+                                )}
+                                {t.status === "error" && (
+                                  <AlertTriangle className="w-4 h-4 text-rose-500" />
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Progress bar */}
+                            <div className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full transition-all duration-300 ${
+                                  t.status === "error" ? "bg-rose-500" : t.status === "success" ? "bg-green-500" : "bg-[#0B53F4]"
+                                }`}
+                                style={{ width: `${t.progress}%` }}
+                              />
+                            </div>
+
+                            {t.error && (
+                              <p className="text-[9.5px] font-bold text-rose-500 leading-normal bg-rose-50/50 dark:bg-rose-950/20 p-2 rounded-lg border border-rose-100/50 dark:border-rose-500/10 mt-1">
+                                {t.error}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Footer block */}
+                      <div className="flex items-center justify-end gap-3 border-t border-slate-100 dark:border-slate-800 pt-4 mt-4 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setIsBatchModalOpen(false)}
+                          className="px-4 py-2.5 text-xs font-black uppercase text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition cursor-pointer bg-transparent border-none"
+                        >
+                          Cerrar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsBatchModalOpen(false);
+                            if (onTabChange) onTabChange("tickets");
+                          }}
+                          className="zt-btn-primary-blue text-xs font-black uppercase px-5 py-2.5 rounded-xl cursor-pointer"
+                        >
+                          Ver mis tickets
+                        </button>
                       </div>
                     </motion.div>
                   </div>
