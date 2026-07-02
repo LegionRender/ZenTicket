@@ -1987,10 +1987,10 @@ export default function TicketsListScreen({
                     {(t.status === "review" || t.status === "requires_manual_review" || t.status === "requires_user_correction" || isFailed) && (
                       <div className={`text-[11px] p-3 rounded-2xl leading-relaxed font-sans ${
                         t.status === "requires_user_correction"
-                          ? "bg-orange-500/10 text-orange-950 border border-orange-200/45"
+                          ? "bg-orange-50 dark:bg-orange-950/30 text-orange-700 dark:text-orange-300 border border-orange-200/50 dark:border-orange-500/20"
                           : t.status === "requires_manual_review" || t.status === "review"
-                            ? "bg-amber-500/10 text-amber-900 border border-amber-200/45"
-                            : "bg-rose-50 text-rose-855 border border-rose-100/60"
+                            ? "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-350 border border-amber-200/50 dark:border-amber-500/20"
+                            : "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-350 border border-rose-200/50 dark:border-rose-500/20"
                       }`}>
                         <span className="font-bold block uppercase text-[9px] mb-1 tracking-wider">
                           {t.status === "requires_user_correction"
