@@ -460,7 +460,7 @@ export const Dashboard = () => {
             userId: "system",
             nombre: "OXXO Cadena",
             rfc: "CCO8605231N4",
-            portalUrl: "http://factura.oxxo.com:8080",
+            portalUrl: "https://www4.oxxo.com:9443/facturacionElectronica-web/views/layout/inicio.do",
             fieldsJson: JSON.stringify([
               { key: "rfc", name: "RFC Emisor", selector: "input[name='rfc']", type: "text", required: true },
               { key: "folio", name: "Número de Folio", selector: "input#folio", type: "text", required: true },

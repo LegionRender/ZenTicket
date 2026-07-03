@@ -107,7 +107,7 @@ const connectorsSeed = [
   {
     nombre: "OXXO Cadena",
     rfc: "CCO8605231N4",
-    portalUrl: "http://factura.oxxo.com:8080",
+    portalUrl: "https://www4.oxxo.com:9443/facturacionElectronica-web/views/layout/inicio.do",
     fieldsJson: JSON.stringify([
       { key: "rfc", name: "RFC Receptor", selector: "input[name='rfc']", type: "text", required: true, source: "fiscalProfile" },
       { key: "folio", name: "Número de Folio", selector: "input#folio", type: "text", required: true, source: "ticket" },
@@ -126,14 +126,36 @@ const connectorsSeed = [
         {
           key: "portalFields.billingReference",
           canonicalKey: "billingReference",
-          label: "Número de Folio",
+          label: "Folio de Venta",
           type: "string",
-          hints: ["Folio impreso en el ticket Oxxo."],
+          hints: ["Folio de venta impreso en el ticket (máximo 9 dígitos)."],
           validationPattern: "^[A-Za-z0-9\\-]+$",
           forbiddenPatterns: FORBIDDEN_PATTERNS,
           required: true,
           userEditable: true,
-          source: "ticket"
+          source: "ticket",
+          fieldExtractionHints: {
+            likelyZones: ["bottom", "near_barcode"],
+            nearbyWords: ["folio", "venta", "ticket", "codigo"],
+            requireLiteralMatch: true
+          }
+        },
+        {
+          key: "portalFields.venta",
+          canonicalKey: "venta",
+          label: "ID de Venta (ITU)",
+          type: "string",
+          hints: ["ITU / ID de Venta impreso en el ticket (máximo 12 dígitos)."],
+          validationPattern: "^[A-Za-z0-9]+$",
+          forbiddenPatterns: FORBIDDEN_PATTERNS,
+          required: true,
+          userEditable: true,
+          source: "ticket",
+          fieldExtractionHints: {
+            likelyZones: ["bottom", "near_barcode"],
+            nearbyWords: ["id", "venta", "itu", "codigo"],
+            requireLiteralMatch: true
+          }
         },
         {
           key: "portalFields.total",
@@ -144,22 +166,60 @@ const connectorsSeed = [
           validationPattern: "^[0-9]+(\\.[0-9]{1,2})?$",
           required: true,
           userEditable: true,
-          source: "ticket"
+          source: "ticket",
+          fieldExtractionHints: {
+            likelyZones: ["bottom", "summary"],
+            nearbyWords: ["total", "neto", "importe", "pago"]
+          }
+        },
+        {
+          key: "portalFields.fecha",
+          canonicalKey: "fecha",
+          label: "Fecha de Compra",
+          type: "string",
+          hints: ["Fecha de compra en formato YYYY-MM-DD."],
+          validationPattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          required: true,
+          userEditable: true,
+          source: "ticket",
+          fieldExtractionHints: {
+            likelyZones: ["top", "header", "bottom"],
+            nearbyWords: ["fecha", "compra", "dia", "mes", "año"]
+          }
         }
       ],
       fiscalFields: DEFAULT_FISCAL_FIELDS,
       screenOrder: [
-        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: ["portalFields.billingReference"] },
-        { screenIndex: 2, description: "Monto de ticket", requiredFields: ["portalFields.total"] },
-        { screenIndex: 3, description: "Datos fiscales", requiredFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"] }
+        {
+          screenIndex: 1,
+          description: "Búsqueda de ticket",
+          requiredFields: [
+            "portalFields.fecha",
+            "portalFields.billingReference",
+            "portalFields.venta",
+            "portalFields.total"
+          ]
+        },
+        {
+          screenIndex: 2,
+          description: "Datos fiscales",
+          requiredFields: [
+            "fiscalProfile.rfc",
+            "fiscalProfile.businessName",
+            "fiscalProfile.postalCode",
+            "fiscalProfile.taxRegime",
+            "fiscalProfile.cfdiUse",
+            "fiscalProfile.email"
+          ]
+        }
       ]
     },
     createdAt: new Date().toISOString(),
-    status: "automation_pending_setup",
-    isProductionReady: false,
+    status: "production_ready",
+    isProductionReady: true,
     isMock: false,
     isRestricted: false,
-    runnerAvailable: false,
+    runnerAvailable: true,
     aliases: ["oxxo", "cadena comercial oxxo", "femsa"]
   },
   {
@@ -448,8 +508,36 @@ async function seedConnectors() {
             { type: "click", selector: "button#btnGenerar" },
             { type: "waitForDownload" }
           ];
+        } else if (item.rfc === "CCO8605231N4") {
+          // Oxxo real flow steps
+          steps = [
+            { type: "goto", url: "{{portalMap.entryUrl}}" },
+            {
+              type: "conditional",
+              selector: "[id='form:dlgAyudaTicket']",
+              steps: [
+                { type: "click", selector: "[id='form:dlgAyudaTicket'] .ui-dialog-titlebar-close" }
+              ]
+            },
+            { type: "evaluate", selector: "[id='form:fecha_input']", value: "{{portalFields.fecha}}", transform: "ddmmyyyy" },
+            { type: "fill", selector: "[id='form:folio']", value: "{{portalFields.billingReference}}" },
+            { type: "fill", selector: "[id='form:venta']", value: "{{portalFields.venta}}" },
+            { type: "fill", selector: "[id='form:total']", value: "{{portalFields.total}}", transform: "fixed2" },
+            { type: "click", selector: "[id='form:validarTicket']" },
+            { type: "waitForTimeout", delay: 3000 },
+            { type: "click", selector: "[id='form:continuar']" },
+            { type: "waitForSelector", selector: "[id='form:rfc'], [id='form:rfcPend']" },
+            { type: "fill", selector: "[id='form:rfc'], [id='form:rfcPend']", value: "{{fiscalProfile.rfc}}", transform: "uppercase" },
+            { type: "fill", selector: "[id='form:razon'], [id='form:razonPend']", value: "{{fiscalProfile.businessName}}", transform: "uppercase" },
+            { type: "fill", selector: "[id='form:codigo'], [id='form:codigoPen']", value: "{{fiscalProfile.postalCode}}" },
+            { type: "select", selector: "select[id='form:selectOneMenuRegFis_input'], select[id='form:selectOneMenuRegFisPend_input']", value: "{{fiscalProfile.taxRegime}}" },
+            { type: "select", selector: "select[id='form:selectOneMenuCFDI_input'], select[id='form:selectOneMenuCFDIPend_input']", value: "{{fiscalProfile.cfdiUse}}" },
+            { type: "fill", selector: "[id='form:email'], [id='form:emailPend']", value: "{{fiscalProfile.email}}", transform: "lowercase" },
+            { type: "click", selector: "[id='form:generarFactura']" },
+            { type: "waitForDownload" }
+          ];
         } else {
-          // Oxxo, Starbucks, Walmart
+          // Starbucks, Walmart
           steps = [
             { type: "goto", url: "{{portalMap.entryUrl}}" },
             { type: "fill", selector: "input#rfc", value: "{{fiscalProfile.rfc}}", transform: "uppercase" },
