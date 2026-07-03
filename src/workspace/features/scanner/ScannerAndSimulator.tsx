@@ -12,7 +12,7 @@ import {
 import { useToast } from "@/shared/feedback/Toast";
 import { db, auth } from "@/services/firebase/firebase";
 import { handleFirestoreError, OperationType } from "@/services/firebase/firestore-helper";
-import { doc, setDoc, updateDoc, getDoc, collection, query, where, getDocs, addDoc } from "firebase/firestore";
+import { doc, setDoc, updateDoc, getDoc, collection, query, where, getDocs, addDoc, onSnapshot } from "firebase/firestore";
 import { AnimatePresence, motion } from "motion/react";
 import { useAuth } from "@/auth/context/AuthContext";
 import logoLight from "@/assets/logos/logo-light.png";
@@ -373,6 +373,10 @@ export default function ScannerAndSimulator({
     usoCFDI: "",
     email: ""
   });
+
+  const [liveTicket, setLiveTicket] = useState<any>(null);
+  const [liveJob, setLiveJob] = useState<any>(null);
+  const [inlineInputs, setInlineInputs] = useState<Record<string, string>>({});
 
   // Corroboration Sub-tab & AI Model training visualizer states
   const [activeExtractedTab, setActiveExtractedTab] = useState<"corroborar" | "detalles">("corroborar");
@@ -784,11 +788,61 @@ export default function ScannerAndSimulator({
     onClearPreselectedTicket();
   }, [preselectedTicketId, tickets, connectors, onClearPreselectedTicket]);
 
+  // 1. Listen to live ticket document updates in real-time
+  useEffect(() => {
+    if (!ticketId) {
+      setLiveTicket(null);
+      return;
+    }
+    const docRef = doc(db, "tickets", ticketId);
+    const unsubscribe = onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setLiveTicket({ id: snapshot.id, ...data });
+      }
+    }, (err) => {
+      console.error("Error watching live ticket:", err);
+    });
+    return unsubscribe;
+  }, [ticketId]);
+
+  // 2. Listen to live invoice_job document updates if jobId exists
+  useEffect(() => {
+    const ticketDoc = liveTicket || (tickets || []).find(t => t.id === ticketId);
+    const jobKey = ticketDoc?.jobId;
+    if (!jobKey) {
+      setLiveJob(null);
+      return;
+    }
+    const docRef = doc(db, "invoice_jobs", jobKey);
+    const unsubscribe = onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setLiveJob({ id: snapshot.id, ...snapshot.data() });
+      }
+    }, (err) => {
+      console.error("Error watching live job:", err);
+    });
+    return unsubscribe;
+  }, [ticketId, liveTicket?.jobId, tickets]);
+
+  // 3. Protection against infinite spinner/slow automation runner
+  const [isTakingTooLong, setIsTakingTooLong] = useState(false);
+  useEffect(() => {
+    if (activeStep !== "automating") {
+      setIsTakingTooLong(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setIsTakingTooLong(true);
+    }, 120000); // 2 minutes timeout
+    return () => clearTimeout(timer);
+  }, [activeStep, ticketId]);
+
   // Real-time synchronization with Firestore ticket state
   useEffect(() => {
-    if (activeStep !== "automating" || !ticketId || !tickets) return;
+    if (activeStep !== "automating" || !ticketId) return;
 
-    const currentTicket = tickets.find(t => t.id === ticketId);
+    const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
     if (!currentTicket) return;
 
     const tStatus = currentTicket.status;
@@ -821,18 +875,18 @@ export default function ScannerAndSimulator({
       }
       setIsEditing(false);
       setActiveStep("correction");
-    } else if (tStatus === "cfdi_validated") {
+    } else if (tStatus === "cfdi_validated" || tStatus === "completed") {
       setIsAutomatingLoading(false);
       setSimulationProgress(100);
       setActiveStep("success");
     }
-  }, [ticketId, tickets, activeStep]);
+  }, [ticketId, tickets, activeStep, liveTicket]);
 
   // Loader timeout protection
   useEffect(() => {
-    if (activeStep !== "automating" || !ticketId || !tickets) return;
+    if (activeStep !== "automating" || !ticketId) return;
 
-    const currentTicket = tickets.find(t => t.id === ticketId);
+    const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
     if (!currentTicket) return;
 
     const tStatus = currentTicket.status;
@@ -2379,6 +2433,115 @@ export default function ScannerAndSimulator({
     // Immediately trigger automation (Guardar y continuar behavior)
     if (found && found.runnerAvailable) {
       await handleTriggerAutomation(found, ticketId, updatedData);
+    }
+  };
+
+  const handleSaveInlineInputs = async () => {
+    if (!ticketId) return;
+    
+    const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
+    const missing = currentTicket?.missingFields || [];
+    const missingFieldsToReport: string[] = [];
+
+    // Verify all missing fields are entered
+    for (const key of missing) {
+      const val = inlineInputs[key] || "";
+      if (!val.trim()) {
+        missingFieldsToReport.push(key);
+      }
+    }
+
+    if (missingFieldsToReport.length > 0) {
+      toast.error("Por favor completa todos los campos requeridos.");
+      return;
+    }
+
+    setIsAutomatingLoading(true);
+    try {
+      const docRef = doc(db, "tickets", ticketId);
+      const ticketSnap = await getDoc(docRef);
+      if (!ticketSnap.exists()) {
+        toast.error("El ticket no existe.");
+        setIsAutomatingLoading(false);
+        return;
+      }
+      const ticketData = ticketSnap.data();
+
+      // Separate inputs
+      const profileUpdates: Record<string, string> = {};
+      const ticketUpdates: Record<string, any> = {};
+      const newPortalFields = { ...(ticketData.portalFields || {}) };
+
+      for (const key of missing) {
+        const val = inlineInputs[key].trim();
+        if (key.startsWith("fiscalProfile.")) {
+          const k = key.replace("fiscalProfile.", "");
+          let mappedKey = k;
+          if (k === "rfc") mappedKey = "rfc";
+          if (k === "businessName") mappedKey = "razonSocial";
+          if (k === "postalCode") mappedKey = "codigoPostal";
+          if (k === "taxRegime") mappedKey = "regimenFiscal";
+          if (k === "cfdiUse") mappedKey = "usoCFDI";
+          if (k === "email") mappedKey = "correoElectronico";
+
+          profileUpdates[mappedKey] = val;
+        } else if (key.startsWith("portalFields.")) {
+          const k = key.replace("portalFields.", "");
+          if (k === "billingReference") {
+            ticketUpdates.folio = val;
+            newPortalFields.billingReference = val;
+            newPortalFields.ticketNumber = val;
+          } else if (k === "total") {
+            const num = parseFloat(val);
+            ticketUpdates.total = isNaN(num) ? 0 : num;
+            newPortalFields.total = isNaN(num) ? 0 : num;
+          } else if (k === "date") {
+            ticketUpdates.fechaCompra = val;
+            newPortalFields.date = val;
+          }
+        }
+      }
+
+      // Save fiscal profile updates if any
+      if (Object.keys(profileUpdates).length > 0 && fiscalProfile) {
+        const updatedProfile = { ...fiscalProfile, ...profileUpdates };
+        if (onSaveProfile) {
+          await onSaveProfile(updatedProfile);
+        }
+      }
+
+      // Save ticket updates in Firestore
+      const finalTicketUpdates = {
+        ...ticketUpdates,
+        portalFields: newPortalFields,
+        status: "connector_resolving", // Transition back to trigger rerun
+        errorMsg: null,
+        reviewReasonCode: null,
+        reviewError: null
+      };
+
+      await updateDoc(docRef, finalTicketUpdates);
+      
+      if (onUpdateTicketInDb) {
+        await onUpdateTicketInDb(ticketId, finalTicketUpdates);
+      }
+
+      toast.success("Campos guardados. Reintentando procesamiento automático...");
+      
+      const activeConn = matchingConnector || matchConnector(ticketData.nombreEmisor || "", ticketData.rfcEmisor || "");
+      if (activeConn) {
+        await handleTriggerAutomation(activeConn, ticketId, {
+          ...ticketData,
+          ...finalTicketUpdates
+        });
+      } else {
+        toast.error("No se pudo iniciar el proceso: conector no identificado.");
+        setIsAutomatingLoading(false);
+      }
+    } catch (err: any) {
+      console.error("Error saving inline inputs:", err);
+      toast.error("Ocurrió un error al guardar los campos: " + err.message);
+      setIsAutomatingLoading(false);
     }
   };
 
@@ -4346,23 +4509,32 @@ return list.map(n => {
         const getDynamicStatusMsg = () => {
           const tStatus = currentTicket?.status || "";
           
-          if (tStatus === "ticket_uploaded" || tStatus === "extracting_data") {
+          if (tStatus === "ticket_uploaded" || tStatus === "extracting_data" || tStatus === "uploaded" || tStatus === "ocr_processing") {
             return "Leyendo ticket";
           }
-          if (tStatus === "connector_resolving") {
-            return "Extrayendo datos";
-          }
-          if (tStatus === "requires_user_correction") {
+          if (tStatus === "connector_resolving" || tStatus === "extracted" || tStatus === "connector_detected") {
             return "Revisa los datos";
           }
-          if (["pending_portal_submission", "submitting_to_portal", "submitted_to_merchant", "waiting_portal_result", "merchant_cfdi_downloaded", "queued_for_runner", "runner_processing"].includes(tStatus)) {
+          if (tStatus === "missing_required_fields" || tStatus === "waiting_fiscal_profile") {
+            return "Necesitamos completar algunos datos";
+          }
+          if (tStatus === "queued_for_runner" || tStatus === "pending_portal_submission" || tStatus === "submitting_to_portal" || tStatus === "submitted_to_merchant" || tStatus === "waiting_portal_result") {
             return "Solicitando factura";
           }
-          if (tStatus === "sat_verifying" || tStatus === "sat_validation_pending" || tStatus === "xml_structure_validated") {
+          if (tStatus === "runner_processing") {
+            return "Solicitando factura en el portal oficial";
+          }
+          if (tStatus === "merchant_cfdi_downloaded") {
             return "Validando CFDI";
           }
+          if (tStatus === "xml_structure_validated") {
+            return "Consultando SAT";
+          }
+          if (tStatus === "sat_validation_pending" || tStatus === "sat_verifying") {
+            return "Esperando respuesta del SAT";
+          }
           if (tStatus === "cfdi_validated" || tStatus === "completed") {
-            return "Solicitud completada";
+            return "Factura lista";
           }
           if (tStatus === "requires_manual_review" || tStatus === "failed") {
             return "Revisión requerida";
@@ -4488,6 +4660,21 @@ return list.map(n => {
               </div>
             </div>
 
+            {/* Warning banner for slow process / runner timeout */}
+            {isTakingTooLong && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5 text-left mt-4 animate-fade-in flex items-start gap-2.5">
+                <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-extrabold block text-amber-800 uppercase mb-0.5 tracking-wide text-xs">
+                    Proceso lento
+                  </span>
+                  <p className="opacity-95 text-amber-700 text-[11.5px] leading-normal font-semibold font-sans">
+                    El proceso está tardando más de lo normal. Puedes revisar el avance en Mis Tickets.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* A single line of dynamic text explaining the currently executed action */}
             {currentTicket?.status === "requires_manual_review" || currentTicket?.status === "review" ? (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5 text-left mt-4 animate-fade-in">
@@ -4528,6 +4715,70 @@ return list.map(n => {
                     <p className="opacity-95 text-rose-700 text-[11.5px] leading-normal font-semibold font-sans">
                       {currentTicket?.errorMsg || "Ocurrió un error inesperado al procesar el ticket."}
                     </p>
+                  </div>
+                </div>
+              </div>
+            ) : (currentTicket?.status === "waiting_fiscal_profile" || currentTicket?.status === "missing_required_fields") ? (
+              <div className="bg-amber-50/30 border border-amber-200 rounded-2xl p-5 mb-5 text-left mt-4 animate-fade-in space-y-4">
+                <div className="flex items-start gap-2.5">
+                  <Users className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold block text-amber-800 uppercase mb-0.5 tracking-wide text-xs">
+                      Datos incompletos
+                    </span>
+                    <p className="opacity-95 text-amber-700 text-[11.5px] leading-normal font-semibold font-sans">
+                      {currentTicket?.errorMsg || "Necesitamos completar algunos datos para poder solicitar la factura automáticamente."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200/80 rounded-xl p-4 space-y-4">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+                    Por favor completa los siguientes datos:
+                  </p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {(currentTicket?.missingFields || []).map((fieldKey: string) => {
+                      const label = fieldKey.startsWith("fiscalProfile.") 
+                        ? (fieldKey === "fiscalProfile.rfc" ? "RFC Receptor"
+                          : fieldKey === "fiscalProfile.businessName" ? "Razón Social Receptor"
+                          : fieldKey === "fiscalProfile.postalCode" ? "Código Postal Receptor"
+                          : fieldKey === "fiscalProfile.taxRegime" ? "Régimen Fiscal Receptor"
+                          : fieldKey === "fiscalProfile.cfdiUse" ? "Uso CFDI Receptor"
+                          : fieldKey === "fiscalProfile.email" ? "Correo del Receptor" : fieldKey)
+                        : (fieldKey === "portalFields.billingReference" ? "Referencia del Ticket"
+                          : fieldKey === "portalFields.total" ? "Total del Ticket"
+                          : fieldKey === "portalFields.date" ? "Fecha del Ticket" : fieldKey);
+
+                      const inputType = (fieldKey === "portalFields.total") ? "number" : "text";
+
+                      return (
+                        <div key={fieldKey} className="space-y-1">
+                          <label className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">
+                            {label} *
+                          </label>
+                          <input
+                            type={inputType}
+                            step={inputType === "number" ? "0.01" : undefined}
+                            value={inlineInputs[fieldKey] || ""}
+                            onChange={(e) => setInlineInputs({ ...inlineInputs, [fieldKey]: e.target.value })}
+                            placeholder={`Ingresa ${label.toLowerCase()}`}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-850 focus:border-[#0B53F4] focus:outline-none transition-all"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveInlineInputs}
+                      disabled={isAutomatingLoading}
+                      className="bg-[#0B53F4] hover:bg-blue-600 text-white text-[10px] font-black px-4 py-2.5 rounded-xl uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap active:scale-97 select-none shrink-0"
+                    >
+                      Confirmar y Reintentar Facturación
+                    </button>
                   </div>
                 </div>
               </div>

@@ -2555,14 +2555,14 @@ export default function AdminScreen({
       {(() => {
         const realProcessedTickets = tickets.filter(t => {
           const hasJob = invoiceJobs.some(j => j.ticketId === t.id);
-          const hasRunnerStatus = ["queued_for_runner", "runner_processing", "sat_validation_pending", "cfdi_validated", "requires_manual_review", "failed"].includes(t.status || "");
+          const hasRunnerStatus = ["queued_for_runner", "runner_processing", "sat_validation_pending", "cfdi_validated", "requires_manual_review", "failed", "waiting_fiscal_profile", "missing_required_fields"].includes(t.status || "");
           return hasJob || hasRunnerStatus;
         });
 
         const filteredRealTickets = realProcessedTickets.filter(t => {
           if (realTicketsFilter === "all") return true;
           if (realTicketsFilter === "processing") {
-            return ["queued_for_runner", "runner_processing", "sat_validation_pending", "xml_structure_validated"].includes(t.status || "");
+            return ["queued_for_runner", "runner_processing", "sat_validation_pending", "xml_structure_validated", "waiting_fiscal_profile", "missing_required_fields"].includes(t.status || "");
           }
           if (realTicketsFilter === "manual_review") {
             return t.status === "requires_manual_review";
@@ -2660,7 +2660,7 @@ export default function AdminScreen({
                         statusBadge = "bg-emerald-50 text-emerald-700 border border-emerald-150";
                       } else if (["queued_for_runner", "runner_processing", "sat_validation_pending"].includes(t.status || "")) {
                         statusBadge = "bg-blue-50 text-[#0B53F4] border border-blue-150";
-                      } else if (t.status === "requires_manual_review") {
+                      } else if (["requires_manual_review", "waiting_fiscal_profile", "missing_required_fields"].includes(t.status || "")) {
                         statusBadge = "bg-amber-50 text-amber-700 border border-amber-150";
                       } else if (t.status === "failed") {
                         statusBadge = "bg-rose-50 text-rose-700 border border-rose-150";
