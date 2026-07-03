@@ -525,16 +525,22 @@ async function seedConnectors() {
             { type: "fill", selector: "[id='form:venta']", value: "{{portalFields.venta}}" },
             { type: "fill", selector: "[id='form:total']", value: "{{portalFields.total}}", transform: "fixed2" },
             { type: "click", selector: "[id='form:validarTicket']" },
-            { type: "waitForTimeout", delay: 3000 },
-            { type: "click", selector: "[id='form:continuar']" },
-            { type: "waitForSelector", selector: "[id='form:rfc'], [id='form:rfcPend']" },
+            { type: "waitForSelector", selector: "[id='form:continuar']:not(.ui-state-disabled)" },
+            { type: "click", selector: "[id='form:continuar']:not(.ui-state-disabled)" },
+            { type: "waitForSelector", selector: "[id='form:rfc']:visible, [id='form:rfcPend']:visible" },
             { type: "fill", selector: "[id='form:rfc'], [id='form:rfcPend']", value: "{{fiscalProfile.rfc}}", transform: "uppercase" },
             { type: "fill", selector: "[id='form:razon'], [id='form:razonPend']", value: "{{fiscalProfile.businessName}}", transform: "uppercase" },
             { type: "fill", selector: "[id='form:codigo'], [id='form:codigoPen']", value: "{{fiscalProfile.postalCode}}" },
-            { type: "select", selector: "select[id='form:selectOneMenuRegFis_input'], select[id='form:selectOneMenuRegFisPend_input']", value: "{{fiscalProfile.taxRegime}}" },
-            { type: "select", selector: "select[id='form:selectOneMenuCFDI_input'], select[id='form:selectOneMenuCFDIPend_input']", value: "{{fiscalProfile.cfdiUse}}" },
-            { type: "fill", selector: "[id='form:email'], [id='form:emailPend']", value: "{{fiscalProfile.email}}", transform: "lowercase" },
-            { type: "click", selector: "[id='form:generarFactura']" },
+            { type: "select", selector: "[id='form:selectOneMenuRegFis']:visible, [id='form:selectOneMenuRegFisPend']:visible", value: "{{fiscalProfile.taxRegime}}" },
+            { type: "select", selector: "[id='form:selectOneMenuCFDI']:visible, [id='form:selectOneMenuCFDIPend']:visible", value: "{{fiscalProfile.cfdiUse}}" },
+            {
+              type: "conditional",
+              selector: "[id='form:email']:visible, [id='form:emailPend']:visible",
+              steps: [
+                { type: "fill", selector: "[id='form:email']:visible, [id='form:emailPend']:visible", value: "{{fiscalProfile.email}}", transform: "lowercase" }
+              ]
+            },
+            { type: "click", selector: "[id='form:generarFactura']:visible, [id='form:j_idt251']:visible, [id='form:j_idt252']:visible, [id='form:j_idt253']:visible" },
             { type: "waitForDownload" }
           ];
         } else {

@@ -261,12 +261,12 @@ export async function executePortalMap(
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.fill(value);
+        await locator.first().fill(value);
       } else if (step.type === "evaluate") {
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.evaluate((el: any, val) => {
+        await locator.first().evaluate((el: any, val) => {
           el.value = val;
           el.dispatchEvent(new Event('change', { bubbles: true }));
           el.dispatchEvent(new Event('blur', { bubbles: true }));
@@ -275,15 +275,68 @@ export async function executePortalMap(
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.selectOption(value);
+        await locator.first().evaluate((targetNode: any, val: string) => {
+          const selectEl = targetNode.tagName === "SELECT" ? targetNode : targetNode.querySelector("select");
+          if (!selectEl) return;
+
+          // 1. Try to find option by exact value matching (standard)
+          let opt = Array.from(selectEl.options).find((o: any) => o.value === val);
+          if (opt) {
+            selectEl.value = val;
+            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+            selectEl.dispatchEvent(new Event('blur', { bubbles: true }));
+            return;
+          }
+
+          // 2. Try to find option by text content fuzzy matching (handles UUIDs/custom labels!)
+          const norm = (s: string) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+          const mappers: Record<string, string> = {
+            "626": "simplificado de confianza",
+            "601": "general de ley",
+            "603": "fines no lucrativos",
+            "605": "sueldos y salarios",
+            "606": "arrendamiento",
+            "608": "intereses",
+            "612": "actividades empresariales",
+            "G01": "adquisicion",
+            "G02": "devoluciones",
+            "G03": "gastos en general",
+            "I01": "construcciones",
+            "S01": "sin efectos fiscales",
+            "CP01": "codigo postal"
+          };
+
+          const targetText = mappers[val] || val;
+          const targetNorm = norm(targetText);
+
+          const idx = Array.from(selectEl.options).findIndex((o: any) => norm(o.text).includes(targetNorm));
+          if (idx !== -1) {
+            selectEl.selectedIndex = idx;
+            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+            selectEl.dispatchEvent(new Event('blur', { bubbles: true }));
+
+            // 3. If PrimeFaces is active, find and click the corresponding custom list item to sync UI visuals
+            const container = selectEl.closest(".ui-selectonemenu");
+            const id = container ? container.id : selectEl.id.replace(/_input$/, "");
+            const panel = document.getElementById(id + "_panel");
+            if (panel) {
+              const items = Array.from(panel.querySelectorAll("li.ui-selectonemenu-item"));
+              const targetItem: any = items[idx];
+              if (targetItem) {
+                targetItem.click();
+              }
+            }
+          }
+        }, value);
       } else if (step.type === "click") {
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.click();
+        await locator.first().click();
       } else if (step.type === "check" || step.type === "radio") {
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.check();
+        await locator.first().check();
       } else if (step.type === "waitForSelector") {
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
       } else if (step.type === "waitForNavigation") {
@@ -293,7 +346,7 @@ export async function executePortalMap(
       } else if (step.type === "assertText") {
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        const text = await locator.innerText();
+        const text = await locator.first().innerText();
         const expected = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap);
         if (!text.includes(expected)) {
           throw new Error(`Assert text fallido: Se esperaba "${expected}" pero se obtuvo "${text}"`);
@@ -313,13 +366,13 @@ export async function executePortalMap(
           const nestedSteps = step.steps || [];
           for (const ns of nestedSteps) {
             if (ns.type === "click") {
-              await getLocator(ns.selector, ns.iframeSelector).click();
+              await getLocator(ns.selector, ns.iframeSelector).first().click();
             } else if (ns.type === "fill") {
               const val = resolveValue(ns.value, ticketData, fiscalProfile, connector, portalMap, ns.transform);
-              await getLocator(ns.selector, ns.iframeSelector).fill(val);
+              await getLocator(ns.selector, ns.iframeSelector).first().fill(val);
             } else if (ns.type === "select") {
               const val = resolveValue(ns.value, ticketData, fiscalProfile, connector, portalMap, ns.transform);
-              await getLocator(ns.selector, ns.iframeSelector).selectOption(val);
+              await getLocator(ns.selector, ns.iframeSelector).first().selectOption(val);
             } else if (ns.type === "waitForSelector") {
               await getLocator(ns.selector, ns.iframeSelector).waitFor({ state: "visible", timeout: ns.timeout || 5000 }).catch(() => null);
             } else if (ns.type === "waitForTimeout") {
