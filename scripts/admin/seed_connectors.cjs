@@ -515,9 +515,9 @@ async function seedConnectors() {
              { type: "waitForTimeout", delay: 3000 },
              {
                type: "conditional",
-               selector: "[id='form:dlgAyudaTicket']",
+               selector: "[id='form:dlgInfoTicket']",
                steps: [
-                 { type: "click", selector: "[id='form:dlgAyudaTicket'] .ui-dialog-titlebar-close" }
+                 { type: "click", selector: "[id='form:dlgInfoTicket'] .ui-dialog-titlebar-close" }
                ]
              },
             { type: "evaluate", selector: "[id='form:fecha_input']", value: "{{portalFields.fecha}}", transform: "ddmmyyyy" },
