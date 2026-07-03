@@ -4635,6 +4635,13 @@ return list.map(n => {
             return "Necesitamos completar datos para continuar";
           }
           if (tStatus === "queued_for_runner" && (jStatus === "pending" || !jStatus)) {
+            const jobCreatedAt = liveJob?.createdAt || currentTicket?.createdAt;
+            if (jobCreatedAt) {
+              const pendingTimeMs = Date.now() - new Date(jobCreatedAt).getTime();
+              if (pendingTimeMs > 3 * 60 * 1000) {
+                return "El robot de facturación está tardando más de lo normal. Puedes revisar el avance en Mis Tickets.";
+              }
+            }
             return "Esperando robot de facturación";
           }
           if (jStatus === "locked" || jStatus === "running" || tStatus === "runner_processing") {

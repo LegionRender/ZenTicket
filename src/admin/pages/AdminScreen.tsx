@@ -2651,6 +2651,7 @@ export default function AdminScreen({
                       const uuidVal = matchingJob?.result?.uuid || "N/A";
                       const dateStr = t.createdAt ? new Date(t.createdAt).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" }) : "N/A";
                       const updatedTimeStr = matchingJob?.updatedAt ? new Date(matchingJob.updatedAt).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" }) : "N/A";
+                      const jobAgeMs = matchingJob?.createdAt ? Date.now() - new Date(matchingJob.createdAt).getTime() : 0;
 
                       let statusBadge = "bg-slate-150 text-slate-650";
                       if (t.status === "cfdi_validated" || t.status === "invoice_obtained") {
@@ -2709,6 +2710,11 @@ export default function AdminScreen({
                             {matchingJob ? (
                               <div className="space-y-1 font-mono text-[10px] leading-tight">
                                 <div><span className="text-slate-400">Job:</span> <span className="font-semibold text-slate-700">#{matchingJob.id?.slice(-6).toUpperCase()} ({matchingJob.status})</span></div>
+                                {matchingJob.status === "pending" && (
+                                  <div className="text-amber-600 font-extrabold mt-0.5 animate-pulse bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 text-[8.5px] leading-none inline-block">
+                                    ⚠️ Runner no ha tomado este job ({Math.round(jobAgeMs / 1000)}s pend.)
+                                  </div>
+                                )}
                                 <div><span className="text-slate-400">XML Descargado:</span> <span className={`font-bold ${hasXml === "Sí" ? "text-emerald-600" : "text-rose-600"}`}>{hasXml}</span></div>
                                 <div><span className="text-slate-400">PDF Descargado:</span> <span className={`font-bold ${hasPdf === "Sí" ? "text-emerald-600" : "text-slate-450"}`}>{hasPdf}</span></div>
                                 <div><span className="text-slate-400">UUID:</span> <span className="text-slate-600 truncate max-w-[120px] inline-block">{uuidVal}</span></div>

@@ -1,4 +1,4 @@
-import { initializeApp, cert } from "firebase-admin/app";
+import { initializeApp, cert, getApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import * as fs from "fs";
@@ -25,7 +25,16 @@ if (fs.existsSync(serviceAccountPath)) {
   });
 }
 
-const db = getFirestore("ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee");
+const databaseId = "ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee";
+const db = getFirestore(getApp(), databaseId);
+
+console.log("=========================================");
+console.log("[Runner] Iniciado correctamente");
+console.log("[Runner] Project: factubolt");
+console.log(`[Runner] Database: ${databaseId}`);
+console.log(`[Runner] Modo de ejecución: ${fs.existsSync(serviceAccountPath) ? "Service Account Key" : "Application Default Credentials"}`);
+console.log("[Runner] Buscando invoice_jobs pending...");
+console.log("=========================================");
 
 async function processJob(jobId: string) {
   const lockedJob = await lockJob(jobId, workerId);
