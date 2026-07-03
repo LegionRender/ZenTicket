@@ -347,6 +347,30 @@ const connectorsSeed = [
 async function seedConnectors() {
   console.log("Starting administrative connectors seed run...");
   try {
+    // Dynamically inject fieldExtractionHints to connectors seed
+    for (const item of connectorsSeed) {
+      if (item.extractionContract && item.extractionContract.requiredPortalFields) {
+        for (const f of item.extractionContract.requiredPortalFields) {
+          if (f.canonicalKey === "billingReference") {
+            f.fieldExtractionHints = {
+              likelyZones: ["bottom", "near_barcode", "invoice_instructions"],
+              nearbyWords: ["referencia", "facturacion", "factura", "portal", "codigo", "ticket", "folio"],
+              rejectIfLooksLike: ["uuid", "internal_id", "cfdi_uuid"],
+              allowSecondaryOcr: true,
+              requireLiteralMatch: true
+            };
+          } else if (f.canonicalKey === "total") {
+            f.fieldExtractionHints = {
+              likelyZones: ["bottom", "summary"],
+              nearbyWords: ["total", "neto", "importe", "pago", "monto"],
+              rejectIfLooksLike: ["uuid", "internal_id"],
+              allowSecondaryOcr: false
+            };
+          }
+        }
+      }
+    }
+
     for (const item of connectorsSeed) {
       let connectorId;
       const snapshot = await db.collection("connectors")

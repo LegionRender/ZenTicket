@@ -1277,6 +1277,81 @@ export default function ScannerAndSimulator({
     }
   };
 
+  const handleForceTargetedRetry = async () => {
+    if (!ticketImage || !matchingConnector) {
+      toast.error("No hay una imagen de ticket o conector asociado para reintentar.");
+      return;
+    }
+    
+    setIsOcrLoading(true);
+    setValidationError(null);
+    
+    let finishTriggered = false;
+    const stopSimulation = simulateOcrProgress(() => {
+      finishTriggered = true;
+    });
+
+    try {
+      const rawBase64 = ticketImage.includes(",") ? ticketImage.split(",")[1] : ticketImage;
+      const response = await analyzeTicket({
+        imageBase64: rawBase64,
+        mimeType: "image/png",
+        personalGeminiKey: fiscalProfile?.personalGeminiKey,
+        userId: user?.uid,
+        forceTargetedRetry: true,
+        connectorId: matchingConnector.id
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo forzar el reintento de extracción dirigida.");
+      }
+
+      const ocrResult: any = await response.json();
+      if (ocrResult.ocrFailed) {
+        toast.warning(
+          ocrResult.ocrError || "El OCR no pudo extraer el dato de forma dirigida. Completa manualmente.",
+          "Captura Manual Activada"
+        );
+      } else {
+        toast.success("¡Lectura automática exitosa en reintento dirigido!", "Lectura Completada");
+      }
+
+      const sanitized = sanitizePortalFieldsForConnector(matchingConnector, ocrResult, ocrResult.rawOcrText);
+
+      setExtractedData(ocrResult);
+      setEditNombre(ocrResult.nombreEmisor || "");
+      setEditRfc(ocrResult.rfcEmisor || "");
+      setEditFecha(ocrResult.fechaCompra || "");
+      setEditFolio(sanitized.billingReference || "");
+      setEditSucursal(ocrResult.sucursal || "");
+      setEditTotal(sanitized.total || 0);
+      setIsEditing(ocrResult.extractionState === "manual_input_required");
+
+      if (ticketId) {
+        await onUpdateTicketInDb(ticketId, {
+          status: ocrResult.ocrFailed || ocrResult.extractionState === "manual_input_required" ? "review" : "extracted",
+          rfcEmisor: ocrResult.rfcEmisor,
+          nombreEmisor: ocrResult.nombreEmisor,
+          fechaCompra: ocrResult.fechaCompra,
+          folio: ocrResult.folio,
+          total: ocrResult.total,
+          sucursal: ocrResult.sucursal || "",
+          itemsJson: JSON.stringify(ocrResult.items),
+          cost: ocrResult.cost !== undefined ? ocrResult.cost : 0.50,
+          rawCost: ocrResult.rawCost || 0.0,
+          extractionState: ocrResult.extractionState || "extraction_found",
+          portalFieldsConfidence: ocrResult.portalFieldsConfidence || { billingReference: 1.0, total: 1.0 },
+          extractionDiagnostics: ocrResult.extractionDiagnostics || null
+        });
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Error al reintentar la extracción dirigida.");
+    } finally {
+      stopSimulation();
+      setIsOcrLoading(false);
+    }
+  };
+
   // Convert files loaded manually or captured from camera to base64, compress, and parse
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -4338,15 +4413,26 @@ return list.map(n => {
                       </div>
                     </div>
 
-                    {checkIsDataIncomplete(extractedData) ? (
-                      <div className="p-4 bg-rose-50 border border-rose-200 text-rose-855 rounded-2xl flex flex-col gap-3 text-xs leading-relaxed transition-all shadow-sm text-left">
+                    {extractedData?.extractionState === "manual_input_required" ? (
+                      <div className="p-4 bg-rose-50 border border-rose-200 text-rose-950 rounded-2xl flex flex-col gap-3 text-xs leading-relaxed transition-all shadow-sm text-left font-sans">
                         <div className="flex items-start gap-3">
-                          <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5 animate-pulse" />
+                          <AlertTriangle className="w-5 h-5 text-rose-550 shrink-0 mt-0.5 animate-pulse" />
                           <div>
-                            <span className="font-extrabold block text-rose-800 uppercase mb-0.5 tracking-wide">🚨 Datos Críticos Faltantes</span>
-                            <p className="opacity-95 text-rose-700 leading-normal font-semibold">
-                              No pudimos leer bien algunos datos del ticket.
-                            </p>
+                            {extractedData?.extractionDiagnostics?.reasonForManualInput === "IMAGE_QUALITY_ISSUE" ? (
+                              <>
+                                <span className="font-extrabold block text-rose-800 uppercase mb-0.5 tracking-wide">🚨 Calidad de Imagen Insuficiente</span>
+                                <p className="opacity-95 text-rose-700 leading-normal font-semibold">
+                                  La foto no permite leer correctamente algunos datos. Toma otra foto o corrige manualmente.
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <span className="font-extrabold block text-rose-800 uppercase mb-0.5 tracking-wide">🚨 Datos Críticos Faltantes</span>
+                                <p className="opacity-95 text-rose-700 leading-normal font-semibold">
+                                  No pudimos detectar automáticamente este dato. Puedes escribirlo manualmente o tomar otra foto.
+                                </p>
+                              </>
+                            )}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2 pt-1">
@@ -4362,6 +4448,15 @@ return list.map(n => {
                           >
                             Editar datos
                           </button>
+                          {matchingConnector && (
+                            <button
+                              onClick={handleForceTargetedRetry}
+                              className="text-[9.5px] font-black uppercase tracking-wider text-amber-705 bg-amber-100 hover:bg-amber-200 px-3.5 py-2 rounded-xl transition cursor-pointer border-none font-sans flex items-center gap-1.5"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+                              Reintentar lectura automática
+                            </button>
+                          )}
                           <button
                             onClick={async () => {
                               if (ticketId) {
@@ -4389,22 +4484,51 @@ return list.map(n => {
                           </button>
                         </div>
                       </div>
+                    ) : extractedData?.extractionState === "extraction_low_confidence" ? (
+                      <div className="p-4 bg-amber-50 border border-amber-200 text-amber-955 rounded-2xl flex flex-col gap-3 text-xs leading-relaxed transition-all shadow-sm text-left font-sans animate-fade-in_50">
+                        <div className="flex items-start gap-3">
+                          <AlertTriangle className="w-5 h-5 text-amber-550 shrink-0 mt-0.5 animate-pulse" />
+                          <div>
+                            <span className="font-extrabold block text-amber-800 uppercase mb-0.5 tracking-wide">⚠️ Validación de Confianza</span>
+                            <p className="opacity-95 text-amber-700 leading-normal font-semibold font-sans">
+                              Detectamos algunos datos con baja confianza. Revísalos antes de continuar.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1 font-sans">
+                          <button
+                            onClick={() => setIsEditing(true)}
+                            className="text-[9.5px] font-black uppercase tracking-wider text-blue-700 bg-blue-100 hover:bg-blue-200 px-3.5 py-2 rounded-xl transition cursor-pointer border-none font-sans"
+                          >
+                            Revisar / Editar datos
+                          </button>
+                          {matchingConnector && (
+                            <button
+                              onClick={handleForceTargetedRetry}
+                              className="text-[9.5px] font-black uppercase tracking-wider text-amber-705 bg-amber-100 hover:bg-amber-200 px-3.5 py-2 rounded-xl transition cursor-pointer border-none font-sans flex items-center gap-1.5"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+                              Reintentar lectura automática
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     ) : matchingConnector ? (
                       <div className="p-3.5 bg-blue-50 border border-blue-150 text-blue-900 rounded-xl flex items-start gap-2.5 text-xs text-left animate-fade-in_50 font-sans">
                         <CheckCircle className="w-4.5 h-4.5 text-[#0B53F4] shrink-0 mt-0.5" />
                         <div>
-                          <p className="font-semibold text-blue-800 leading-normal">
+                          <p className="font-semibold text-blue-800 leading-normal font-sans">
                             Estamos revisando si este comercio puede procesarse automáticamente.
                           </p>
                         </div>
                       </div>
                     ) : (
-                      <div className="p-4 bg-amber-50/50 border border-amber-200 text-amber-900 rounded-2xl flex flex-col gap-3 text-xs leading-relaxed transition-all shadow-sm text-left">
+                      <div className="p-4 bg-amber-50/50 border border-amber-200 text-amber-900 rounded-2xl flex flex-col gap-3 text-xs leading-relaxed transition-all shadow-sm text-left font-sans">
                         <div className="flex items-start gap-3">
-                          <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 animate-pulse" />
+                          <AlertTriangle className="w-5 h-5 text-amber-550 shrink-0 mt-0.5 animate-pulse" />
                           <div>
                             <span className="font-extrabold block text-amber-800 uppercase mb-0.5 tracking-wide">Comercio Sin Conector</span>
-                            <p className="opacity-95 text-amber-700 leading-normal font-semibold">
+                            <p className="opacity-95 text-amber-700 leading-normal font-semibold font-sans">
                               Este comercio aún requiere revisión manual. Puedes corregir los datos o enviar el ticket a revisión.
                             </p>
                           </div>

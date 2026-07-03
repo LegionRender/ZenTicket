@@ -5,6 +5,8 @@ export interface AnalyzeTicketParams {
   mimeType: string;
   personalGeminiKey?: string;
   userId?: string;
+  forceTargetedRetry?: boolean;
+  connectorId?: string;
 }
 
 const MOCK_TICKETS = [
@@ -79,7 +81,9 @@ export const analyzeTicket = async ({
   imageBase64,
   mimeType,
   personalGeminiKey,
-  userId
+  userId,
+  forceTargetedRetry,
+  connectorId
 }: AnalyzeTicketParams): Promise<Response> => {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (personalGeminiKey) {
@@ -94,6 +98,8 @@ export const analyzeTicket = async ({
         image: imageBase64,
         mimeType,
         userId,
+        forceTargetedRetry,
+        connectorId
       }),
     });
 

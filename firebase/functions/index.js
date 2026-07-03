@@ -129,7 +129,10 @@ function emptyOcrDraft(message = "El OCR no pudo procesar la imagen. Completa lo
     items: [],
     rawOcrText: "",
     cost: 0,
-    rawCost: 0
+    rawCost: 0,
+    extractionState: "manual_input_required",
+    portalFieldsConfidence: { billingReference: 0.0, total: 0.0 },
+    extractionDiagnostics: { reasonForManualInput: "PROVIDER_ERROR_FALLBACK" }
   };
 }
 
@@ -201,6 +204,83 @@ function classifyError(errorText) {
   };
 }
 
+async function analyzeTicketImageQuality(ai, imagePart) {
+  const schema = {
+    type: "OBJECT",
+    properties: {
+      isBlurry: { type: "BOOLEAN", description: "Verdadero si la imagen está borrosa o movida." },
+      isCropped: { type: "BOOLEAN", description: "Verdadero si el ticket está cortado en partes esenciales." },
+      isLowLighting: { type: "BOOLEAN", description: "Verdadero si la iluminación es demasiado baja o hay sombras críticas." },
+      isLegible: { type: "BOOLEAN", description: "Verdadero si el texto del ticket se puede leer con facilidad." },
+      isIncomplete: { type: "BOOLEAN", description: "Verdadero si faltan partes importantes del ticket." },
+      reason: { type: "STRING", description: "Breve descripción en español del problema si se detectó alguno." }
+    },
+    required: ["isBlurry", "isCropped", "isLowLighting", "isLegible", "isIncomplete", "reason"]
+  };
+  const prompt = "Analiza detalladamente la calidad visual de esta fotografía de un ticket de compra. Determina si la imagen está borrosa, cortada, con mala iluminación, ilegible o incompleta. Si todo está perfecto y legible, pon 'reason' como 'OK'.";
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: { parts: [imagePart, { text: prompt }] },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema
+      }
+    });
+    if (response.text) {
+      return JSON.parse(response.text.trim());
+    }
+  } catch (e) {
+    console.warn("Quality analysis model call failed:", e);
+  }
+  return { isBlurry: false, isCropped: false, isLowLighting: false, isLegible: true, isIncomplete: false, reason: "No se pudo analizar" };
+}
+
+async function runSecondaryExtraction(ai, imagePart, rawOcrText, connector, missingFieldKey) {
+  const contract = connector.extractionContract;
+  const field = contract.requiredPortalFields.find(f => f.canonicalKey === missingFieldKey);
+  if (!field) return null;
+
+  const hints = field.fieldExtractionHints || {};
+  const schema = {
+    type: "OBJECT",
+    properties: {
+      extractedValue: { type: "STRING", description: `El valor extraído para ${field.label}. Si no lo encuentras literalmente, devuelve null.` }
+    },
+    required: ["extractedValue"]
+  };
+
+  let prompt = `Este ticket pertenece a ${connector.nombre}.\n`;
+  prompt += `Busca en la imagen y el texto OCR la referencia de facturación: ${field.label}.\n`;
+  prompt += `Pistas de la zona: ${hints.likelyZones ? hints.likelyZones.join(", ") : "Cualquier parte del ticket"}.\n`;
+  prompt += `Palabras cercanas asociadas: ${hints.nearbyWords ? hints.nearbyWords.join(", ") : ""}.\n`;
+  prompt += `Reglas de filtrado: No debe ser un UUID, folio fiscal, ticketId, doc.id ni ningún identificador interno del sistema.\n`;
+  if (field.validationPattern) {
+    prompt += `Patrón requerido (Regex): ${field.validationPattern}.\n`;
+  }
+  prompt += `Instrucción detallada: "Busca únicamente este dato en la imagen. Si no aparece claramente, devuelve null. No inventes. No uses UUID, folio fiscal, ticketId, doc.id ni identificadores internos."\n`;
+  prompt += `Texto OCR de referencia:\n${rawOcrText}\n`;
+
+  try {
+    console.log(`[OCR Secondary] Attempting secondary extraction for field ${missingFieldKey}`);
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: { parts: [imagePart, { text: prompt }] },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema
+      }
+    });
+    if (response.text) {
+      const parsed = JSON.parse(response.text.trim());
+      return parsed.extractedValue || null;
+    }
+  } catch (e) {
+    console.warn(`[OCR Secondary Error] failed for ${missingFieldKey}:`, e);
+  }
+  return null;
+}
+
 function calculateGeminiRawCost(response) {
   const promptTokens = response.usageMetadata?.promptTokenCount || 0;
   const outputTokens = response.usageMetadata?.candidatesTokenCount || 0;
@@ -208,9 +288,79 @@ function calculateGeminiRawCost(response) {
   return (((promptTokens * 0.075) + (outputTokens * 0.30)) / 1000000) * exchangeRate;
 }
 
-async function runGeminiOcr(provider, image, mimeType) {
+async function runGeminiOcr(provider, image, mimeType, matchedConnector = null) {
   const ai = new GoogleGenAI({ apiKey: provider.key });
   let lastError = "";
+
+  // Prepare custom schema/prompt if connector matched
+  let targetedPromptText = OCR_PROMPT;
+  let targetedSchema = OCR_RESPONSE_SCHEMA;
+
+  if (matchedConnector && matchedConnector.extractionContract) {
+    const contract = matchedConnector.extractionContract;
+    targetedPromptText = `Analiza la imagen del ticket de compra comercial del comercio: ${matchedConnector.nombre} (también conocido como: ${matchedConnector.aliases ? matchedConnector.aliases.join(", ") : "n/a"}).\n`;
+    targetedPromptText += `Extrae únicamente los campos requeridos por el portal de facturación oficial:\n`;
+    for (const f of contract.requiredPortalFields) {
+      const hints = f.fieldExtractionHints || {};
+      targetedPromptText += `- Campo: ${f.label} (clave: ${f.canonicalKey})\n`;
+      targetedPromptText += `  * Pistas: ${f.hints.join(". ")}\n`;
+      if (hints.likelyZones) targetedPromptText += `  * Zonas probables: ${hints.likelyZones.join(", ")}\n`;
+      if (hints.nearbyWords) targetedPromptText += `  * Palabras clave cercanas: ${hints.nearbyWords.join(", ")}\n`;
+      if (f.validationPattern) targetedPromptText += `  * Formato esperado (Regex): ${f.validationPattern}\n`;
+      if (f.forbiddenPatterns) targetedPromptText += `  * Patrones prohibidos: ${f.forbiddenPatterns.join(", ")}\n`;
+    }
+    targetedPromptText += `\nINSTRUCCIÓN CRÍTICA DE SEGURIDAD: Queda estrictamente prohibido extraer, inferir o inventar cualquier valor de tipo UUID (como xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx), ticketId, doc.id, jobId, folio fiscal SAT, o identificador interno de ZenTicket o del sistema. Si detectas tales valores, ignóralos y no los uses para el campo billingReference.\n`;
+    targetedPromptText += `Si un campo requerido no aparece físicamente o de forma legible en el ticket, debes devolver obligatoriamente null o una cadena vacía. No inventes datos.\n`;
+    targetedPromptText += `También extrae la fecha de compra (fechaCompra) en formato YYYY-MM-DD, la sucursal (sucursal) y la lista de artículos comprados (items).`;
+
+    const customProperties = {
+      rfcEmisor: { type: "STRING" },
+      nombreEmisor: { type: "STRING" },
+      fechaCompra: { type: "STRING", description: "Fecha de compra en formato YYYY-MM-DD. Si no la encuentras, devuelve null." },
+      sucursal: { type: "STRING" },
+      rawOcrText: { type: "STRING", description: "El texto completo e íntegro extraído del ticket de forma literal, línea por línea." },
+      portalFieldsConfidence: {
+        type: "OBJECT",
+        properties: {
+          billingReference: { type: "NUMBER", description: "Confianza estimada de 0.0 a 1.0 para la referencia de facturación. Si no se extrae, devuelve 0.0." },
+          total: { type: "NUMBER", description: "Confianza estimada de 0.0 a 1.0 para el total. Si no se extrae, devuelve 0.0." }
+        },
+        required: ["billingReference", "total"]
+      },
+      items: {
+        type: "ARRAY",
+        description: "Lista de conceptos comprados descritos en el ticket",
+        items: {
+          type: "OBJECT",
+          properties: {
+            description: { type: "STRING" },
+            amount: { type: "NUMBER" }
+          },
+          required: ["description", "amount"]
+        }
+      }
+    };
+
+    for (const f of contract.requiredPortalFields) {
+      if (f.canonicalKey === "billingReference") {
+        customProperties.billingReference = {
+          type: "STRING",
+          description: `${f.label}. Si no se encuentra literal en el ticket, devuelve null.`
+        };
+      } else if (f.canonicalKey === "total") {
+        customProperties.total = {
+          type: "NUMBER",
+          description: `${f.label}. Si no se encuentra literal en el ticket, devuelve null.`
+        };
+      }
+    }
+
+    targetedSchema = {
+      type: "OBJECT",
+      properties: customProperties,
+      required: ["rfcEmisor", "nombreEmisor", "rawOcrText", "items", "portalFieldsConfidence"]
+    };
+  }
 
   for (const model of provider.models) {
     try {
@@ -219,12 +369,12 @@ async function runGeminiOcr(provider, image, mimeType) {
         contents: {
           parts: [
             { inlineData: { mimeType: mimeType || "image/jpeg", data: image } },
-            { text: OCR_PROMPT }
+            { text: targetedPromptText }
           ]
         },
         config: {
           responseMimeType: "application/json",
-          responseSchema: OCR_RESPONSE_SCHEMA
+          responseSchema: targetedSchema
         }
       });
 
@@ -288,9 +438,9 @@ async function runOpenAiOcr(provider, image, mimeType) {
   };
 }
 
-async function runProviderOcr(provider, image, mimeType) {
+async function runProviderOcr(provider, image, mimeType, matchedConnector = null) {
   if (provider.provider === "gemini") {
-    return runGeminiOcr(provider, image, mimeType);
+    return runGeminiOcr(provider, image, mimeType, matchedConnector);
   }
   if (provider.provider === "openai") {
     return runOpenAiOcr(provider, image, mimeType);
@@ -514,7 +664,7 @@ function sanitizeBillingReferenceForConnector(value, rawOcrText, connector, fiel
   return cleanValue;
 }
 
-async function processOcrRequest({ req, image, mimeType, userId, retryJobId = null }) {
+async function processOcrRequest({ req, image, mimeType, userId, retryJobId = null, forceTargetedRetry = false, connectorId = null }) {
   const providers = buildProviderPlan(req);
   const jobRef = retryJobId ? db.collection("ocr_jobs").doc(retryJobId) : await recordJobStart({ userId, mimeType });
   const providerAttempts = [];
@@ -527,7 +677,103 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
   for (const provider of providers) {
     const startedAt = Date.now();
     try {
-      const result = await runProviderOcr(provider, image, mimeType);
+      const ai = new GoogleGenAI({ apiKey: provider.key });
+      
+      // Load connectors list
+      let connectorsList = [];
+      try {
+        const snap = await db.collection("connectors").get();
+        connectorsList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      } catch (e) {
+        console.warn("Could not retrieve connectors list from DB:", e.message);
+      }
+
+      let matchedConnector = null;
+      if (forceTargetedRetry && connectorId) {
+        matchedConnector = connectorsList.find(c => c.id === connectorId) || null;
+        console.log(`[OCR Force Retry Cloud] Forced connector: ${matchedConnector?.nombre}`);
+      } else {
+        // STAGE 1: Identify Merchant
+        let detectedName = "";
+        let detectedRfc = "";
+        let successId = false;
+
+        const idSchema = {
+          type: "OBJECT",
+          properties: {
+            rfcEmisor: { type: "STRING", description: "RFC del emisor de la tienda. Si no viene o no es legible, coloca 'XAXX010101000'." },
+            nombreEmisor: { type: "STRING", description: "Nombre de la tienda en mayúsculas." }
+          },
+          required: ["rfcEmisor", "nombreEmisor"]
+        };
+
+        const idPrompt = {
+          text: "Analiza esta fotografía de un ticket de compra. Identifica únicamente el nombre del comercio (nombreEmisor) y su RFC (rfcEmisor). Si no encuentras el RFC, pon 'XAXX010101000'."
+        };
+
+        const imagePart = {
+          inlineData: {
+            mimeType: mimeType || "image/jpeg",
+            data: image,
+          },
+        };
+
+        for (const model of provider.models) {
+          if (successId) break;
+          try {
+            console.log(`[OCR Stage 1 Cloud] Identifying merchant with model ${model}`);
+            const response = await ai.models.generateContent({
+              model,
+              contents: { parts: [imagePart, idPrompt] },
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: idSchema
+              }
+            });
+            if (response.text && response.text.trim()) {
+              const parsed = JSON.parse(response.text.trim());
+              detectedName = parsed.nombreEmisor || "";
+              detectedRfc = parsed.rfcEmisor || "";
+              successId = true;
+              console.log(`[OCR Stage 1 Cloud] Identified: ${detectedName} (RFC: ${detectedRfc})`);
+            }
+          } catch (err) {
+            console.warn(`[OCR Stage 1 Cloud Warning] Model ${model} failed:`, err?.message || err);
+          }
+        }
+
+        // Match locally
+        const cleanStr = (s) => 
+          (s || "")
+            .toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9\s]/g, "")
+            .replace(/\b(sa|de|cv|sapi|srl|grupo|comercial|cadena|tiendas|sucursal)\b/g, "")
+            .trim();
+
+        const tRfc = (detectedRfc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const tNombre = cleanStr(detectedName || "");
+
+        matchedConnector = connectorsList.find((c) => {
+          const cRfc = (c.rfc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+          if (tRfc && cRfc && tRfc === cRfc) return true;
+
+          const cNombre = cleanStr(c.nombre || "");
+          if (tNombre && cNombre && (tNombre.includes(cNombre) || cNombre.includes(tNombre))) return true;
+
+          if (c.aliases && Array.isArray(c.aliases)) {
+            const matchingAlias = c.aliases.find((alias) => {
+              const cleanAlias = cleanStr(alias);
+              return tNombre && cleanAlias && (tNombre.includes(cleanAlias) || cleanAlias.includes(tNombre));
+            });
+            if (matchingAlias) return true;
+          }
+          return false;
+        }) || null;
+      }
+
+      // STAGE 2: Targeted OCR
+      const result = await runProviderOcr(provider, image, mimeType, matchedConnector);
       const attempt = {
         provider: provider.id,
         model: result.model,
@@ -544,36 +790,6 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         rawCost: result.rawCost,
         updatedAt: now()
       }, { merge: true });
-
-      const MERCHANT_PROFILES = {
-        "system-oxxo": {
-          name: "OXXO Cadena",
-          rfc: "CCO8605231N4",
-          portalUrl: "http://factura.oxxo.com:8080",
-          requiredFields: ["rfcEmisor", "folio", "total", "fecha"],
-          folioPattern: /^[a-zA-Z0-9\-]+$/i,
-          dateFormat: "YYYY-MM-DD",
-          minConfidence: 0.70
-        },
-        "system-starbucks": {
-          name: "Starbucks / Alsea",
-          rfc: "SHE190630TX1",
-          portalUrl: "https://alsea.facturacion.com",
-          requiredFields: ["rfcEmisor", "folio", "total", "fecha"],
-          folioPattern: /^[0-9]+$/i,
-          dateFormat: "YYYY-MM-DD",
-          minConfidence: 0.70
-        },
-        "system-walmart": {
-          name: "Walmart / Aurrera",
-          rfc: "NWM9709244W4",
-          portalUrl: "https://facturacion.walmartmexico.com",
-          requiredFields: ["rfcEmisor", "folio", "total", "fecha"],
-          folioPattern: /^[0-9]+$/i,
-          dateFormat: "YYYY-MM-DD",
-          minConfidence: 0.70
-        }
-      };
 
       const extractedData = result.data || {};
       const pipelineLogs = [];
@@ -596,63 +812,6 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
       const rawRfc = extractedData.rfcEmisor || "";
       let detectedProfileKey = "";
       let detectedProfile = null;
-      let matchedConnector = null;
-
-      // ultra-robust clean string for matching
-      const cleanStr = (s) => 
-        (s || "")
-          .toLowerCase()
-          .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^a-z0-9\s]/g, "")
-          .replace(/\b(sa|de|cv|sapi|srl|grupo|comercial|cadena|tiendas|sucursal)\b/g, "")
-          .trim();
-
-      // Query Firestore connectors to find match if Firestore is initialized
-      if (db && (rawNombre || rawRfc)) {
-        try {
-          console.log(`[OCR] Matching connector in Firestore for Name: "${rawNombre}", RFC: "${rawRfc}"...`);
-          if (rawRfc) {
-            const cleanRfc = rawRfc.toUpperCase().replace(/[^A-Z0-9]/g, "");
-            const rfcSnap = await db.collection("connectors")
-              .where("rfc", "==", cleanRfc)
-              .get();
-            if (!rfcSnap.empty) {
-              matchedConnector = { id: rfcSnap.docs[0].id, ...rfcSnap.docs[0].data() };
-              console.log(`[OCR] Connector matched by RFC: ${matchedConnector.nombre}`);
-            }
-          }
-
-          if (!matchedConnector && rawNombre) {
-            const connSnap = await db.collection("connectors").get();
-            const cleanInputName = cleanStr(rawNombre);
-            
-            for (const doc of connSnap.docs) {
-              const data = doc.data();
-              const cleanConnName = cleanStr(data.nombre || "");
-              
-              if (cleanInputName && cleanConnName && (cleanInputName.includes(cleanConnName) || cleanConnName.includes(cleanInputName))) {
-                matchedConnector = { id: doc.id, ...data };
-                console.log(`[OCR] Connector matched by Name: ${matchedConnector.nombre}`);
-                break;
-              }
-
-              if (data.aliases && Array.isArray(data.aliases)) {
-                const matchedAlias = data.aliases.find((alias) => {
-                  const cleanAlias = cleanStr(alias);
-                  return cleanInputName && cleanAlias && (cleanInputName.includes(cleanAlias) || cleanAlias.includes(cleanInputName));
-                });
-                if (matchedAlias) {
-                  matchedConnector = { id: doc.id, ...data };
-                  console.log(`[OCR] Connector matched by Alias: "${matchedAlias}" on connector: ${matchedConnector.nombre}`);
-                  break;
-                }
-              }
-            }
-          }
-        } catch (err) {
-          console.warn("[OCR] Error matching connector from Firestore:", err);
-        }
-      }
 
       if (matchedConnector) {
         detectedProfileKey = matchedConnector.id;
@@ -672,17 +831,6 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           dateFormat: "YYYY-MM-DD",
           minConfidence: 0.70
         };
-      } else {
-        if (rawRfc.toUpperCase().includes("CCO8605231N4") || rawNombre.toUpperCase().includes("OXXO")) {
-          detectedProfileKey = "system-oxxo";
-          detectedProfile = MERCHANT_PROFILES["system-oxxo"];
-        } else if (rawRfc.toUpperCase().includes("SHE190630TX1") || rawNombre.toUpperCase().includes("STARBUCKS") || rawNombre.toUpperCase().includes("ALSEA")) {
-          detectedProfileKey = "system-starbucks";
-          detectedProfile = MERCHANT_PROFILES["system-starbucks"];
-        } else if (rawRfc.toUpperCase().includes("NWM9709244W4") || rawNombre.toUpperCase().includes("WALMART") || rawNombre.toUpperCase().includes("AURRERA")) {
-          detectedProfileKey = "system-walmart";
-          detectedProfile = MERCHANT_PROFILES["system-walmart"];
-        }
       }
 
       if (detectedProfile) {
@@ -690,6 +838,126 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
       } else {
         pipelineLogs.push("Etapa 4: Comercio identificado como comercio local/general.");
       }
+
+      // Phased Extraction Metrics
+      let extractionAttemptsCount = 1;
+      let secondaryOcrExecuted = false;
+      const secondaryOcrFieldsList = [];
+      const rejectedValuesList = [];
+      let manualInputReason = "";
+      let qualityResult = null;
+
+      let billingReference = extractedData.billingReference || extractedData.referenciaFacturacion || "";
+      
+      // Sanitise immediately
+      const sanitized = sanitizeBillingReferenceForConnector(billingReference, extractedData.rawOcrText || "", matchedConnector);
+      if (billingReference && billingReference !== sanitized) {
+        rejectedValuesList.push(billingReference);
+        billingReference = "";
+      } else {
+        billingReference = sanitized;
+      }
+
+      let portalFieldsConfidence = {
+        billingReference: 0.0,
+        total: 0.0
+      };
+
+      if (extractedData.portalFieldsConfidence) {
+        portalFieldsConfidence.billingReference = parseFloat(String(extractedData.portalFieldsConfidence.billingReference || 0.0));
+        portalFieldsConfidence.total = parseFloat(String(extractedData.portalFieldsConfidence.total || 0.0));
+      } else {
+        portalFieldsConfidence.billingReference = billingReference ? 0.90 : 0.0;
+        portalFieldsConfidence.total = extractedData.total ? 0.90 : 0.0;
+      }
+
+      const imagePart = {
+        inlineData: {
+          mimeType: mimeType || "image/jpeg",
+          data: image,
+        },
+      };
+
+      // Phased validation checks
+      const isBillingRefRequired = matchedConnector && matchedConnector.extractionContract && matchedConnector.extractionContract.requiredPortalFields?.some((f) => f.canonicalKey === "billingReference");
+      const isBillingRefMissingOrLow = isBillingRefRequired && (!billingReference || portalFieldsConfidence.billingReference < 0.5);
+      const isTextTooShort = !extractedData.rawOcrText || extractedData.rawOcrText.length < 50;
+
+      if (isBillingRefMissingOrLow || isTextTooShort) {
+        console.log("[OCR Phased Cloud] Required field missing or low confidence. Running quality check...");
+        qualityResult = await analyzeTicketImageQuality(ai, imagePart);
+        
+        const isBadQuality = qualityResult.isBlurry || qualityResult.isCropped || qualityResult.isLowLighting || !qualityResult.isLegible || qualityResult.isIncomplete;
+
+        if (isBadQuality) {
+          manualInputReason = "IMAGE_QUALITY_ISSUE";
+          console.log(`[OCR Phased Cloud] Bad quality detected: ${qualityResult.reason}. Skipping secondary extraction.`);
+        } else {
+          // Legible! Run secondary extraction pass
+          secondaryOcrExecuted = true;
+          secondaryOcrFieldsList.push("billingReference");
+          extractionAttemptsCount++;
+
+          const secondaryVal = await runSecondaryExtraction(ai, imagePart, extractedData.rawOcrText || "", matchedConnector, "billingReference");
+          if (secondaryVal) {
+            const sanitizedSecondary = sanitizeBillingReferenceForConnector(secondaryVal, extractedData.rawOcrText || "", matchedConnector);
+            if (secondaryVal !== sanitizedSecondary) {
+              rejectedValuesList.push(secondaryVal);
+            } else if (sanitizedSecondary) {
+              billingReference = sanitizedSecondary;
+              portalFieldsConfidence.billingReference = 0.90;
+              console.log(`[OCR Phased Cloud] Secondary extraction found reference: "${billingReference}"`);
+            }
+          }
+        }
+      }
+
+      // Determine extraction state
+      let extractionState = "extraction_found";
+      const missingFieldsList = [];
+      const lowConfidenceFieldsList = [];
+
+      if (isBillingRefRequired) {
+        if (!billingReference) {
+          missingFieldsList.push("portalFields.billingReference");
+        } else if (portalFieldsConfidence.billingReference < 0.8) {
+          lowConfidenceFieldsList.push("portalFields.billingReference");
+        }
+      }
+      const isTotalRequired = matchedConnector && matchedConnector.extractionContract && matchedConnector.extractionContract.requiredPortalFields?.some((f) => f.canonicalKey === "total");
+      if (isTotalRequired) {
+        if (!extractedData.total) {
+          missingFieldsList.push("portalFields.total");
+        } else if (portalFieldsConfidence.total < 0.8) {
+          lowConfidenceFieldsList.push("portalFields.total");
+        }
+      }
+
+      if (missingFieldsList.length > 0) {
+        extractionState = "manual_input_required";
+        if (!manualInputReason) {
+          manualInputReason = "EXTRACTION_FAILED_TICKET_LEGIBLE";
+        }
+      } else if (lowConfidenceFieldsList.length > 0) {
+        extractionState = "extraction_low_confidence";
+      } else {
+        extractionState = "extraction_found";
+      }
+
+      const extractionDiagnostics = {
+        connectorDetected: !!matchedConnector,
+        connectorId: matchedConnector ? matchedConnector.id : null,
+        contractUsed: matchedConnector ? matchedConnector.extractionContract : null,
+        imageQuality: qualityResult || { isBlurry: false, isCropped: false, isLowLighting: false, isLegible: true, isIncomplete: false, reason: "OK" },
+        extractionAttempts: extractionAttemptsCount,
+        secondaryOcrUsed: secondaryOcrExecuted,
+        secondaryOcrFields: secondaryOcrFieldsList,
+        missingFields: missingFieldsList,
+        lowConfidenceFields: lowConfidenceFieldsList,
+        rejectedValues: rejectedValuesList,
+        reasonForManualInput: manualInputReason || null,
+        rawOcrTextAvailable: !!(extractedData && extractedData.rawOcrText)
+      };
 
       const fields = {
         comercio: {
@@ -735,19 +1003,11 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           normalizedValue: extractedData.folio || ""
         },
         referenciaFacturacion: {
-          value: sanitizeBillingReferenceForConnector(
-            extractedData.billingReference || extractedData.referenciaFacturacion || "",
-            null,
-            matchedConnector
-          ),
-          confidence: (extractedData.billingReference || extractedData.referenciaFacturacion) ? 0.95 : 0.0,
+          value: billingReference,
+          confidence: portalFieldsConfidence.billingReference,
           source: "ocr",
-          rawText: extractedData.billingReference || extractedData.referenciaFacturacion || "",
-          normalizedValue: sanitizeBillingReferenceForConnector(
-            extractedData.billingReference || extractedData.referenciaFacturacion || "",
-            null,
-            matchedConnector
-          )
+          rawText: billingReference,
+          normalizedValue: billingReference
         },
         codigoBarras: {
           value: extractedData.codigoBarras || "",
@@ -781,39 +1041,13 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
 
       pipelineLogs.push("Etapa 5: Ejecutando normalización de campos (limpieza de RFC, formato de fechas y totales).");
 
-      let validationFailed = false;
-      let failReason = "";
+      const portalFields = {
+        billingReference: billingReference || "",
+        total: qrParsed ? qrParsed.total : (parseFloat(String(extractedData.total)) || 0),
+        date: extractedData.fechaCompra || ""
+      };
 
-      if (detectedProfile && fields.folio.value && detectedProfile.folioPattern) {
-        if (!detectedProfile.folioPattern.test(fields.folio.value)) {
-          fields.folio.confidence = 0.50;
-          pipelineLogs.push(`⚠️ Advertencia: El folio '${fields.folio.value}' no coincide con el patrón esperado del comercio.`);
-        }
-      }
-
-      const required = detectedProfile ? detectedProfile.requiredFields : ["rfcEmisor", "folio", "total", "fecha"];
-      for (const reqField of required) {
-        const fieldKey = reqField === "fecha" ? "fecha" : reqField;
-        const f = fields[fieldKey];
-        if (!f || !f.value || f.confidence < 0.70) {
-          validationFailed = true;
-          failReason = `El campo requerido '${reqField}' falta o tiene baja confianza de extracción.`;
-          pipelineLogs.push(`❌ Falló validación: Campo '${reqField}' no es confiable (Confianza: ${f ? Math.round(f.confidence*100) : 0}%).`);
-        }
-      }
-
-      const sumConf = Object.values(fields).reduce((sum, f) => sum + f.confidence, 0);
-      const avgConfidence = sumConf / Object.keys(fields).length;
-      pipelineLogs.push(`Etapa 6: Cálculo de confianza general completado: ${Math.round(avgConfidence * 100)}%.`);
-
-      let finalOcrFailed = validationFailed;
-      let ocrErrorStr = "";
-      if (validationFailed) {
-        ocrErrorStr = `Extracción de datos con baja confianza o incompleta: ${failReason} Requiere revisión del usuario.`;
-        pipelineLogs.push("Decisión: Confianza insuficiente para automatización automática. Marcando para revisión manual.");
-      } else {
-        pipelineLogs.push("Decisión: Confianza aprobada. Listo para automatización automática.");
-      }
+      const avgConfidence = Object.values(fields).reduce((sum, f) => sum + f.confidence, 0) / Object.keys(fields).length;
 
       return {
         ...extractedData,
@@ -825,8 +1059,9 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         sucursal: fields.sucursal.value,
         billingReference: fields.referenciaFacturacion.value,
         codigoBarras: fields.codigoBarras.value,
-        ocrFailed: finalOcrFailed,
-        ocrError: ocrErrorStr || extractedData.ocrError || null,
+        portalFields,
+        ocrFailed: extractionState === "manual_input_required",
+        ocrError: (extractionState === "manual_input_required") ? "Requiere revisión del usuario por campo faltante o ilegible." : null,
         confidenceScore: parseFloat(avgConfidence.toFixed(4)),
         extractedFields: fields,
         pipelineLogs,
@@ -841,10 +1076,14 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           portalUrl: matchedConnector.portalUrl,
           fieldsJson: matchedConnector.fieldsJson,
           flowJson: matchedConnector.flowJson,
+          extractionContract: matchedConnector.extractionContract,
           status: matchedConnector.status
         } : null,
         cost: provider.provider === "openai" ? 0.75 : 0.5,
-        rawCost: result.rawCost
+        rawCost: result.rawCost,
+        extractionState,
+        portalFieldsConfidence,
+        extractionDiagnostics
       };
     } catch (err) {
       lastError = err?.message || String(err);
@@ -890,7 +1129,10 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
   return {
     ...emptyOcrDraft(errorInfo.userMessage),
     ocrJobId: jobRef.id,
-    retryQueued: true
+    retryQueued: true,
+    extractionState: "manual_input_required",
+    portalFieldsConfidence: { billingReference: 0, total: 0 },
+    extractionDiagnostics: { reasonForManualInput: "RETRY_QUEUED_INTERNAL_ERROR" }
   };
 }
 
@@ -911,7 +1153,7 @@ app.post("/api/automation/run", async (req, res) => {
 });
 
 app.post("/api/tickets/analyze", async (req, res) => {
-  const { image, mimeType, userId } = req.body || {};
+  const { image, mimeType, userId, forceTargetedRetry, connectorId } = req.body || {};
 
   if (!image) {
     res.status(400).json({ error: "Missing base64 ticket image" });
@@ -919,7 +1161,7 @@ app.post("/api/tickets/analyze", async (req, res) => {
   }
 
   try {
-    const result = await processOcrRequest({ req, image, mimeType, userId });
+    const result = await processOcrRequest({ req, image, mimeType, userId, forceTargetedRetry, connectorId });
     res.json(result);
   } catch (err) {
     console.error("[OCR] Critical failure:", err);
