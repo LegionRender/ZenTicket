@@ -165,6 +165,33 @@ export default function AdminScreen({
   const [trainingSyncError, setTrainingSyncError] = useState<string | null>(null);
   const [ocrSyncError, setOcrSyncError] = useState<string | null>(null);
   const [trackerTab, setTrackerTab] = useState<"activos" | "aprendidos">("aprendidos");
+  const [trainingRequests, setTrainingRequests] = useState<any[]>([]);
+  const [portalMaps, setPortalMaps] = useState<any[]>([]);
+
+  useEffect(() => {
+    const unsubscribeRequests = onSnapshot(
+      query(collection(db, "training_requests")),
+      (snapshot) => {
+        setTrainingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      },
+      (err) => {
+        console.error("Error loading training requests:", err);
+      }
+    );
+    const unsubscribeMaps = onSnapshot(
+      query(collection(db, "portal_maps")),
+      (snapshot) => {
+        setPortalMaps(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      },
+      (err) => {
+        console.error("Error loading portal maps:", err);
+      }
+    );
+    return () => {
+      unsubscribeRequests();
+      unsubscribeMaps();
+    };
+  }, []);
 
   // See All modal state variables
   const [isCostFacturasModalOpen, setIsCostFacturasModalOpen] = useState(false);
@@ -242,6 +269,22 @@ export default function AdminScreen({
       ...prev,
       [id]: !prev[id],
     }));
+  };
+
+  const handleEnableAutomation = async (connectorId: string) => {
+    try {
+      const connRef = doc(db, "connectors", connectorId);
+      await updateDoc(connRef, {
+        status: "automation_available",
+        runnerAvailable: true,
+        isProductionReady: false,
+        updatedAt: new Date().toISOString()
+      });
+      toast.success("Automatización habilitada para este comercio exitosamente.", "Comercio Habilitado");
+    } catch (e: any) {
+      console.error("Error enabling automation:", e);
+      toast.error("No se pudo habilitar la automatización: " + e.message, "Error");
+    }
   };
 
   React.useEffect(() => {
@@ -1802,32 +1845,20 @@ export default function AdminScreen({
             
             // Custom label badges
             let badgeText = "MOCK IA";
-            let badgeBg = "bg-blue-50 text-blue-700 border-blue-150";
+            let badgeBg = "bg-blue-550/10 text-blue-700 border-blue-500/10";
             const status = c.status || "mock_only";
 
             if (status === "production_ready") {
               badgeText = "PRODUCTIVO";
               badgeBg = "bg-emerald-50 text-emerald-700 border-emerald-150";
-            } else if (status === "real_validation") {
-              badgeText = "EN VALIDACIÓN REAL";
+            } else if (status === "automation_available" || status === "real_validation") {
+              badgeText = "AUTOMATIZACIÓN DISPONIBLE";
               badgeBg = "bg-indigo-50 text-indigo-700 border-indigo-150";
-            } else if (status === "trained_needs_validation") {
-              badgeText = "REQUIERE ENTRENAMIENTO";
-              badgeBg = "bg-yellow-50 text-yellow-700 border-yellow-150";
-            } else if (status === "runner_not_available") {
-              badgeText = "RUNNER NO DISPONIBLE";
+            } else if (status === "automation_pending_setup" || status === "runner_not_available" || status === "mock_only" || status === "trained_needs_validation") {
+              badgeText = "CONFIGURACIÓN PENDIENTE";
               badgeBg = "bg-slate-50 text-slate-700 border-slate-150";
-            } else if (status === "disabled") {
-              badgeText = "DESHABILITADO";
-              badgeBg = "bg-slate-50 text-slate-700 border-slate-150";
-            } else if (status === "mock_only") {
-              badgeText = "MOCK IA";
-              badgeBg = "bg-blue-550/10 text-blue-700 border-blue-500/10";
-            } else if (status === "restricted") {
-              badgeText = "RESTRINGIDO";
-              badgeBg = "bg-amber-50 text-amber-700 border-amber-150";
-            } else if (status === "broken") {
-              badgeText = "ROTO";
+            } else if (status === "automation_blocked" || status === "disabled" || status === "restricted" || status === "broken") {
+              badgeText = "AUTOMATIZACIÓN BLOQUEADA";
               badgeBg = "bg-rose-50 text-rose-700 border-rose-150";
             } else if (status === "needs_discovery") {
               badgeText = "REQUIERE DISCOVERY";
@@ -1937,10 +1968,10 @@ export default function AdminScreen({
                         </span>
                       </div>
 
-                      {/* DATOS DE ENTRENAMIENTO DE AUTOMATIZACIÓN DE IA */}
+                      {/* ORIGEN DE LA CONFIGURACIÓN */}
                       <div className="text-left">
                         <span className="block text-[9px] font-black text-slate-400 uppercase tracking-widest font-mono">
-                          Entrenamiento de Automatización
+                          Origen de la Configuración
                         </span>
                         <div className="bg-white border border-slate-205/70 rounded-xl p-3.5 mt-1.5 space-y-3 shadow-4xs text-[11px]">
                           {(() => {
@@ -1956,7 +1987,7 @@ export default function AdminScreen({
                               badgeStyle = "bg-amber-50 border-amber-200 text-amber-800";
                               dotColor = "bg-amber-500";
                             } else if (isPortal) {
-                              trainingLabel = "Entrenamiento de portal";
+                              trainingLabel = "Configuración de portal";
                               badgeStyle = "bg-purple-50 border-purple-200 text-purple-800";
                               dotColor = "bg-purple-500";
                             }
@@ -1986,6 +2017,99 @@ export default function AdminScreen({
                         </div>
                       </div>
                     </div>
+
+                    {/* SECCIÓN DE SOLICITUDES DE CONFIGURACIÓN Y DIAGNÓSTICO */}
+                    {(() => {
+                      const ticketsWaitingConfig = (tickets || []).filter(t => 
+                        t.status === "requires_manual_review" && 
+                        t.reviewError?.reviewReasonCode === "CONNECTOR_RUNNER_NOT_AVAILABLE" && 
+                        (t.reviewError?.connectorId === c.id || t.rfcEmisor === c.rfc)
+                      );
+                      const countWaiting = ticketsWaitingConfig.length;
+                      const sortedTicketsWaiting = [...ticketsWaitingConfig].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                      const lastTicket = sortedTicketsWaiting[0];
+
+                      const pMap = portalMaps.find(pm => pm.connectorId === c.id);
+                      const hasPortalMap = !!pMap;
+                      const hasStepsJson = !!(pMap && pMap.stepsJson && pMap.stepsJson !== "[]");
+                      const isPortalMapApproved = !!(pMap && (pMap.isApproved === true || pMap.status === "approved"));
+                      const hasContract = !!c.extractionContract;
+                      const isEntryUrlVerified = !!(pMap && pMap.entryUrl && pMap.entryUrl.startsWith("http"));
+                      
+                      const isEligibleToEnable = hasContract && hasPortalMap && hasStepsJson && isPortalMapApproved && isEntryUrlVerified;
+
+                      return (
+                        <div className="border-t border-slate-100 pt-3 space-y-3 text-left font-sans text-xs">
+                          <span className="block text-[9px] font-black text-slate-400 uppercase tracking-widest font-mono">
+                            Configuración Pendiente
+                          </span>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white border border-slate-200/60 rounded-xl p-3.5 shadow-4xs">
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between">
+                                <span className="text-slate-450 font-medium font-semibold">Tickets esperando configuración:</span>
+                                <span className="font-extrabold text-slate-800 font-mono">{countWaiting}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-450 font-medium font-semibold">Último ticket recibido:</span>
+                                <span className="font-extrabold text-slate-800 font-mono select-all">
+                                  {lastTicket ? `#${lastTicket.id.replace("ticket_", "").toUpperCase()} (${new Date(lastTicket.createdAt).toLocaleDateString("es-MX")})` : "Ninguno"}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-450 font-medium font-semibold">Estatus del conector:</span>
+                                <span className="font-extrabold text-slate-800 uppercase">{c.status}</span>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5 border-l md:border-l border-slate-100 pl-0 md:pl-4">
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-450 font-medium font-semibold">Contrato de extracción:</span>
+                                <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${hasContract ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                                  {hasContract ? "Sí" : "No"}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-450 font-medium font-semibold">Mapa de portal (portalMap):</span>
+                                <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${hasPortalMap ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                                  {hasPortalMap ? (isPortalMapApproved ? "Aprobado" : "Pendiente") : "Falta"}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-450 font-medium font-semibold">Pasos de flujo (stepsJson):</span>
+                                <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${hasStepsJson ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                                  {hasStepsJson ? "Sí" : "No"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Botón de Habilitación */}
+                          {c.status !== "production_ready" && c.status !== "automation_available" && (
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50 border border-slate-100 p-3.5 rounded-xl">
+                              <div className="text-[11px] leading-tight text-slate-500 font-semibold">
+                                {isEligibleToEnable 
+                                  ? "Este comercio cuenta con toda la configuración real requerida. Puedes habilitar su automatización automática."
+                                  : "Falta completar la configuración técnica real (contrato, mapa aprobado o pasos de navegación) antes de habilitarlo."
+                                }
+                              </div>
+                              <button
+                                type="button"
+                                disabled={!isEligibleToEnable}
+                                onClick={() => handleEnableAutomation(c.id)}
+                                className={`px-4.5 py-2 text-[10.5px] font-black uppercase tracking-wider rounded-xl transition cursor-pointer select-none border-none shrink-0 ${
+                                  isEligibleToEnable 
+                                    ? "bg-[#0B53F4] text-white shadow-sm hover:bg-[#0942c4]" 
+                                    : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                                }`}
+                              >
+                                Habilitar automatización
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Fields lists */}
                     <div className="space-y-1 text-left">

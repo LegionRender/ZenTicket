@@ -39,8 +39,8 @@ async function auditConnectors() {
     }
 
     console.log(`\nConectores encontrados: ${snapshot.size}\n`);
-    console.log("| ID | Nombre | RFC | Has Contract | Required Portal Fields | Fiscal Fields | Has Portal Map | Has stepsJson | Status | Runner Available | Production Ready | Eligible For Production |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    console.log("| ID | Nombre | RFC | Status | Runner Available | Production Ready | Has Extraction Contract | Has Portal Map | Has stepsJson | Entry URL Verified | Reason Not Runnable | Last Real Run | Last Result | Last XML Result | Eligible For Production |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
 
     for (const doc of snapshot.docs) {
       const data = doc.data();
@@ -66,16 +66,51 @@ async function auditConnectors() {
       
       let hasSteps = "No";
       let portalMapApproved = false;
-      
+      let reasonNotRunnable = "Ninguna (Listo)";
+      let entryUrlVerified = "No";
+
       if (!pmSnap.empty) {
         const pmData = pmSnap.docs[0].data();
         portalMapApproved = pmData.isApproved === true || pmData.status === "approved";
+        if (pmData.entryUrl && pmData.entryUrl.startsWith("http")) {
+          entryUrlVerified = "Sí";
+        }
         try {
           if (pmData.stepsJson) {
             const parsedSteps = JSON.parse(pmData.stepsJson);
             if (parsedSteps.length > 0) hasSteps = "Sí";
           }
         } catch (e) {}
+      }
+
+      // Calculate Reason Not Runnable
+      if (!data.extractionContract) {
+        reasonNotRunnable = "Sin extractionContract";
+      } else if (pmSnap.empty) {
+        reasonNotRunnable = "Sin portalMap";
+      } else {
+        const pmData = pmSnap.docs[0].data();
+        if (pmData.isApproved !== true && pmData.status !== "approved") {
+          reasonNotRunnable = "PortalMap no aprobado";
+        } else if (!pmData.stepsJson || pmData.stepsJson === "[]") {
+          reasonNotRunnable = "Sin stepsJson";
+        } else {
+          try {
+            const parsedSteps = JSON.parse(pmData.stepsJson);
+            const hasFillTransaction = parsedSteps.some(step => step.type === "fill" && (step.value.includes("billingReference") || step.value.includes("folio")));
+            if (!hasFillTransaction && data.nombre.toLowerCase().includes("walmart")) {
+              reasonNotRunnable = "stepsJson incompleto/legacy (Falta TR/folio)";
+            } else if (pmData.entryUrl && pmData.entryUrl.startsWith("http")) {
+              if (data.runnerAvailable === false) {
+                reasonNotRunnable = "Runner no disponible (desactivado manual)";
+              }
+            } else {
+              reasonNotRunnable = "Entry URL no verificada";
+            }
+          } catch (e) {
+            reasonNotRunnable = "stepsJson inválido";
+          }
+        }
       }
 
       // Fetch real jobs to check successful runs
@@ -96,10 +131,20 @@ async function auditConnectors() {
         latestRealJob = jobs[0];
       }
 
+      let lastRealRun = "Ninguna";
+      let lastResult = "N/A";
+      let lastXmlResult = "N/A";
+
+      if (latestRealJob) {
+        lastRealRun = latestRealJob.createdAt.split("T")[0];
+        lastResult = latestRealJob.status;
+        lastXmlResult = (latestRealJob.result && latestRealJob.result.xmlStoragePath) ? "Descargado" : "Pendiente";
+      }
+
       // Calculate Eligibility based on navigation success and local structural validation
       const eligibleForProd = portalMapApproved && latestRealJob && latestRealJob.status === "succeeded" && latestRealJob.result && latestRealJob.result.xmlStoragePath ? "Sí" : "No";
 
-      console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${hasContract} | ${reqPortalFields} | ${fiscalFieldsStr} | ${hasPortalMap} | ${hasSteps} | ${data.status || "mock_only"} | ${data.runnerAvailable || false} | ${data.isProductionReady || false} | ${eligibleForProd} |`);
+      console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${data.status || "mock_only"} | ${data.runnerAvailable || false} | ${data.isProductionReady || false} | ${hasContract} | ${hasPortalMap} | ${hasSteps} | ${entryUrlVerified} | ${reasonNotRunnable} | ${lastRealRun} | ${lastResult} | ${lastXmlResult} | ${eligibleForProd} |`);
     }
   } catch (err) {
     console.error("Fallo al auditar conectores:", err.message);

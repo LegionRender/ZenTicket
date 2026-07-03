@@ -97,7 +97,7 @@ const connectorsSeed = [
       ]
     },
     createdAt: new Date().toISOString(),
-    status: "runner_not_available",
+    status: "automation_pending_setup",
     isProductionReady: false,
     isMock: false,
     isRestricted: false,
@@ -155,7 +155,7 @@ const connectorsSeed = [
       ]
     },
     createdAt: new Date().toISOString(),
-    status: "runner_not_available",
+    status: "automation_pending_setup",
     isProductionReady: false,
     isMock: false,
     isRestricted: false,
@@ -213,7 +213,7 @@ const connectorsSeed = [
       ]
     },
     createdAt: new Date().toISOString(),
-    status: "runner_not_available",
+    status: "automation_pending_setup",
     isProductionReady: false,
     isMock: false,
     isRestricted: false,
@@ -279,7 +279,7 @@ const connectorsSeed = [
       ]
     },
     createdAt: new Date().toISOString(),
-    status: "real_validation",
+    status: "automation_available",
     isProductionReady: false,
     isMock: false,
     isRestricted: false,
@@ -335,7 +335,7 @@ const connectorsSeed = [
       ]
     },
     createdAt: new Date().toISOString(),
-    status: "mock_only",
+    status: "automation_pending_setup",
     isProductionReady: false,
     isMock: true,
     isRestricted: false,

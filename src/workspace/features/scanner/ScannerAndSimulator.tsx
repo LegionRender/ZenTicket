@@ -1107,6 +1107,7 @@ export default function ScannerAndSimulator({
         rawOcrText: ocrResult.rawOcrText || "",
       } as any);
       setTicketId(tId);
+      await ensureTrainingRequest(ocrResult, foundConnector, tId);
 
       // Seek matching connector (already matched above)
 
@@ -1198,6 +1199,9 @@ export default function ScannerAndSimulator({
 
   const tryAutoEnqueueBatchTicket = async (ticketId: string, ocrResult: any, foundConnector: any) => {
     if (!foundConnector) return false;
+    if (foundConnector.runnerAvailable !== true || foundConnector.status === "automation_pending_setup") {
+      return false;
+    }
     try {
       const portalMapsColl = collection(db, "portal_maps");
       const qMaps = query(portalMapsColl, where("connectorId", "==", foundConnector.id));
@@ -1451,14 +1455,38 @@ export default function ScannerAndSimulator({
           } as any);
 
           let isEnqueued = false;
-          if (foundConnector && !isDataIncomplete) {
-            updateTicketInBatch(idx, { step: "Encolando en el portal del comercio..." });
-            isEnqueued = await tryAutoEnqueueBatchTicket(tId, ocrResult, foundConnector);
+          let isPendingSetup = false;
+          if (foundConnector) {
+            if (foundConnector.runnerAvailable === true && foundConnector.status !== "automation_pending_setup") {
+              if (!isDataIncomplete) {
+                updateTicketInBatch(idx, { step: "Encolando en el portal del comercio..." });
+                isEnqueued = await tryAutoEnqueueBatchTicket(tId, ocrResult, foundConnector);
+              }
+            } else {
+              isPendingSetup = true;
+              await ensureTrainingRequest(ocrResult, foundConnector, tId);
+              const runnerErr: ReviewError = {
+                reviewReasonCode: "CONNECTOR_RUNNER_NOT_AVAILABLE",
+                reviewReasonMessage: "Detectamos este comercio, pero su automatización todavía se está configurando. Guardamos tu ticket para revisión.",
+                lastAutomationStep: "connector_resolving",
+                connectorAttempted: true,
+                connectorId: foundConnector.id || null,
+                connectorName: foundConnector.nombre || null,
+                portalErrorMessage: "Runner not available"
+              };
+              await onUpdateTicketInDb(tId, {
+                status: "requires_manual_review",
+                errorMsg: runnerErr.reviewReasonMessage,
+                reviewError: runnerErr as any
+              });
+            }
           }
 
           let finalStep = "Listo";
           if (isEnqueued) {
             finalStep = "Solicitud de factura en proceso 🚀";
+          } else if (isPendingSetup) {
+            finalStep = "Configurando automatización ⏳";
           } else if (ticketStatus === "review") {
             finalStep = "Requiere corregir datos ⚠️";
           } else {
@@ -1616,6 +1644,7 @@ export default function ScannerAndSimulator({
         rawOcrText: ocrResult.rawOcrText || "",
       } as any);
       setTicketId(tId);
+      await ensureTrainingRequest(ocrResult, foundConnector, tId);
 
       stopSimulation();
       // Wait for completion callback to trigger
@@ -1709,6 +1738,30 @@ export default function ScannerAndSimulator({
       setMessage(err.message || "Error al aprender el portal de facturación del comercio.");
     } finally {
       setIsLearningLoading(false);
+    }
+  };
+
+  const ensureTrainingRequest = async (ocrResult: any, foundConnector: any, tId: string | null) => {
+    if (foundConnector && (foundConnector.runnerAvailable === false || foundConnector.status === "automation_pending_setup")) {
+      try {
+        const reqRef = doc(db, "training_requests", foundConnector.id);
+        await setDoc(reqRef, {
+          userId: user?.uid || "guest",
+          ticketId: tId || null,
+          connectorId: foundConnector.id,
+          storeName: foundConnector.nombre,
+          rfcEmisor: foundConnector.rfc || "",
+          rawOcrText: ocrResult.rawOcrText || "",
+          ticketImagePath: null,
+          status: "pending_runner_setup",
+          reason: "CONNECTOR_RUNNER_NOT_AVAILABLE",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        console.log(`[Training Request] Created/Updated for connector: ${foundConnector.nombre}`);
+      } catch (e) {
+        console.warn("Could not save training request:", e);
+      }
     }
   };
 
@@ -1913,16 +1966,17 @@ export default function ScannerAndSimulator({
       }
 
       // Check runner availability
-      if (activeConn.runnerAvailable !== true) {
+      if (activeConn.runnerAvailable !== true || activeConn.status === "automation_pending_setup") {
         const runnerErr: ReviewError = {
           reviewReasonCode: "CONNECTOR_RUNNER_NOT_AVAILABLE",
-          reviewReasonMessage: "Este comercio aún no está disponible para facturación automática.",
+          reviewReasonMessage: "Detectamos este comercio, pero su automatización todavía se está configurando. Guardamos tu ticket para revisión.",
           lastAutomationStep: "connector_resolving",
           connectorAttempted: true,
           connectorId: activeConn.id || null,
           connectorName: activeConn.nombre || null,
           portalErrorMessage: "Runner not available"
         };
+        await ensureTrainingRequest(activeExtractedData, activeConn, activeTicketId);
         await onUpdateTicketInDb(activeTicketId, {
           status: "requires_manual_review",
           errorMsg: runnerErr.reviewReasonMessage,
@@ -1934,15 +1988,15 @@ export default function ScannerAndSimulator({
       }
 
       // Check connector status
-      if (activeConn.status !== "production_ready" && activeConn.status !== "real_validation") {
+      if (activeConn.status !== "production_ready" && activeConn.status !== "automation_available") {
         let code: "CONNECTOR_NOT_PRODUCTION_READY" | "CONNECTOR_RESTRICTED" | "CONNECTOR_BROKEN" = "CONNECTOR_NOT_PRODUCTION_READY";
-        let msg = "El conector de este comercio está en validación técnica y no está listo para producción.";
+        let msg = "Detectamos este comercio, pero su automatización todavía se está configurando. Guardamos tu ticket para revisión.";
         if (activeConn.status === "restricted") {
           code = "CONNECTOR_RESTRICTED";
           msg = "Este portal requiere credenciales especiales o permisos de acceso restringidos.";
-        } else if (activeConn.status === "broken") {
+        } else if (activeConn.status === "broken" || activeConn.status === "automation_blocked") {
           code = "CONNECTOR_BROKEN";
-          msg = "El conector de este portal se encuentra temporalmente fuera de servicio por mantenimiento.";
+          msg = "El conector de este portal se encuentra temporalmente fuera de servicio por mantenimiento o restricciones del portal.";
         }
 
         const runnerErr: ReviewError = {
@@ -4733,9 +4787,9 @@ return list.map(n => {
             if (code === "USER_REQUESTED_REVIEW") return "El usuario solicitó revisión manual del ticket.";
             if (code === "CONNECTOR_TIMEOUT") return "El conector del comercio tardó más de lo esperado en responder.";
             if (code === "PORTAL_ERROR") return revErr.reviewReasonMessage || "Ocurrió un error en el portal del comercio.";
-            if (code === "CONNECTOR_RUNNER_NOT_AVAILABLE") return "Este comercio aún no está disponible para facturación automática.";
-            if (code === "CONNECTOR_SCHEMA_INVALID") return "El conector tiene una configuración incompleta y requiere revisión técnica.";
-            if (code === "CONNECTOR_NOT_PRODUCTION_READY") return "Este comercio todavía está en validación técnica. Aún no está disponible para facturación automática.";
+            if (code === "CONNECTOR_RUNNER_NOT_AVAILABLE") return "Detectamos este comercio, pero su automatización todavía se está configurando. Guardamos tu ticket para revisión.";
+            if (code === "CONNECTOR_SCHEMA_INVALID") return "Detectamos este comercio, pero su automatización todavía se está configurando. Guardamos tu ticket para revisión.";
+            if (code === "CONNECTOR_NOT_PRODUCTION_READY") return "Detectamos este comercio, pero su automatización todavía se está configurando. Guardamos tu ticket para revisión.";
             if (code === "CONNECTOR_RESTRICTED") return "Este portal requiere credenciales especiales o permisos de acceso restringidos.";
             if (code === "CONNECTOR_BROKEN") return "El conector de este portal se encuentra temporalmente fuera de servicio por mantenimiento.";
             if (code === "PORTAL_FIELD_MAP_CHANGED") return "La estructura del portal oficial ha cambiado. Se ha programado un rediscovery técnico.";
