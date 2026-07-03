@@ -522,7 +522,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // List of models to try in order
+     // List of models to try in order
     const MODELS_TO_TRY = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
     const MAX_RETRIES_PER_MODEL = 2; // Try up to 2 times for each model
     
@@ -545,55 +545,207 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       },
     };
 
-    const textPart = {
-      text: "Analiza exhaustivamente esta fotografía de un ticket de compra mexicano. Extrae con precisión los datos y estructura el resultado exactamente según el esqueleto proporcionado. INSTRUCCIÓN CRÍTICA DE INTEGRIDAD: No asumes marcas populares (ej. OXXO, Walmart, Starbucks, etc.) si el ticket no pertenece explícitamente a ellas. Si es una farmacia u otro comercio local (ej. Farmacias del Ahorro, Farmacias Guadalajara, farmacias locales, etc.), extrae fielmente el nombre exacto de la marca o razón social impreso en la parte superior. Si encuentras un código de barras largo o número largo de referencia para facturar (como ITU de 15-20 dígitos, o número largo de 12 dígitos de Farmacias Similares/Confianza), por favor extráelos de manera muy precisa en los campos correspondientes. Si el RFC no es legible o no se localiza, coloca 'XAXX010101000' en rfcEmisor, pero NUNCA inventes o asocies el RFC de otra franquicia para rellenar.",
-    };
+    // Helper for matching connector on backend
+    function backendMatchConnector(connectorsList: any[], tEmisorName: string, tEmisorRfc: string): any {
+      const cleanStr = (s: string) => 
+        (s || "")
+         .toLowerCase()
+         .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
+         .replace(/[^a-z0-9\s]/g, "") // remove punctuation
+         .replace(/\b(sa|de|cv|sapi|srl|de|cv|grupo|comercial|cadena|tiendas|sucursal|santa|fe|magna|pemex)\b/g, "")
+         .trim();
 
-    const responseSchema = {
-      type: "OBJECT",
-      properties: {
-        rfcEmisor: { type: "STRING", description: "RFC del emisor de la tienda (12 o 13 carácteres). Si no viene o no es legible, coloca 'XAXX010101000'." },
-        nombreEmisor: { type: "STRING", description: "Nombre comercial o razón social de la tienda en mayúsculas (ej: FARMACIAS GUADALAJARA, OXXO, WALMART, TOKIO, STARBUCKS)" },
-        fechaCompra: { type: "STRING", description: "Fecha de compra aproximada o exacta en formato YYYY-MM-DD" },
-        folio: { type: "STRING", description: "Folio del ticket, ID de transacción, código de facturación o referencia de ticket (ej: 0251846 o 4821-3921-1923)" },
-        total: { type: "NUMBER", description: "Total monetario pagado en el ticket en pesos mexicanos" },
-        sucursal: { type: "STRING", description: "Sucursal o ubicación donde se realizó la compra" },
-        referenciaFacturacion: { type: "STRING", description: "Referencia para facturación, código de facturación o código largo impreso en el ticket (ej: ITU de 15-20 dígitos, o 12 dígitos numéricos para Farmacias Similares)." },
-        codigoBarras: { type: "STRING", description: "Código de barras numérico impreso en el ticket (número largo generalmente de 12 a 13 dígitos)." },
-        rawOcrText: { type: "STRING", description: "El texto completo e íntegro extraído del ticket de forma literal, línea por línea." },
-        items: {
-          type: "ARRAY",
-          description: "Lista de conceptos comprados descritos en el ticket",
-          items: {
-            type: "OBJECT",
-            properties: {
-              description: { type: "STRING", description: "Concepto del producto" },
-              amount: { type: "NUMBER", description: "Precio o importe de este concepto" },
-            },
-            required: ["description", "amount"],
-          },
-        },
-      },
-      required: ["rfcEmisor", "nombreEmisor", "fechaCompra", "folio", "total", "rawOcrText", "items"],
-    };
+      const tRfc = (tEmisorRfc || "").toLowerCase().trim();
+      const tNombre = cleanStr(tEmisorName || "");
+
+      const found = connectorsList.find((c) => {
+        const cRfc = (c.rfc || "").toLowerCase().trim();
+        if (tRfc && cRfc && tRfc === cRfc) return true;
+
+        const cNombre = cleanStr(c.nombre || "");
+        if (tNombre && cNombre && (tNombre.includes(cNombre) || cNombre.includes(tNombre))) return true;
+
+        if (c.aliases && c.aliases.length > 0) {
+          const matchingAlias = c.aliases.find((alias: string) => {
+            const cleanAlias = cleanStr(alias);
+            return tNombre && cleanAlias && (tNombre.includes(cleanAlias) || cleanAlias.includes(tNombre));
+          });
+          if (matchingAlias) return true;
+        }
+
+        if (tNombre && cNombre) {
+          const tWords = tNombre.split(/\s+/).filter(w => w.length > 2);
+          const cWords = cNombre.split(/\s+/).filter(w => w.length > 2);
+          return tWords.some(w => cWords.includes(w));
+        }
+
+        return false;
+      });
+
+      return found || null;
+    }
 
     let textResult = "";
     let promptTokens = 0;
     let outputTokens = 0;
-    
+    let matchedConnector = null;
+
     if (!fallbackToOcrMock && ai) {
-      let success = false;
+      // STAGE 1: Identify Merchant
+      let detectedName = "";
+      let detectedRfc = "";
+      let successId = false;
+
+      const idSchema = {
+        type: "OBJECT",
+        properties: {
+          rfcEmisor: { type: "STRING", description: "RFC del emisor de la tienda. Si no viene o no es legible, coloca 'XAXX010101000'." },
+          nombreEmisor: { type: "STRING", description: "Nombre de la tienda en mayúsculas." }
+        },
+        required: ["rfcEmisor", "nombreEmisor"]
+      };
+
+      const idPrompt = {
+        text: "Analiza esta fotografía de un ticket de compra. Identifica únicamente el nombre del comercio (nombreEmisor) y su RFC (rfcEmisor). Si no encuentras el RFC, pon 'XAXX010101000'."
+      };
+
       for (const model of MODELS_TO_TRY) {
-        if (success) break;
+        if (successId) break;
+        try {
+          console.log(`[OCR Stage 1] Identifying merchant with model ${model}`);
+          const response = await ai.models.generateContent({
+            model: model,
+            contents: { parts: [imagePart, idPrompt] },
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: idSchema
+            }
+          });
+          if (response.text && response.text.trim()) {
+            const parsed = JSON.parse(response.text.trim());
+            detectedName = parsed.nombreEmisor || "";
+            detectedRfc = parsed.rfcEmisor || "";
+            successId = true;
+            console.log(`[OCR Stage 1] Identified: ${detectedName} (RFC: ${detectedRfc})`);
+          }
+        } catch (err: any) {
+          console.warn(`[OCR Stage 1 Warning] Model ${model} failed:`, err?.message || err);
+        }
+      }
+
+      // Fetch connectors from Firestore
+      let connectorsList: any[] = [];
+      if (adminDb && typeof adminDb.collection === "function") {
+        try {
+          const snap = await adminDb.collection("connectors").get();
+          connectorsList = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+        } catch (e: any) {
+          console.warn("Could not retrieve connectors list from DB:", e.message);
+        }
+      }
+
+      matchedConnector = backendMatchConnector(connectorsList, detectedName, detectedRfc);
+
+      // STAGE 2: Targeted OCR or generic fallback
+      let targetedPromptText = "";
+      let targetedSchema: any = {};
+
+      if (matchedConnector && matchedConnector.extractionContract) {
+        console.log(`[OCR Stage 2] Matched connector ${matchedConnector.nombre}. Loading extractionContract.`);
+        const contract = matchedConnector.extractionContract;
+
+        targetedPromptText = `Este ticket pertenece a ${matchedConnector.nombre}.\n`;
+        targetedPromptText += `Extrae únicamente los campos requeridos por este portal:\n`;
+        for (const f of contract.requiredPortalFields) {
+          targetedPromptText += `- ${f.label} (${f.canonicalKey}): ${f.hints.join(". ")} (patrón esperado: ${f.validationPattern}).\n`;
+        }
+        targetedPromptText += `INSTRUCCIÓN CRÍTICA: Si no encuentras un dato literalmente en el ticket, devuelve null. No inventes valores. No uses UUIDs, ticketId, doc.id, UUID SAT ni identificadores internos como referencia de facturación.\n`;
+        targetedPromptText += `También extrae la fecha de compra (fechaCompra) en formato YYYY-MM-DD, la sucursal (sucursal) y la lista de artículos comprados (items).`;
+
+        const customProperties: any = {
+          rfcEmisor: { type: "STRING" },
+          nombreEmisor: { type: "STRING" },
+          fechaCompra: { type: "STRING", description: "Fecha de compra en formato YYYY-MM-DD. Si no la encuentras, devuelve null." },
+          sucursal: { type: "STRING" },
+          rawOcrText: { type: "STRING", description: "El texto completo e íntegro extraído del ticket de forma literal, línea por línea." },
+          items: {
+            type: "ARRAY",
+            description: "Lista de conceptos comprados descritos en el ticket",
+            items: {
+              type: "OBJECT",
+              properties: {
+                description: { type: "STRING" },
+                amount: { type: "NUMBER" }
+              },
+              required: ["description", "amount"]
+            }
+          }
+        };
+
+        // Add targeted fields as nullable string/number
+        for (const f of contract.requiredPortalFields) {
+          if (f.canonicalKey === "billingReference") {
+            customProperties.billingReference = {
+              type: "STRING",
+              description: `${f.label}. Si no se encuentra literal en el ticket, devuelve null.`
+            };
+          } else if (f.canonicalKey === "total") {
+            customProperties.total = {
+              type: "NUMBER",
+              description: `${f.label}. Si no se encuentra literal en el ticket, devuelve null.`
+            };
+          }
+        }
+
+        targetedSchema = {
+          type: "OBJECT",
+          properties: customProperties,
+          required: ["rfcEmisor", "nombreEmisor", "rawOcrText", "items"]
+        };
+      } else {
+        console.log(`[OCR Stage 2] No matched connector. Using generic fallback schema.`);
+        targetedPromptText = "Analiza exhaustivamente esta fotografía de un ticket de compra mexicano. Extrae con precisión los datos y estructura el resultado exactamente según el esqueleto proporcionado. INSTRUCCIÓN CRÍTICA: No asumas marcas populares si el ticket no pertenece a ellas. Si es una farmacia o comercio local, extrae fielmente el nombre exacto de la marca. Si encuentras un código de barras largo o número de referencia, extráelos. Si no encuentras un dato literalmente, devuelve null y no inventes valores.";
+        targetedSchema = {
+          type: "OBJECT",
+          properties: {
+            rfcEmisor: { type: "STRING", description: "RFC del emisor de la tienda (12 o 13 carácteres). Si no viene o no es legible, coloca 'XAXX010101000'." },
+            nombreEmisor: { type: "STRING", description: "Nombre comercial o razón social de la tienda en mayúsculas." },
+            fechaCompra: { type: "STRING", description: "Fecha de compra aproximada o exacta en formato YYYY-MM-DD" },
+            folio: { type: "STRING", description: "Folio del ticket, ID de transacción, código de facturación o referencia de ticket." },
+            total: { type: "NUMBER", description: "Total monetario pagado en el ticket en pesos mexicanos" },
+            sucursal: { type: "STRING", description: "Sucursal o ubicación donde se realizó la compra" },
+            referenciaFacturacion: { type: "STRING", description: "Referencia para facturación, código de facturación o código largo impreso en el ticket." },
+            codigoBarras: { type: "STRING", description: "Código de barras numérico impreso en el ticket." },
+            rawOcrText: { type: "STRING", description: "El texto completo e íntegro extraído del ticket de forma literal, línea por línea." },
+            items: {
+              type: "ARRAY",
+              description: "Lista de conceptos comprados descritos en el ticket",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  description: { type: "STRING", description: "Concepto del producto" },
+                  amount: { type: "NUMBER", description: "Precio o importe de este concepto" },
+                },
+                required: ["description", "amount"],
+              },
+            },
+          },
+          required: ["rfcEmisor", "nombreEmisor", "fechaCompra", "folio", "total", "rawOcrText", "items"],
+        };
+      }
+
+      let successTarget = false;
+      for (const model of MODELS_TO_TRY) {
+        if (successTarget) break;
         for (let attempt = 1; attempt <= MAX_RETRIES_PER_MODEL; attempt++) {
           try {
-            console.log(`[OCR] Trying model ${model} (Attempt ${attempt}/${MAX_RETRIES_PER_MODEL})`);
+            console.log(`[OCR Stage 2] Extracting details using model ${model} (Attempt ${attempt}/${MAX_RETRIES_PER_MODEL})`);
             const response = await ai.models.generateContent({
               model: model,
-              contents: { parts: [imagePart, textPart] },
+              contents: { parts: [imagePart, { text: targetedPromptText }] },
               config: {
                 responseMimeType: "application/json",
-                responseSchema,
+                responseSchema: targetedSchema,
               },
             });
 
@@ -601,21 +753,19 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
               textResult = response.text.trim();
               promptTokens = response.usageMetadata?.promptTokenCount || 428;
               outputTokens = response.usageMetadata?.candidatesTokenCount || 215;
-              console.log(`[OCR] Success with model ${model}. Tokens: In=${promptTokens}, Out=${outputTokens}`);
-              success = true;
+              console.log(`[OCR Stage 2] Success with model ${model}. Tokens: In=${promptTokens}, Out=${outputTokens}`);
+              successTarget = true;
               fallbackToOcrMock = false;
               break;
             } else {
-              throw new Error("Empty text returned from Gemini API");
+              throw new Error("Empty text returned from Gemini API Stage 2");
             }
           } catch (err: any) {
-            const currentErr = err?.message || String(err);
-            console.warn(`[OCR Warning] Model ${model} failed on attempt ${attempt}: ${currentErr}`);
-            ocrErrorDetails += `\n[${model} attempt ${attempt}]: ${currentErr}`;
+            console.warn(`[OCR Stage 2 Warning] Model ${model} failed on attempt ${attempt}: ${err?.message || err}`);
           }
         }
       }
-      if (!success) {
+      if (!successTarget) {
         fallbackToOcrMock = true;
       }
     }
@@ -703,64 +853,8 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
     const rawRfc = extractedData.rfcEmisor || "";
     let detectedProfileKey = "";
     let detectedProfile = null;
-    let matchedConnector: any = null;
 
-    // ultra-robust clean string for matching
-    const cleanStr = (s: string) => 
-      (s || "")
-        .toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9\s]/g, "")
-        .replace(/\b(sa|de|cv|sapi|srl|grupo|comercial|cadena|tiendas|sucursal)\b/g, "")
-        .trim();
-
-    // Query Firestore connectors to find match if adminDb is available
-    if (adminDb && (rawNombre || rawRfc)) {
-      try {
-        console.log(`[OCR] Matching connector in Firestore for Name: "${rawNombre}", RFC: "${rawRfc}"...`);
-        if (rawRfc) {
-          const cleanRfc = rawRfc.toUpperCase().replace(/[^A-Z0-9]/g, "");
-          const rfcSnap = await adminDb.collection("connectors")
-            .where("rfc", "==", cleanRfc)
-            .get();
-          if (!rfcSnap.empty) {
-            matchedConnector = { id: rfcSnap.docs[0].id, ...rfcSnap.docs[0].data() };
-            console.log(`[OCR] Connector matched by RFC: ${matchedConnector.nombre}`);
-          }
-        }
-
-        if (!matchedConnector && rawNombre) {
-          const connSnap = await adminDb.collection("connectors").get();
-          const cleanInputName = cleanStr(rawNombre);
-          
-          for (const doc of connSnap.docs) {
-            const data = doc.data();
-            const cleanConnName = cleanStr(data.nombre || "");
-            
-            if (cleanInputName && cleanConnName && (cleanInputName.includes(cleanConnName) || cleanConnName.includes(cleanInputName))) {
-              matchedConnector = { id: doc.id, ...data };
-              console.log(`[OCR] Connector matched by Name: ${matchedConnector.nombre}`);
-              break;
-            }
-
-            if (data.aliases && Array.isArray(data.aliases)) {
-              const matchedAlias = data.aliases.find((alias: string) => {
-                const cleanAlias = cleanStr(alias);
-                return cleanInputName && cleanAlias && (cleanInputName.includes(cleanAlias) || cleanAlias.includes(cleanInputName));
-              });
-              if (matchedAlias) {
-                matchedConnector = { id: doc.id, ...data };
-                console.log(`[OCR] Connector matched by Alias: "${matchedAlias}" on connector: ${matchedConnector.nombre}`);
-                break;
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.warn("[OCR] Error matching connector from Firestore:", err);
-      }
-    }
-
+    // Reuse matchedConnector from Stage 1
     if (matchedConnector) {
       detectedProfileKey = matchedConnector.id;
       let reqFields = ["rfcEmisor", "folio", "total", "fecha"];
@@ -928,6 +1022,52 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       rawCost = (((promptTokens * 0.075) + (outputTokens * 0.30)) / 1000000) * exchangeRate;
     }
 
+    let billingReference = extractedData.billingReference || extractedData.referenciaFacturacion || extractedData.folio || "";
+
+    // Validate billingReference against contract if found
+    if (matchedConnector && matchedConnector.extractionContract) {
+      const refField = matchedConnector.extractionContract.requiredPortalFields.find((f: any) => f.canonicalKey === "billingReference");
+      if (refField) {
+        // Pasa validationPattern?
+        if (billingReference && refField.validationPattern) {
+          const regex = new RegExp(refField.validationPattern, "i");
+          if (!regex.test(billingReference)) {
+            console.log(`[Validation] billingReference '${billingReference}' failed validationPattern '${refField.validationPattern}'. Clearing.`);
+            billingReference = "";
+          }
+        }
+        // Coincide con forbiddenPatterns?
+        if (billingReference && refField.forbiddenPatterns) {
+          for (const pattern of refField.forbiddenPatterns) {
+            const regex = new RegExp(pattern, "i");
+            if (regex.test(billingReference)) {
+              console.log(`[Validation] billingReference '${billingReference}' matched forbiddenPattern '${pattern}'. Clearing.`);
+              billingReference = "";
+              break;
+            }
+          }
+        }
+      }
+    } else {
+      // Generic fallback forbidden checks
+      if (billingReference) {
+        const isUuid = /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/i.test(billingReference);
+        const hasMockPrefix = /^ticket_|^job_|^OFFLINE-/i.test(billingReference);
+        if (isUuid || hasMockPrefix) {
+          billingReference = "";
+        }
+      }
+    }
+
+    fields.referenciaFacturacion.value = billingReference;
+    fields.referenciaFacturacion.normalizedValue = billingReference;
+
+    const portalFields = {
+      billingReference: billingReference || "",
+      total: qrParsed ? qrParsed.total : (parseFloat(String(extractedData.total)) || 0),
+      date: extractedData.fechaCompra || ""
+    };
+
     res.json({
       ...extractedData,
       rfcEmisor: fields.rfcEmisor.value,
@@ -938,6 +1078,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       sucursal: fields.sucursal.value,
       billingReference: fields.referenciaFacturacion.value,
       codigoBarras: fields.codigoBarras.value,
+      portalFields,
       ocrFailed: finalOcrFailed,
       ocrError: ocrErrorStr || extractedData.ocrError || null,
       confidenceScore: parseFloat(avgConfidence.toFixed(4)),
@@ -952,6 +1093,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         portalUrl: matchedConnector.portalUrl,
         fieldsJson: matchedConnector.fieldsJson,
         flowJson: matchedConnector.flowJson,
+        extractionContract: matchedConnector.extractionContract,
         status: matchedConnector.status
       } : null
     });

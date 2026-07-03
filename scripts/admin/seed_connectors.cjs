@@ -29,6 +29,22 @@ if (fs.existsSync(firebaseConfigPath)) {
 
 const db = getFirestore(undefined, databaseId);
 
+const FORBIDDEN_PATTERNS = [
+  "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$",
+  "^ticket_",
+  "^job_",
+  "^OFFLINE-"
+];
+
+const DEFAULT_FISCAL_FIELDS = [
+  { key: "fiscalProfile.rfc", label: "RFC receptor", required: true, source: "fiscalProfile" },
+  { key: "fiscalProfile.businessName", label: "Razón social", required: true, source: "fiscalProfile" },
+  { key: "fiscalProfile.postalCode", label: "Código postal fiscal", required: true, source: "fiscalProfile" },
+  { key: "fiscalProfile.taxRegime", label: "Régimen fiscal", required: true, source: "fiscalProfile" },
+  { key: "fiscalProfile.cfdiUse", label: "Uso de CFDI", required: true, source: "fiscalProfile" },
+  { key: "fiscalProfile.email", label: "Correo electrónico", required: true, source: "fiscalProfile" }
+];
+
 const connectorsSeed = [
   {
     nombre: "Starbucks / Alsea",
@@ -47,6 +63,39 @@ const connectorsSeed = [
       "4. Obtener CFDI",
       "5. Guardar documentos PDF y XML generados"
     ]),
+    extractionContract: {
+      requiredPortalFields: [
+        {
+          key: "portalFields.billingReference",
+          canonicalKey: "billingReference",
+          label: "Ticket Folio",
+          type: "string",
+          hints: ["Folio impreso en tu ticket de compra."],
+          validationPattern: "^[0-9]+$",
+          forbiddenPatterns: FORBIDDEN_PATTERNS,
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        },
+        {
+          key: "portalFields.total",
+          canonicalKey: "total",
+          label: "Total Importe",
+          type: "number",
+          hints: ["Total de la compra."],
+          validationPattern: "^[0-9]+(\\.[0-9]{1,2})?$",
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        }
+      ],
+      fiscalFields: DEFAULT_FISCAL_FIELDS,
+      screenOrder: [
+        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: ["portalFields.billingReference"] },
+        { screenIndex: 2, description: "Monto de ticket", requiredFields: ["portalFields.total"] },
+        { screenIndex: 3, description: "Datos fiscales", requiredFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"] }
+      ]
+    },
     createdAt: new Date().toISOString(),
     status: "runner_not_available",
     isProductionReady: false,
@@ -72,6 +121,39 @@ const connectorsSeed = [
       "4. Autorizar emisión de CFDI con sello SAT",
       "5. Consolidar documentos digitales en almacén"
     ]),
+    extractionContract: {
+      requiredPortalFields: [
+        {
+          key: "portalFields.billingReference",
+          canonicalKey: "billingReference",
+          label: "Número de Folio",
+          type: "string",
+          hints: ["Folio impreso en el ticket Oxxo."],
+          validationPattern: "^[A-Za-z0-9\\-]+$",
+          forbiddenPatterns: FORBIDDEN_PATTERNS,
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        },
+        {
+          key: "portalFields.total",
+          canonicalKey: "total",
+          label: "Total Ticket",
+          type: "number",
+          hints: ["Total de la compra."],
+          validationPattern: "^[0-9]+(\\.[0-9]{1,2})?$",
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        }
+      ],
+      fiscalFields: DEFAULT_FISCAL_FIELDS,
+      screenOrder: [
+        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: ["portalFields.billingReference"] },
+        { screenIndex: 2, description: "Monto de ticket", requiredFields: ["portalFields.total"] },
+        { screenIndex: 3, description: "Datos fiscales", requiredFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"] }
+      ]
+    },
     createdAt: new Date().toISOString(),
     status: "runner_not_available",
     isProductionReady: false,
@@ -97,6 +179,39 @@ const connectorsSeed = [
       "4. Obtener CFDI",
       "5. Almacenar facturas PDF y XML"
     ]),
+    extractionContract: {
+      requiredPortalFields: [
+        {
+          key: "portalFields.billingReference",
+          canonicalKey: "billingReference",
+          label: "Número de Transacción",
+          type: "string",
+          hints: ["Folio/TR impreso en el ticket."],
+          validationPattern: "^[0-9]+$",
+          forbiddenPatterns: FORBIDDEN_PATTERNS,
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        },
+        {
+          key: "portalFields.total",
+          canonicalKey: "total",
+          label: "Monto Neto Total",
+          type: "number",
+          hints: ["Monto neto total del ticket."],
+          validationPattern: "^[0-9]+(\\.[0-9]{1,2})?$",
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        }
+      ],
+      fiscalFields: DEFAULT_FISCAL_FIELDS,
+      screenOrder: [
+        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: ["portalFields.billingReference"] },
+        { screenIndex: 2, description: "Monto de ticket", requiredFields: ["portalFields.total"] },
+        { screenIndex: 3, description: "Datos fiscales", requiredFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"] }
+      ]
+    },
     createdAt: new Date().toISOString(),
     status: "runner_not_available",
     isProductionReady: false,
@@ -125,6 +240,44 @@ const connectorsSeed = [
       "3. Autocompletar RFC, Razón Social, C.P. y Régimen desde el perfil del usuario",
       "4. Solicitar CFDI y guardar XML"
     ]),
+    extractionContract: {
+      requiredPortalFields: [
+        {
+          key: "portalFields.billingReference",
+          canonicalKey: "billingReference",
+          label: "Referencia de facturación",
+          type: "string",
+          hints: [
+            "Número impreso en el ticket requerido por el portal",
+            "No confundir con UUID, folio interno, ticketId o UUID SAT"
+          ],
+          validationPattern: "^\\d{12}$",
+          forbiddenPatterns: FORBIDDEN_PATTERNS,
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        },
+        {
+          key: "portalFields.total",
+          canonicalKey: "total",
+          label: "Total facturado",
+          type: "number",
+          hints: [
+            "Importe total de la compra tal como aparece en el ticket"
+          ],
+          validationPattern: "^[0-9]+(\\.[0-9]{1,2})?$",
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        }
+      ],
+      fiscalFields: DEFAULT_FISCAL_FIELDS,
+      screenOrder: [
+        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: ["portalFields.billingReference"] },
+        { screenIndex: 2, description: "Monto de ticket", requiredFields: ["portalFields.total"] },
+        { screenIndex: 3, description: "Datos fiscales", requiredFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"] }
+      ]
+    },
     createdAt: new Date().toISOString(),
     status: "real_validation",
     isProductionReady: false,
@@ -148,6 +301,39 @@ const connectorsSeed = [
       "2. Digitar RFC receptor y folios",
       "3. Validar y descargar XML"
     ]),
+    extractionContract: {
+      requiredPortalFields: [
+        {
+          key: "portalFields.billingReference",
+          canonicalKey: "billingReference",
+          label: "Folio de Factura",
+          type: "string",
+          hints: ["Folio de Soriana impreso en el ticket."],
+          validationPattern: "^[0-9]+$",
+          forbiddenPatterns: FORBIDDEN_PATTERNS,
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        },
+        {
+          key: "portalFields.total",
+          canonicalKey: "total",
+          label: "Total Neto",
+          type: "number",
+          hints: ["Total de la compra."],
+          validationPattern: "^[0-9]+(\\.[0-9]{1,2})?$",
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        }
+      ],
+      fiscalFields: DEFAULT_FISCAL_FIELDS,
+      screenOrder: [
+        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: ["portalFields.billingReference"] },
+        { screenIndex: 2, description: "Monto de ticket", requiredFields: ["portalFields.total"] },
+        { screenIndex: 3, description: "Datos fiscales", requiredFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"] }
+      ]
+    },
     createdAt: new Date().toISOString(),
     status: "mock_only",
     isProductionReady: false,

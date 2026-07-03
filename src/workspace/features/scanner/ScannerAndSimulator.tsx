@@ -1949,12 +1949,29 @@ export default function ScannerAndSimulator({
 
       if (missingFields.length > 0) {
         await addLog(`❌ Faltan campos requeridos: ${missingFields.join(", ")}`, 400);
+
+        const hasMissingTicketFields = missingFields.some(f => f.startsWith("portalFields."));
+        const hasMissingFiscalFields = missingFields.some(f => f.startsWith("fiscalProfile."));
+
+        let finalStatus = "requires_manual_review";
+        let finalReasonCode = "MISSING_REQUIRED_FIELDS";
+        let reasonMessage = "";
+
+        if (hasMissingTicketFields) {
+          finalStatus = "missing_required_fields";
+          finalReasonCode = "MISSING_REQUIRED_FIELDS";
+          reasonMessage = "Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura.";
+        } else if (hasMissingFiscalFields) {
+          finalStatus = "waiting_fiscal_profile";
+          finalReasonCode = "WAITING_FISCAL_PROFILE";
+          reasonMessage = "Completa tus datos de Perfil Fiscal para que podamos solicitar esta factura automáticamente.";
+        } else {
+          reasonMessage = `Faltan campos requeridos para continuar: ${missingFields.join(", ")}.`;
+        }
         
         const configErr: ReviewError = {
-          reviewReasonCode: "MISSING_REQUIRED_FIELDS",
-          reviewReasonMessage: missingFields.includes("portalFields.billingReference")
-            ? "Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura en el portal oficial."
-            : `Necesitamos completar algunos datos antes de solicitar la factura: ${missingFields.join(", ")}.`,
+          reviewReasonCode: finalReasonCode as any,
+          reviewReasonMessage: reasonMessage,
           lastAutomationStep: "connector_resolving",
           connectorAttempted: true,
           connectorId: activeConn.id || null,
@@ -1968,18 +1985,18 @@ export default function ScannerAndSimulator({
             portalMapApproved: pMap ? (pMap.isApproved === true || pMap.status === "approved") : false,
             hasStepsJson: pMap ? !!pMap.stepsJson : false,
             missingFields: missingFields,
-            blockingReason: "MISSING_REQUIRED_FIELDS: " + missingFields.join(", ")
+            blockingReason: `${finalReasonCode}: ` + missingFields.join(", ")
           } as any
         };
 
         await onUpdateTicketInDb(activeTicketId, {
-          status: "requires_manual_review",
-          reviewReasonCode: "MISSING_REQUIRED_FIELDS",
+          status: finalStatus as any,
+          reviewReasonCode: finalReasonCode as any,
           errorMsg: configErr.reviewReasonMessage,
           reviewError: configErr as any,
           missingFields: missingFields
         } as any);
-        await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, "MISSING_REQUIRED_FIELDS");
+        await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, finalReasonCode);
         setIsAutomatingLoading(false);
         return;
       }
@@ -2165,55 +2182,54 @@ export default function ScannerAndSimulator({
   };
 
   const handleSaveEditedData = async () => {
-    let fieldsSchema: any[] = [];
-    try {
-      fieldsSchema = matchingConnector ? JSON.parse(matchingConnector.fieldsJson || "[]") : [];
-    } catch (e) {
-      fieldsSchema = [];
-    }
-    const isCustomConnector = fieldsSchema.length > 0;
+    const contract = matchingConnector?.extractionContract;
+    const isContractConnector = !!contract;
 
     let updatedData: ExtractedTicketData;
+    const totalNum = parseFloat(editTotal.toString());
 
-    if (isCustomConnector) {
-      // Validate dynamic fields
-      const hasFolioField = fieldsSchema.some(f => f.key === "referenciaFacturacion" || f.key === "folio" || f.key === "ticketNumber");
-      if (hasFolioField && !editFolio.trim()) {
-        setValidationError("Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura en el portal del comercio.");
-        return;
-      }
-      const hasTotalField = fieldsSchema.some(f => f.key === "total");
-      const totalNum = parseFloat(editTotal.toString());
-      if (hasTotalField && (isNaN(totalNum) || totalNum <= 0)) {
-        setValidationError("El importe total es obligatorio y debe ser mayor a cero.");
-        return;
-      }
-      const hasFechaField = fieldsSchema.some(f => f.key === "fecha" || f.key === "date");
-      if (hasFechaField && !editFecha.trim()) {
-        setValidationError("La fecha es obligatoria.");
-        return;
-      }
+    if (isContractConnector) {
+      // Stage 1: Validate ticket required fields from contract
+      const refField = contract.requiredPortalFields.find((f: any) => f.canonicalKey === "billingReference");
+      const totalField = contract.requiredPortalFields.find((f: any) => f.canonicalKey === "total");
 
-      // Check required fiscal fields in the form state
-      const missingProfileFields: string[] = [];
-      for (const field of fieldsSchema) {
-        if (getFieldSource(field) === "fiscalProfile" && field.required) {
-          const val = customProfileFields[field.key] || "";
-          if (field.key === "rfcReceptor" || field.key === "rfc") {
-            if (val.trim().length < 12) missingProfileFields.push(field.name);
-          } else if (field.key === "codigoPostal") {
-            if (val.trim().length !== 5) missingProfileFields.push(field.name);
-          } else if (field.key === "email") {
-            if (!val.includes("@")) missingProfileFields.push(field.name);
-          } else {
-            if (!val.trim()) missingProfileFields.push(field.name);
+      if (refField && refField.required) {
+        if (!editFolio.trim()) {
+          setValidationError(`El campo '${refField.label}' es obligatorio.`);
+          return;
+        }
+        // Validation pattern
+        if (refField.validationPattern) {
+          const regex = new RegExp(refField.validationPattern, "i");
+          if (!regex.test(editFolio.trim())) {
+            setValidationError(`El campo '${refField.label}' no coincide con el formato esperado.`);
+            return;
+          }
+        }
+        // Forbidden patterns
+        if (refField.forbiddenPatterns) {
+          for (const pattern of refField.forbiddenPatterns) {
+            const regex = new RegExp(pattern, "i");
+            if (regex.test(editFolio.trim())) {
+              setValidationError(`El campo '${refField.label}' contiene un valor prohibido (ej: UUID/ID interno). Por favor captura el dato del ticket impreso.`);
+              return;
+            }
           }
         }
       }
 
-      if (missingProfileFields.length > 0) {
-        setValidationError(`Faltan datos fiscales requeridos: ${missingProfileFields.join(", ")}`);
-        return;
+      if (totalField && totalField.required) {
+        if (isNaN(totalNum) || totalNum <= 0) {
+          setValidationError(`El campo '${totalField.label}' es obligatorio y debe ser mayor a cero.`);
+          return;
+        }
+        if (totalField.validationPattern) {
+          const regex = new RegExp(totalField.validationPattern, "i");
+          if (!regex.test(totalNum.toString())) {
+            setValidationError(`El campo '${totalField.label}' no tiene un formato numérico válido.`);
+            return;
+          }
+        }
       }
 
       setValidationError(null);
@@ -2225,9 +2241,14 @@ export default function ScannerAndSimulator({
         total: !isNaN(totalNum) ? totalNum : (extractedData?.total || 0),
         fechaCompra: editFecha.trim() || (extractedData?.fechaCompra || ""),
         sucursal: editSucursal.trim(),
+        portalFields: {
+          billingReference: editFolio.trim(),
+          total: !isNaN(totalNum) ? totalNum : (extractedData?.total || 0),
+          date: editFecha.trim() || (extractedData?.fechaCompra || "")
+        }
       };
 
-      // Save/update user's fiscal profile if fields were corrected
+      // Save/update user's fiscal profile if fields were edited
       const updatedProfile = { ...fiscalProfile };
       let profileChanged = false;
       
@@ -2324,7 +2345,7 @@ export default function ScannerAndSimulator({
     // Save/update in DB
     if (ticketId) {
       try {
-        const portalFields = {
+        const portalFields = updatedData.portalFields || {
           billingReference: updatedData.folio || "",
           total: updatedData.total || 0,
           ticketNumber: updatedData.folio || "",
@@ -3659,117 +3680,108 @@ return list.map(n => {
                       </div>
                     )}
 
-                     {(() => {
-                      let fieldsSchema = [];
-                      try {
-                        fieldsSchema = matchingConnector ? JSON.parse(matchingConnector.fieldsJson || "[]") : [];
-                      } catch (e) {
-                        fieldsSchema = [];
-                      }
-                      const isCustomConnector = fieldsSchema.length > 0;
+                      {(() => {
+                        const contract = matchingConnector?.extractionContract;
+                        const isContractConnector = !!contract;
 
-                      if (isCustomConnector) {
-                        const ticketFields = fieldsSchema.filter((f: any) => getFieldSource(f) === "ticket");
-                        const profileFields = fieldsSchema.filter((f: any) => getFieldSource(f) === "fiscalProfile");
+                        if (isContractConnector) {
+                          const ticketFields = contract.requiredPortalFields || [];
+                          const fiscalFields = contract.fiscalFields || [];
 
-                        return (
-                          <div className="space-y-5 text-left">
-                            {/* Block A: Datos para facturar en el portal */}
-                            <div className="bg-[#121421] p-4.5 rounded-2xl border border-slate-800 space-y-3.5">
-                              <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800/80 pb-2 flex items-center gap-1.5 font-mono">
-                                <Building2 className="w-4.5 h-4.5 text-[#0B53F4]" />
-                                A) Datos para facturar en el portal
-                              </h6>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                {ticketFields.map((field: any) => {
-                                  if (field.key === "referenciaFacturacion" || field.key === "folio") {
+                          // Map key helper
+                          const mapContractKeyToStateKey = (key: string): string => {
+                            if (key.startsWith("fiscalProfile.")) {
+                              const k = key.replace("fiscalProfile.", "");
+                              if (k === "rfc") return "rfcReceptor";
+                              if (k === "businessName") return "razonSocial";
+                              if (k === "postalCode") return "codigoPostal";
+                              if (k === "taxRegime") return "regimenFiscal";
+                              if (k === "cfdiUse") return "usoCFDI";
+                              return k;
+                            }
+                            return key;
+                          };
+
+                          return (
+                            <div className="space-y-5 text-left">
+                              {/* Block A: Datos para facturar en el portal */}
+                              <div className="bg-[#121421] p-4.5 rounded-2xl border border-slate-800 space-y-3.5">
+                                <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800/80 pb-2 flex items-center gap-1.5 font-mono">
+                                  <Building2 className="w-4.5 h-4.5 text-[#0B53F4]" />
+                                  A) Datos para facturar en el portal
+                                </h6>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  {ticketFields.map((field: any) => {
+                                    if (field.canonicalKey === "billingReference") {
+                                      return (
+                                        <div key={field.key} className="space-y-1">
+                                          <label className="text-[9px] text-slate-450 font-black uppercase tracking-wider block font-mono">{field.label} *</label>
+                                          <input
+                                            type="text"
+                                            value={editFolio}
+                                            onChange={(e) => setEditFolio(e.target.value)}
+                                            placeholder={`Ej. ${field.hints?.[0] || ""}`}
+                                            className={getInputClass(!editFolio.trim(), false)}
+                                          />
+                                          {field.hints && field.hints.length > 0 && (
+                                            <span className="text-[9px] text-slate-500 block leading-normal">{field.hints.join(" ")}</span>
+                                          )}
+                                        </div>
+                                      );
+                                    }
+                                    if (field.canonicalKey === "total") {
+                                      return (
+                                        <div key={field.key} className="space-y-1">
+                                          <label className="text-[9px] text-slate-455 font-black uppercase tracking-wider block font-mono">{field.label} *</label>
+                                          <input
+                                            type="number"
+                                            step="0.01"
+                                            value={editTotal || ""}
+                                            onChange={(e) => setEditTotal(parseFloat(e.target.value) || 0)}
+                                            placeholder="0.00"
+                                            className={getInputClass(!editTotal || editTotal <= 0, false, true)}
+                                          />
+                                          {field.hints && field.hints.length > 0 && (
+                                            <span className="text-[9px] text-slate-500 block leading-normal">{field.hints.join(" ")}</span>
+                                          )}
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* Block B: Datos fiscales del receptor */}
+                              <div className="bg-[#121421] p-4.5 rounded-2xl border border-slate-800 space-y-3.5">
+                                <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800/80 pb-2 flex items-center gap-1.5 font-mono">
+                                  <Users className="w-4.5 h-4.5 text-emerald-500" />
+                                  B) Datos fiscales del receptor
+                                </h6>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  {fiscalFields.map((field: any) => {
+                                    const stateKey = mapContractKeyToStateKey(field.key);
+                                    const curVal = customProfileFields[stateKey] || "";
+                                    const isValid = curVal.trim().length > 0;
+
                                     return (
                                       <div key={field.key}>
-                                        <label className="text-[9px] text-slate-450 font-black uppercase tracking-wider block mb-1 font-mono">{field.name} *</label>
+                                        <label className="text-[9px] text-slate-455 font-black uppercase tracking-wider block mb-1 font-mono">{field.label} *</label>
                                         <input
                                           type="text"
-                                          value={editFolio}
-                                          onChange={(e) => setEditFolio(e.target.value)}
-                                          placeholder={`Ej. ${field.name}`}
-                                          className={getInputClass(!editFolio.trim(), false)}
+                                          value={curVal}
+                                          onChange={(e) => setCustomProfileFields({ ...customProfileFields, [stateKey]: e.target.value })}
+                                          placeholder={`Completa ${field.label}`}
+                                          className={getInputClass(!isValid, false)}
                                         />
                                       </div>
                                     );
-                                  }
-                                  if (field.key === "total") {
-                                    return (
-                                      <div key={field.key}>
-                                        <label className="text-[9px] text-slate-450 font-black uppercase tracking-wider block mb-1 font-mono">{field.name} *</label>
-                                        <input
-                                          type="number"
-                                          step="0.01"
-                                          value={editTotal || ""}
-                                          onChange={(e) => setEditTotal(parseFloat(e.target.value) || 0)}
-                                          placeholder="0.00"
-                                          className={getInputClass(!editTotal || editTotal <= 0, false, true)}
-                                        />
-                                      </div>
-                                    );
-                                  }
-                                  if (field.key === "fecha" || field.key === "date") {
-                                    return (
-                                      <div key={field.key}>
-                                        <label className="text-[9px] text-slate-455 font-black uppercase tracking-wider block mb-1 font-mono">{field.name} *</label>
-                                        <input
-                                          type="text"
-                                          value={editFecha}
-                                          onChange={(e) => setEditFecha(e.target.value)}
-                                          placeholder="DD/MM/AAAA o YYYY-MM-DD"
-                                          className={getInputClass(!editFecha.trim(), false)}
-                                        />
-                                      </div>
-                                    );
-                                  }
-                                  return (
-                                    <div key={field.key}>
-                                      <label className="text-[9px] text-slate-455 font-black uppercase tracking-wider block mb-1 font-mono">{field.name} *</label>
-                                      <input
-                                        type="text"
-                                        value={editSucursal}
-                                        onChange={(e) => setEditSucursal(e.target.value)}
-                                        placeholder={`Ej. ${field.name}`}
-                                        className={getInputClass(!editSucursal.trim(), false)}
-                                      />
-                                    </div>
-                                  );
-                                })}
+                                  })}
+                                </div>
                               </div>
                             </div>
-
-                            {/* Block B: Datos fiscales del receptor */}
-                            <div className="bg-[#121421] p-4.5 rounded-2xl border border-slate-800 space-y-3.5">
-                              <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800/80 pb-2 flex items-center gap-1.5 font-mono">
-                                <Users className="w-4.5 h-4.5 text-emerald-500" />
-                                B) Datos fiscales del receptor
-                              </h6>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                {profileFields.map((field: any) => {
-                                  const curVal = customProfileFields[field.key] || "";
-                                  const isValid = curVal.trim().length > 0;
-                                  
-                                  return (
-                                    <div key={field.key}>
-                                      <label className="text-[9px] text-slate-455 font-black uppercase tracking-wider block mb-1 font-mono">{field.name} *</label>
-                                      <input
-                                        type="text"
-                                        value={curVal}
-                                        onChange={(e) => setCustomProfileFields({ ...customProfileFields, [field.key]: e.target.value })}
-                                        placeholder={`Completa ${field.name}`}
-                                        className={getInputClass(!isValid, false)}
-                                      />
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      }
+                          );
+                        }
 
                       // Generic legacy merchant fallback form
                       return (

@@ -30,7 +30,7 @@ if (fs.existsSync(firebaseConfigPath)) {
 const db = getFirestore(undefined, databaseId);
 
 async function auditConnectors() {
-  console.log("Iniciando auditoría de la Biblioteca de Conectores...");
+  console.log("Iniciando auditoría Connector-Driven de la Biblioteca de Conectores...");
   try {
     const snapshot = await db.collection("connectors").get();
     if (snapshot.empty) {
@@ -39,32 +39,46 @@ async function auditConnectors() {
     }
 
     console.log(`\nConectores encontrados: ${snapshot.size}\n`);
-    console.log("| ID | Nombre | RFC | Status | Runner Available | Production Ready | Fields Valid | Flow Valid | Last Real Run | Last Result | Last Valid XML | Last SAT Status | Eligible For Production |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    console.log("| ID | Nombre | RFC | Has Contract | Required Portal Fields | Fiscal Fields | Has Portal Map | Has stepsJson | Status | Runner Available | Production Ready | Eligible For Production |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
 
     for (const doc of snapshot.docs) {
       const data = doc.data();
-      let fieldsValid = "No";
-      try {
-        if (data.fieldsJson) {
-          const parsed = JSON.parse(data.fieldsJson);
-          if (parsed.length > 0) fieldsValid = "Sí";
+      
+      const hasContract = data.extractionContract ? "Sí" : "No";
+      
+      let reqPortalFields = "N/A";
+      let fiscalFieldsStr = "N/A";
+      
+      if (data.extractionContract) {
+        const contract = data.extractionContract;
+        if (contract.requiredPortalFields && contract.requiredPortalFields.length > 0) {
+          reqPortalFields = contract.requiredPortalFields.map(f => f.canonicalKey || f.key.split(".").pop()).join(", ");
         }
-      } catch (e) {}
-
-      let flowValid = "No";
-      try {
-        if (data.flowJson) {
-          const parsed = JSON.parse(data.flowJson);
-          if (parsed.length > 0) flowValid = "Sí";
+        if (contract.fiscalFields && contract.fiscalFields.length > 0) {
+          fiscalFieldsStr = contract.fiscalFields.map(f => f.key.split(".").pop()).join(", ");
         }
-      } catch (e) {}
+      }
 
-      // 1. Fetch portalMap
+      // Fetch portalMap
       const pmSnap = await db.collection("portal_maps").where("connectorId", "==", doc.id).get();
-      const portalMapApproved = !pmSnap.empty && pmSnap.docs[0].data().isApproved === true;
+      const hasPortalMap = !pmSnap.empty ? "Sí" : "No";
+      
+      let hasSteps = "No";
+      let portalMapApproved = false;
+      
+      if (!pmSnap.empty) {
+        const pmData = pmSnap.docs[0].data();
+        portalMapApproved = pmData.isApproved === true || pmData.status === "approved";
+        try {
+          if (pmData.stepsJson) {
+            const parsedSteps = JSON.parse(pmData.stepsJson);
+            if (parsedSteps.length > 0) hasSteps = "Sí";
+          }
+        } catch (e) {}
+      }
 
-      // 2. Fetch real jobs and sort in memory
+      // Fetch real jobs to check successful runs
       const jobsSnap = await db.collection("invoice_jobs")
         .where("connectorId", "==", doc.id)
         .get();
@@ -74,7 +88,7 @@ async function auditConnectors() {
         const jobs = [];
         jobsSnap.forEach(jobDoc => {
           const jobData = jobDoc.data();
-          if (!jobData.pilotMode) { // Exclude legacy pilot runs to report only real production/validation runs
+          if (!jobData.pilotMode) {
             jobs.push({ id: jobDoc.id, ...jobData });
           }
         });
@@ -82,16 +96,10 @@ async function auditConnectors() {
         latestRealJob = jobs[0];
       }
 
-      // 3. Map real values
-      const lastRealRun = latestRealJob ? new Date(latestRealJob.createdAt).toLocaleString("es-MX") : "N/A";
-      const lastResult = latestRealJob ? latestRealJob.status : "N/A";
-      const lastValidXml = (latestRealJob && latestRealJob.result) ? (latestRealJob.result.uuid || "N/A") : "N/A";
-      const lastSatStatus = (latestRealJob && latestRealJob.result) ? (latestRealJob.result.satStatus || "N/A") : "N/A";
-
-      // 4. Calculate Eligibility
+      // Calculate Eligibility
       const eligibleForProd = portalMapApproved && latestRealJob && latestRealJob.status === "succeeded" && latestRealJob.result && latestRealJob.result.satStatus === "valid" ? "Sí" : "No";
 
-      console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${data.status || "mock_only"} | ${data.runnerAvailable || false} | ${data.isProductionReady || false} | ${fieldsValid} | ${flowValid} | ${lastRealRun} | ${lastResult} | ${lastValidXml} | ${lastSatStatus} | ${eligibleForProd} |`);
+      console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${hasContract} | ${reqPortalFields} | ${fiscalFieldsStr} | ${hasPortalMap} | ${hasSteps} | ${data.status || "mock_only"} | ${data.runnerAvailable || false} | ${data.isProductionReady || false} | ${eligibleForProd} |`);
     }
   } catch (err) {
     console.error("Fallo al auditar conectores:", err.message);

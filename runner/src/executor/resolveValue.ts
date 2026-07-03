@@ -14,20 +14,28 @@ export function resolveValue(
     const base = parts[0];
     const key = parts[1];
 
-    if (base === "ticket") {
-      if (key === "total") return (ticketData.total || 0).toString();
-      if (key === "billingReference" || key === "folio" || key === "ticketNumber") return ticketData.folio || ticketData.billingReference || "";
-      if (key === "date") return ticketData.fechaCompra || "";
-      return ticketData[key] || "";
-    } else if (base === "portalFields") {
-      if (key === "billingReference") return ticketData.billingReference || ticketData.folio || "";
-      if (key === "total") return (ticketData.total || 0).toString();
-      if (key === "date") return ticketData.fechaCompra || ticketData.date || "";
-      return ticketData[key] || "";
+    if (base === "ticket" || base === "portalFields") {
+      const pFields = ticketData.portalFields || {};
+      if (key === "billingReference" || key === "folio" || key === "ticketNumber") {
+        let val = pFields.billingReference || ticketData.billingReference || ticketData.folio || "";
+        const isUuid = /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/i.test(val);
+        const hasMockPrefix = /^ticket_|^job_|^OFFLINE-/i.test(val);
+        if (isUuid || hasMockPrefix) {
+          val = "";
+        }
+        return val;
+      }
+      if (key === "total") {
+        return (pFields.total !== undefined && pFields.total !== null) ? pFields.total.toString() : (ticketData.total || 0).toString();
+      }
+      if (key === "date" || key === "fecha") {
+        return pFields.date || ticketData.fechaCompra || "";
+      }
+      return pFields[key] || ticketData[key] || "";
     } else if (base === "fiscalProfile") {
       if (key === "rfc") return fiscalProfile.rfc || "";
       if (key === "businessName" || key === "razonSocial") return fiscalProfile.razonSocial || "";
-      if (key === "postalCode" || key === "codigoPostal") return fiscalProfile.codigoPostal || "";
+      if (key === "postalCode" || key === "codigoPostal") return fiscalProfile.postalCode || "";
       if (key === "taxRegime" || key === "regimenFiscal") return fiscalProfile.regimenFiscal || "";
       if (key === "cfdiUse" || key === "usoCFDI") return fiscalProfile.usoCFDI || "";
       if (key === "email") return fiscalProfile.correoElectronico || "";
@@ -48,16 +56,23 @@ export function resolveValue(
       const parts = template.trim().split(".");
       const base = parts[0];
       const key = parts[1];
-      if (base === "ticket") {
-        if (key === "total") resolved = (ticketData.total || 0).toString();
-        else if (key === "billingReference" || key === "folio" || key === "ticketNumber") resolved = ticketData.folio || ticketData.billingReference || "";
-        else if (key === "date") resolved = ticketData.fechaCompra || "";
-        else resolved = ticketData[key] || "";
-      } else if (base === "portalFields") {
-        if (key === "billingReference") resolved = ticketData.billingReference || ticketData.folio || "";
-        else if (key === "total") resolved = (ticketData.total || 0).toString();
-        else if (key === "date") resolved = ticketData.fechaCompra || ticketData.date || "";
-        else resolved = ticketData[key] || "";
+      if (base === "ticket" || base === "portalFields") {
+        const pFields = ticketData.portalFields || {};
+        if (key === "billingReference" || key === "folio" || key === "ticketNumber") {
+          let val = pFields.billingReference || ticketData.billingReference || ticketData.folio || "";
+          const isUuid = /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/i.test(val);
+          const hasMockPrefix = /^ticket_|^job_|^OFFLINE-/i.test(val);
+          if (isUuid || hasMockPrefix) {
+            val = "";
+          }
+          resolved = val;
+        } else if (key === "total") {
+          resolved = (pFields.total !== undefined && pFields.total !== null) ? pFields.total.toString() : (ticketData.total || 0).toString();
+        } else if (key === "date" || key === "fecha") {
+          resolved = pFields.date || ticketData.fechaCompra || "";
+        } else {
+          resolved = pFields[key] || ticketData[key] || "";
+        }
       } else if (base === "fiscalProfile") {
         if (key === "rfc") resolved = fiscalProfile.rfc || "";
         else if (key === "businessName" || key === "razonSocial") resolved = fiscalProfile.razonSocial || "";
