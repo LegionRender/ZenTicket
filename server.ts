@@ -546,7 +546,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
     };
 
     const textPart = {
-      text: "Analiza exhaustivamente esta fotografía de un ticket de compra mexicano. Extrae con precisión los datos y estructura el resultado exactamente según el esqueleto proporcionado. INSTRUCCIÓN CRÍTICA DE INTEGRIDAD: No asumes marcas populares (ej. OXXO, Walmart, Starbucks, etc.) si el ticket no pertenece explícitamente a ellas. Si es una farmacia u otro comercio local (ej. Farmacias del Ahorro, Farmacias Guadalajara, farmacias locales, etc.), extrae fielmente el nombre exacto de la marca o razón social impreso en la parte superior. Si el RFC no es legible o no se localiza, coloca 'XAXX010101000' en rfcEmisor, pero NUNCA inventes o asocies el RFC de otra franquicia para rellenar.",
+      text: "Analiza exhaustivamente esta fotografía de un ticket de compra mexicano. Extrae con precisión los datos y estructura el resultado exactamente según el esqueleto proporcionado. INSTRUCCIÓN CRÍTICA DE INTEGRIDAD: No asumes marcas populares (ej. OXXO, Walmart, Starbucks, etc.) si el ticket no pertenece explícitamente a ellas. Si es una farmacia u otro comercio local (ej. Farmacias del Ahorro, Farmacias Guadalajara, farmacias locales, etc.), extrae fielmente el nombre exacto de la marca o razón social impreso en la parte superior. Si encuentras un código de barras largo o número largo de referencia para facturar (como ITU de 15-20 dígitos, o número largo de 12 dígitos de Farmacias Similares/Confianza), por favor extráelos de manera muy precisa en los campos correspondientes. Si el RFC no es legible o no se localiza, coloca 'XAXX010101000' en rfcEmisor, pero NUNCA inventes o asocies el RFC de otra franquicia para rellenar.",
     };
 
     const responseSchema = {
@@ -558,6 +558,8 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         folio: { type: "STRING", description: "Folio del ticket, ID de transacción, código de facturación o referencia de ticket (ej: 0251846 o 4821-3921-1923)" },
         total: { type: "NUMBER", description: "Total monetario pagado en el ticket en pesos mexicanos" },
         sucursal: { type: "STRING", description: "Sucursal o ubicación donde se realizó la compra" },
+        referenciaFacturacion: { type: "STRING", description: "Referencia para facturación, código de facturación o código largo impreso en el ticket (ej: ITU de 15-20 dígitos, o 12 dígitos numéricos para Farmacias Similares)." },
+        codigoBarras: { type: "STRING", description: "Código de barras numérico impreso en el ticket (número largo generalmente de 12 a 13 dígitos)." },
         rawOcrText: { type: "STRING", description: "El texto completo e íntegro extraído del ticket de forma literal, línea por línea." },
         items: {
           type: "ARRAY",
@@ -701,16 +703,94 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
     const rawRfc = extractedData.rfcEmisor || "";
     let detectedProfileKey = "";
     let detectedProfile = null;
+    let matchedConnector: any = null;
 
-    if (rawRfc.toUpperCase().includes("CCO8605231N4") || rawNombre.toUpperCase().includes("OXXO")) {
-      detectedProfileKey = "system-oxxo";
-      detectedProfile = MERCHANT_PROFILES["system-oxxo"];
-    } else if (rawRfc.toUpperCase().includes("SHE190630TX1") || rawNombre.toUpperCase().includes("STARBUCKS") || rawNombre.toUpperCase().includes("ALSEA")) {
-      detectedProfileKey = "system-starbucks";
-      detectedProfile = MERCHANT_PROFILES["system-starbucks"];
-    } else if (rawRfc.toUpperCase().includes("NWM9709244W4") || rawNombre.toUpperCase().includes("WALMART") || rawNombre.toUpperCase().includes("AURRERA")) {
-      detectedProfileKey = "system-walmart";
-      detectedProfile = MERCHANT_PROFILES["system-walmart"];
+    // ultra-robust clean string for matching
+    const cleanStr = (s: string) => 
+      (s || "")
+        .toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9\s]/g, "")
+        .replace(/\b(sa|de|cv|sapi|srl|grupo|comercial|cadena|tiendas|sucursal)\b/g, "")
+        .trim();
+
+    // Query Firestore connectors to find match if adminDb is available
+    if (adminDb && (rawNombre || rawRfc)) {
+      try {
+        console.log(`[OCR] Matching connector in Firestore for Name: "${rawNombre}", RFC: "${rawRfc}"...`);
+        if (rawRfc) {
+          const cleanRfc = rawRfc.toUpperCase().replace(/[^A-Z0-9]/g, "");
+          const rfcSnap = await adminDb.collection("connectors")
+            .where("rfc", "==", cleanRfc)
+            .get();
+          if (!rfcSnap.empty) {
+            matchedConnector = { id: rfcSnap.docs[0].id, ...rfcSnap.docs[0].data() };
+            console.log(`[OCR] Connector matched by RFC: ${matchedConnector.nombre}`);
+          }
+        }
+
+        if (!matchedConnector && rawNombre) {
+          const connSnap = await adminDb.collection("connectors").get();
+          const cleanInputName = cleanStr(rawNombre);
+          
+          for (const doc of connSnap.docs) {
+            const data = doc.data();
+            const cleanConnName = cleanStr(data.nombre || "");
+            
+            if (cleanInputName && cleanConnName && (cleanInputName.includes(cleanConnName) || cleanConnName.includes(cleanInputName))) {
+              matchedConnector = { id: doc.id, ...data };
+              console.log(`[OCR] Connector matched by Name: ${matchedConnector.nombre}`);
+              break;
+            }
+
+            if (data.aliases && Array.isArray(data.aliases)) {
+              const matchedAlias = data.aliases.find((alias: string) => {
+                const cleanAlias = cleanStr(alias);
+                return cleanInputName && cleanAlias && (cleanInputName.includes(cleanAlias) || cleanAlias.includes(cleanInputName));
+              });
+              if (matchedAlias) {
+                matchedConnector = { id: doc.id, ...data };
+                console.log(`[OCR] Connector matched by Alias: "${matchedAlias}" on connector: ${matchedConnector.nombre}`);
+                break;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[OCR] Error matching connector from Firestore:", err);
+      }
+    }
+
+    if (matchedConnector) {
+      detectedProfileKey = matchedConnector.id;
+      let reqFields = ["rfcEmisor", "folio", "total", "fecha"];
+      if (matchedConnector.fieldsJson) {
+        try {
+          const parsedFields = JSON.parse(matchedConnector.fieldsJson);
+          reqFields = parsedFields.filter((f: any) => f.required !== false).map((f: any) => f.key);
+        } catch (_) {}
+      }
+      detectedProfile = {
+        name: matchedConnector.nombre,
+        rfc: matchedConnector.rfc,
+        portalUrl: matchedConnector.portalUrl,
+        requiredFields: reqFields,
+        folioPattern: /.*/,
+        dateFormat: "YYYY-MM-DD",
+        minConfidence: 0.70
+      };
+    } else {
+      // Check local profiles
+      if (rawRfc.toUpperCase().includes("CCO8605231N4") || rawNombre.toUpperCase().includes("OXXO")) {
+        detectedProfileKey = "system-oxxo";
+        detectedProfile = MERCHANT_PROFILES["system-oxxo"];
+      } else if (rawRfc.toUpperCase().includes("SHE190630TX1") || rawNombre.toUpperCase().includes("STARBUCKS") || rawNombre.toUpperCase().includes("ALSEA")) {
+        detectedProfileKey = "system-starbucks";
+        detectedProfile = MERCHANT_PROFILES["system-starbucks"];
+      } else if (rawRfc.toUpperCase().includes("NWM9709244W4") || rawNombre.toUpperCase().includes("WALMART") || rawNombre.toUpperCase().includes("AURRERA")) {
+        detectedProfileKey = "system-walmart";
+        detectedProfile = MERCHANT_PROFILES["system-walmart"];
+      }
     }
 
     if (detectedProfile) {
@@ -763,6 +843,20 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         rawText: extractedData.folio || "",
         normalizedValue: qrParsed ? qrParsed.uuid : (extractedData.folio || "")
       },
+      referenciaFacturacion: {
+        value: extractedData.referenciaFacturacion || "",
+        confidence: extractedData.referenciaFacturacion ? 0.95 : 0.0,
+        source: "ocr",
+        rawText: extractedData.referenciaFacturacion || "",
+        normalizedValue: extractedData.referenciaFacturacion || ""
+      },
+      codigoBarras: {
+        value: extractedData.codigoBarras || "",
+        confidence: extractedData.codigoBarras ? 0.95 : 0.0,
+        source: "ocr",
+        rawText: extractedData.codigoBarras || "",
+        normalizedValue: extractedData.codigoBarras || ""
+      },
       sucursal: {
         value: extractedData.sucursal || "Matriz",
         confidence: extractedData.sucursal ? 0.88 : 0.50,
@@ -793,7 +887,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
     let failReason = "";
 
     // 1. FOLIO PATTERN check if profile exists
-    if (detectedProfile && fields.folio.value) {
+    if (detectedProfile && fields.folio.value && detectedProfile.folioPattern) {
       if (!detectedProfile.folioPattern.test(fields.folio.value)) {
         fields.folio.confidence = 0.50;
         pipelineLogs.push(`⚠️ Advertencia: El folio '${fields.folio.value}' no coincide con el patrón esperado del comercio.`);
@@ -842,13 +936,24 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       folio: fields.folio.value,
       total: fields.total.value,
       sucursal: fields.sucursal.value,
+      billingReference: fields.referenciaFacturacion.value,
+      codigoBarras: fields.codigoBarras.value,
       ocrFailed: finalOcrFailed,
       ocrError: ocrErrorStr || extractedData.ocrError || null,
       confidenceScore: parseFloat(avgConfidence.toFixed(4)),
       extractedFields: fields,
       pipelineLogs,
       cost,
-      rawCost: parseFloat(rawCost.toFixed(6))
+      rawCost: parseFloat(rawCost.toFixed(6)),
+      matchedConnector: matchedConnector ? {
+        id: matchedConnector.id,
+        nombre: matchedConnector.nombre,
+        rfc: matchedConnector.rfc,
+        portalUrl: matchedConnector.portalUrl,
+        fieldsJson: matchedConnector.fieldsJson,
+        flowJson: matchedConnector.flowJson,
+        status: matchedConnector.status
+      } : null
     });
   } catch (error: any) {
     console.error("Critical OCR Analysis process went down:", error);
@@ -1314,6 +1419,21 @@ function getLocalDictionaryMatch(nombreEmisor: string, rfcEmisor: string) {
         "Ingresar el RFC fiscal del contribuyente emisor",
         "Confirmar dirección e impuestos",
         "Hacer clic en 'Emitir Comprobante'"
+      ]
+    },
+    {
+      // 19. Farmacias Similares (Doctor Simi / Confianza)
+      keys: ["farmacias similares", "similares", "doctor simi", "simi", "farmacias de confianza", "confianza"],
+      portalUrl: "https://facturacion.gpupm.com/simifactura/portal",
+      fields: [
+        { key: "referenciaFacturacion", name: "Referencia de facturación", selector: "input#ref_simi", type: "text", required: true },
+        { key: "total", name: "Total Facturado", selector: "input#total_simi", type: "number", required: true }
+      ],
+      steps: [
+        "Navegar al portal de facturación de Farmacias Similares",
+        "Ingresar la referencia de facturación y el importe total",
+        "Completar datos fiscales y régimen SAT del receptor",
+        "Generar y descargar la factura XML"
       ]
     }
   ];

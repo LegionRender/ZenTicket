@@ -256,12 +256,18 @@ export async function executePortalMap(
           // Execute nested steps
           const nestedSteps = step.steps || [];
           for (const ns of nestedSteps) {
-            // Recursion or basic execution mapping
             if (ns.type === "click") {
               await getLocator(ns.selector, ns.iframeSelector).click();
             } else if (ns.type === "fill") {
               const val = resolveValue(ns.value, ticketData, fiscalProfile, connector, portalMap, ns.transform);
               await getLocator(ns.selector, ns.iframeSelector).fill(val);
+            } else if (ns.type === "select") {
+              const val = resolveValue(ns.value, ticketData, fiscalProfile, connector, portalMap, ns.transform);
+              await getLocator(ns.selector, ns.iframeSelector).selectOption(val);
+            } else if (ns.type === "waitForSelector") {
+              await getLocator(ns.selector, ns.iframeSelector).waitFor({ state: "visible", timeout: ns.timeout || 5000 }).catch(() => null);
+            } else if (ns.type === "waitForTimeout") {
+              await page.waitForTimeout(ns.delay || 2000);
             }
           }
         } else {

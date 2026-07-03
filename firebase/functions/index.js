@@ -65,6 +65,8 @@ const OCR_RESPONSE_SCHEMA = {
     folio: { type: "STRING", description: "Folio, ticket, transaccion o codigo de facturacion. Si no es legible, usa cadena vacia." },
     total: { type: "NUMBER", description: "Total pagado en MXN. Si no es legible, usa 0." },
     sucursal: { type: "STRING", description: "Sucursal o ubicacion si aparece. Si no es legible, usa cadena vacia." },
+    referenciaFacturacion: { type: "STRING", description: "Referencia de facturación, código de facturación o código largo impreso en el ticket (ej: ITU de 15-20 dígitos, o 12 dígitos numéricos para Farmacias Similares)." },
+    codigoBarras: { type: "STRING", description: "Código de barras numérico impreso en el ticket (número largo generalmente de 12 a 13 dígitos)." },
     rawOcrText: { type: "STRING", description: "El texto completo e integro extraido del ticket de forma literal, linea por linea." },
     items: {
       type: "ARRAY",
@@ -87,7 +89,8 @@ const OCR_PROMPT = [
   "No inventes comercios, RFC, folios, fechas, importes ni conceptos.",
   "Si un dato no es legible, devuelve cadena vacia; para total no legible devuelve 0.",
   "No uses ejemplos populares como OXXO, Walmart o Starbucks salvo que el ticket lo muestre explicitamente.",
-  "Devuelve un JSON con rfcEmisor, nombreEmisor, fechaCompra, folio, total, sucursal e items."
+  "Si encuentras un código de barras largo o número largo de referencia para facturar (como ITU de 15-20 dígitos, o número largo de 12 dígitos de Farmacias Similares/Confianza), por favor extráelos de manera muy precisa en los campos referenciaFacturacion y codigoBarras respectivamente.",
+  "Devuelve un JSON estructurado con rfcEmisor, nombreEmisor, fechaCompra, folio, total, sucursal, referenciaFacturacion, codigoBarras e items."
 ].join(" ");
 
 const CONSTANCIA_RESPONSE_SCHEMA = {
@@ -514,16 +517,93 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
       const rawRfc = extractedData.rfcEmisor || "";
       let detectedProfileKey = "";
       let detectedProfile = null;
+      let matchedConnector = null;
 
-      if (rawRfc.toUpperCase().includes("CCO8605231N4") || rawNombre.toUpperCase().includes("OXXO")) {
-        detectedProfileKey = "system-oxxo";
-        detectedProfile = MERCHANT_PROFILES["system-oxxo"];
-      } else if (rawRfc.toUpperCase().includes("SHE190630TX1") || rawNombre.toUpperCase().includes("STARBUCKS") || rawNombre.toUpperCase().includes("ALSEA")) {
-        detectedProfileKey = "system-starbucks";
-        detectedProfile = MERCHANT_PROFILES["system-starbucks"];
-      } else if (rawRfc.toUpperCase().includes("NWM9709244W4") || rawNombre.toUpperCase().includes("WALMART") || rawNombre.toUpperCase().includes("AURRERA")) {
-        detectedProfileKey = "system-walmart";
-        detectedProfile = MERCHANT_PROFILES["system-walmart"];
+      // ultra-robust clean string for matching
+      const cleanStr = (s) => 
+        (s || "")
+          .toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9\s]/g, "")
+          .replace(/\b(sa|de|cv|sapi|srl|grupo|comercial|cadena|tiendas|sucursal)\b/g, "")
+          .trim();
+
+      // Query Firestore connectors to find match if Firestore is initialized
+      if (db && (rawNombre || rawRfc)) {
+        try {
+          console.log(`[OCR] Matching connector in Firestore for Name: "${rawNombre}", RFC: "${rawRfc}"...`);
+          if (rawRfc) {
+            const cleanRfc = rawRfc.toUpperCase().replace(/[^A-Z0-9]/g, "");
+            const rfcSnap = await db.collection("connectors")
+              .where("rfc", "==", cleanRfc)
+              .get();
+            if (!rfcSnap.empty) {
+              matchedConnector = { id: rfcSnap.docs[0].id, ...rfcSnap.docs[0].data() };
+              console.log(`[OCR] Connector matched by RFC: ${matchedConnector.nombre}`);
+            }
+          }
+
+          if (!matchedConnector && rawNombre) {
+            const connSnap = await db.collection("connectors").get();
+            const cleanInputName = cleanStr(rawNombre);
+            
+            for (const doc of connSnap.docs) {
+              const data = doc.data();
+              const cleanConnName = cleanStr(data.nombre || "");
+              
+              if (cleanInputName && cleanConnName && (cleanInputName.includes(cleanConnName) || cleanConnName.includes(cleanInputName))) {
+                matchedConnector = { id: doc.id, ...data };
+                console.log(`[OCR] Connector matched by Name: ${matchedConnector.nombre}`);
+                break;
+              }
+
+              if (data.aliases && Array.isArray(data.aliases)) {
+                const matchedAlias = data.aliases.find((alias) => {
+                  const cleanAlias = cleanStr(alias);
+                  return cleanInputName && cleanAlias && (cleanInputName.includes(cleanAlias) || cleanAlias.includes(cleanInputName));
+                });
+                if (matchedAlias) {
+                  matchedConnector = { id: doc.id, ...data };
+                  console.log(`[OCR] Connector matched by Alias: "${matchedAlias}" on connector: ${matchedConnector.nombre}`);
+                  break;
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("[OCR] Error matching connector from Firestore:", err);
+        }
+      }
+
+      if (matchedConnector) {
+        detectedProfileKey = matchedConnector.id;
+        let reqFields = ["rfcEmisor", "folio", "total", "fecha"];
+        if (matchedConnector.fieldsJson) {
+          try {
+            const parsedFields = JSON.parse(matchedConnector.fieldsJson);
+            reqFields = parsedFields.filter((f) => f.required !== false).map((f) => f.key);
+          } catch (_) {}
+        }
+        detectedProfile = {
+          name: matchedConnector.nombre,
+          rfc: matchedConnector.rfc,
+          portalUrl: matchedConnector.portalUrl,
+          requiredFields: reqFields,
+          folioPattern: /.*/,
+          dateFormat: "YYYY-MM-DD",
+          minConfidence: 0.70
+        };
+      } else {
+        if (rawRfc.toUpperCase().includes("CCO8605231N4") || rawNombre.toUpperCase().includes("OXXO")) {
+          detectedProfileKey = "system-oxxo";
+          detectedProfile = MERCHANT_PROFILES["system-oxxo"];
+        } else if (rawRfc.toUpperCase().includes("SHE190630TX1") || rawNombre.toUpperCase().includes("STARBUCKS") || rawNombre.toUpperCase().includes("ALSEA")) {
+          detectedProfileKey = "system-starbucks";
+          detectedProfile = MERCHANT_PROFILES["system-starbucks"];
+        } else if (rawRfc.toUpperCase().includes("NWM9709244W4") || rawNombre.toUpperCase().includes("WALMART") || rawNombre.toUpperCase().includes("AURRERA")) {
+          detectedProfileKey = "system-walmart";
+          detectedProfile = MERCHANT_PROFILES["system-walmart"];
+        }
       }
 
       if (detectedProfile) {
@@ -575,6 +655,20 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           rawText: extractedData.folio || "",
           normalizedValue: qrParsed ? qrParsed.uuid : (extractedData.folio || "")
         },
+        referenciaFacturacion: {
+          value: extractedData.referenciaFacturacion || "",
+          confidence: extractedData.referenciaFacturacion ? 0.95 : 0.0,
+          source: "ocr",
+          rawText: extractedData.referenciaFacturacion || "",
+          normalizedValue: extractedData.referenciaFacturacion || ""
+        },
+        codigoBarras: {
+          value: extractedData.codigoBarras || "",
+          confidence: extractedData.codigoBarras ? 0.95 : 0.0,
+          source: "ocr",
+          rawText: extractedData.codigoBarras || "",
+          normalizedValue: extractedData.codigoBarras || ""
+        },
         sucursal: {
           value: extractedData.sucursal || "Matriz",
           confidence: extractedData.sucursal ? 0.88 : 0.50,
@@ -603,7 +697,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
       let validationFailed = false;
       let failReason = "";
 
-      if (detectedProfile && fields.folio.value) {
+      if (detectedProfile && fields.folio.value && detectedProfile.folioPattern) {
         if (!detectedProfile.folioPattern.test(fields.folio.value)) {
           fields.folio.confidence = 0.50;
           pipelineLogs.push(`⚠️ Advertencia: El folio '${fields.folio.value}' no coincide con el patrón esperado del comercio.`);
@@ -642,6 +736,8 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         folio: fields.folio.value,
         total: fields.total.value,
         sucursal: fields.sucursal.value,
+        billingReference: fields.referenciaFacturacion.value,
+        codigoBarras: fields.codigoBarras.value,
         ocrFailed: finalOcrFailed,
         ocrError: ocrErrorStr || extractedData.ocrError || null,
         confidenceScore: parseFloat(avgConfidence.toFixed(4)),
@@ -650,6 +746,15 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         ocrProvider: provider.id,
         ocrModel: result.model,
         ocrJobId: jobRef.id,
+        matchedConnector: matchedConnector ? {
+          id: matchedConnector.id,
+          nombre: matchedConnector.nombre,
+          rfc: matchedConnector.rfc,
+          portalUrl: matchedConnector.portalUrl,
+          fieldsJson: matchedConnector.fieldsJson,
+          flowJson: matchedConnector.flowJson,
+          status: matchedConnector.status
+        } : null
         cost: provider.provider === "openai" ? 0.75 : 0.5,
         rawCost: result.rawCost
       };

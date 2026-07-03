@@ -131,7 +131,7 @@ const connectorsSeed = [
     isMock: false,
     isRestricted: false,
     runnerAvailable: true,
-    aliases: ["farmacias similares", "similares", "doctor simi", "simi"]
+    aliases: ["farmacias similares", "similares", "doctor simi", "simi", "farmacias de confianza", "confianza"]
   },
   {
     nombre: "Tiendas Soriana",

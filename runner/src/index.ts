@@ -297,6 +297,12 @@ async function processJob(jobId: string) {
       rfcReceptor: xmlResult.rfcReceptor,
       nombreReceptor: lockedJob.fiscalProfileSnapshot.razonSocial,
       total: xmlResult.total,
+      regimenFiscalEmisor: xmlResult.regimenFiscalEmisor || null,
+      regimenFiscalReceptor: xmlResult.regimenFiscalReceptor || null,
+      usoCfdiReceptor: xmlResult.usoCfdiReceptor || null,
+      lugarExpedicion: xmlResult.lugarExpedicion || null,
+      formaPago: xmlResult.formaPago || null,
+      noCertificadoSAT: xmlResult.noCertificadoSAT || null,
       createdAt: new Date().toISOString()
     });
 
