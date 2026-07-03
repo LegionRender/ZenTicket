@@ -185,7 +185,7 @@ export async function executePortalMap(
       await createRunnerLog(jobId, ticketId, "INFO", `Ejecutando paso ${i + 1}/${steps.length}: [${step.type}]`, { stepIndex: i, stepType: step.type });
 
       // Check if step requires missing fields
-      if (step.type === "fill" || step.type === "select" || step.type === "assertText") {
+      if (step.type === "fill" || step.type === "select" || step.type === "assertText" || step.type === "evaluate") {
         const template = step.value || "";
         const matches = [...template.matchAll(/\{\{([^}]+)\}\}/g)];
         const missingFieldsForStep: string[] = [];
@@ -262,6 +262,15 @@ export async function executePortalMap(
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
         await locator.fill(value);
+      } else if (step.type === "evaluate") {
+        const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
+        await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
+        const locator = getLocator(step.selector, step.iframeSelector);
+        await locator.evaluate((el: any, val) => {
+          el.value = val;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new Event('blur', { bubbles: true }));
+        }, value);
       } else if (step.type === "select") {
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);

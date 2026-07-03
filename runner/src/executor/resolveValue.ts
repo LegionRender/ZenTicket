@@ -74,6 +74,11 @@ export function resolveValue(
       return Number.isFinite(number) ? number.toFixed(2) : resolved;
     }
     case "dateformat": return resolved.replace(/[^0-9/-]/g, "");
+    case "ddmmyyyy": {
+      const match = resolved.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+      return resolved;
+    }
     default: return resolved;
   }
 }
