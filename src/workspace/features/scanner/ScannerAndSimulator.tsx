@@ -1777,40 +1777,42 @@ export default function ScannerAndSimulator({
 
       // Scheme validation
       let flowSteps = [];
-      try {
-        const hasInvalidField = fieldsSchema.some((f: any) => !f.key || !f.name || !f.selector || !f.type || f.required === undefined);
-        if (hasInvalidField) {
-          throw new Error("Esquema de campos inválido: Falta key, name, selector o type en uno de los campos.");
+      if (!activeConn.extractionContract) {
+        try {
+          const hasInvalidField = fieldsSchema.some((f: any) => !f.key || !f.name || !f.selector || !f.type || f.required === undefined);
+          if (hasInvalidField) {
+            throw new Error("Esquema de campos inválido: Falta key, name, selector o type en uno de los campos.");
+          }
+          flowSteps = JSON.parse(activeConn.flowJson || "[]");
+        } catch (e: any) {
+          const schemaErr: ReviewError = {
+            reviewReasonCode: "CONNECTOR_SCHEMA_INVALID",
+            reviewReasonMessage: "El conector tiene una configuración incompleta y requiere revisión técnica.",
+            lastAutomationStep: "connector_resolving",
+            connectorAttempted: true,
+            connectorId: activeConn.id || null,
+            connectorName: activeConn.nombre || null,
+            portalErrorMessage: e.message || "Invalid fieldsJson or flowJson schema",
+            reviewError: {
+              connectorStatus: activeConn.status || "undefined",
+              runnerAvailable: activeConn.runnerAvailable || false,
+              isProductionReady: activeConn.isProductionReady || false,
+              portalMapFound: false,
+              portalMapApproved: false,
+              hasStepsJson: !!activeConn.flowJson,
+              missingFields: ["fieldsSchema_validation_failed"],
+              blockingReason: "CONNECTOR_SCHEMA_INVALID: " + (e.message || "")
+            } as any
+          };
+          await onUpdateTicketInDb(activeTicketId, {
+            status: "requires_manual_review",
+            errorMsg: schemaErr.reviewReasonMessage,
+            reviewError: schemaErr as any
+          });
+          await addAutomationEvent("connector_resolving", "failed", schemaErr.reviewReasonMessage, undefined, "CONNECTOR_SCHEMA_INVALID");
+          setIsAutomatingLoading(false);
+          return;
         }
-        flowSteps = JSON.parse(activeConn.flowJson || "[]");
-      } catch (e: any) {
-        const schemaErr: ReviewError = {
-          reviewReasonCode: "CONNECTOR_SCHEMA_INVALID",
-          reviewReasonMessage: "El conector tiene una configuración incompleta y requiere revisión técnica.",
-          lastAutomationStep: "connector_resolving",
-          connectorAttempted: true,
-          connectorId: activeConn.id || null,
-          connectorName: activeConn.nombre || null,
-          portalErrorMessage: e.message || "Invalid fieldsJson or flowJson schema",
-          reviewError: {
-            connectorStatus: activeConn.status || "undefined",
-            runnerAvailable: activeConn.runnerAvailable || false,
-            isProductionReady: activeConn.isProductionReady || false,
-            portalMapFound: false,
-            portalMapApproved: false,
-            hasStepsJson: !!activeConn.flowJson,
-            missingFields: ["fieldsSchema_validation_failed"],
-            blockingReason: "CONNECTOR_SCHEMA_INVALID: " + (e.message || "")
-          } as any
-        };
-        await onUpdateTicketInDb(activeTicketId, {
-          status: "requires_manual_review",
-          errorMsg: schemaErr.reviewReasonMessage,
-          reviewError: schemaErr as any
-        });
-        await addAutomationEvent("connector_resolving", "failed", schemaErr.reviewReasonMessage, undefined, "CONNECTOR_SCHEMA_INVALID");
-        setIsAutomatingLoading(false);
-        return;
       }
 
       // Check runner availability
@@ -1984,53 +1986,42 @@ export default function ScannerAndSimulator({
         return;
       }
 
-      // Check required fields from portalMap and user fiscal profile (Rule 6)
-      const validationResult = validatePortalFieldsAgainstPortalMap(
-        { ...freshTicketData, portalFields: pFields },
-        pMap
-      );
-      const missingFields: string[] = [...validationResult.missingFields];
+      // B) Validate ticket physical fields from connector.extractionContract.requiredPortalFields
+      let missingFields: string[] = [];
+      const contract = activeConn.extractionContract;
       
-      if (!fiscalProfile.userId) missingFields.push("userId");
-      if (!fiscalProfile.rfc || !fiscalProfile.rfc.trim()) missingFields.push("fiscalProfile.rfc");
-      if (!fiscalProfile.razonSocial || !fiscalProfile.razonSocial.trim()) missingFields.push("fiscalProfile.businessName");
-      if (!fiscalProfile.codigoPostal || !fiscalProfile.codigoPostal.trim()) missingFields.push("fiscalProfile.postalCode");
-      if (!fiscalProfile.regimenFiscal || !fiscalProfile.regimenFiscal.trim()) missingFields.push("fiscalProfile.taxRegime");
-      if (!fiscalProfile.usoCFDI || !fiscalProfile.usoCFDI.trim()) missingFields.push("fiscalProfile.cfdiUse");
-      
-      const fpEmail = fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || "";
-      if (!fpEmail || !fpEmail.trim() || !fpEmail.includes("@")) missingFields.push("fiscalProfile.email");
-
-      if (missingFields.length > 0) {
-        await addLog(`❌ Faltan campos requeridos: ${missingFields.join(", ")}`, 400);
-
-        const hasMissingTicketFields = missingFields.some(f => f.startsWith("portalFields."));
-        const hasMissingFiscalFields = missingFields.some(f => f.startsWith("fiscalProfile."));
-
-        let finalStatus = "requires_manual_review";
-        let finalReasonCode = "MISSING_REQUIRED_FIELDS";
-        let reasonMessage = "";
-
-        if (hasMissingTicketFields) {
-          finalStatus = "missing_required_fields";
-          finalReasonCode = "MISSING_REQUIRED_FIELDS";
-          reasonMessage = "Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura.";
-        } else if (hasMissingFiscalFields) {
-          finalStatus = "waiting_fiscal_profile";
-          finalReasonCode = "WAITING_FISCAL_PROFILE";
-          reasonMessage = "Completa tus datos de Perfil Fiscal para que podamos solicitar esta factura automáticamente.";
-        } else {
-          reasonMessage = `Faltan campos requeridos para continuar: ${missingFields.join(", ")}.`;
+      if (contract && contract.requiredPortalFields) {
+        for (const field of contract.requiredPortalFields) {
+          if (field.required) {
+            const key = field.canonicalKey;
+            const val = pFields[key];
+            if (val === undefined || val === null || (typeof val === "string" && !val.trim()) || (typeof val === "number" && isNaN(val))) {
+              missingFields.push(`portalFields.${key}`);
+            }
+          }
         }
-        
+      } else {
+        // Fallback for legacy connectors
+        const validationResult = validatePortalFieldsAgainstPortalMap(
+          { ...freshTicketData, portalFields: pFields },
+          pMap
+        );
+        missingFields = validationResult.missingFields.filter(f => f.startsWith("portalFields."));
+      }
+
+      // If physical ticket fields are missing, stop immediately and report missing_required_fields
+      if (missingFields.length > 0) {
+        await addLog(`❌ Faltan campos físicos del ticket: ${missingFields.join(", ")}`, 400);
+
+        const reasonMessage = "Necesitamos completar algunos datos del ticket para solicitar la factura en el portal oficial.";
         const configErr: ReviewError = {
-          reviewReasonCode: finalReasonCode as any,
+          reviewReasonCode: "MISSING_REQUIRED_FIELDS",
           reviewReasonMessage: reasonMessage,
           lastAutomationStep: "connector_resolving",
           connectorAttempted: true,
           connectorId: activeConn.id || null,
           connectorName: activeConn.nombre || null,
-          portalErrorMessage: `Campos requeridos faltantes: ${missingFields.join(", ")}`,
+          portalErrorMessage: `Campos del ticket faltantes: ${missingFields.join(", ")}`,
           reviewError: {
             connectorStatus: activeConn.status || "undefined",
             runnerAvailable: activeConn.runnerAvailable || false,
@@ -2039,18 +2030,86 @@ export default function ScannerAndSimulator({
             portalMapApproved: pMap ? (pMap.isApproved === true || pMap.status === "approved") : false,
             hasStepsJson: pMap ? !!pMap.stepsJson : false,
             missingFields: missingFields,
-            blockingReason: `${finalReasonCode}: ` + missingFields.join(", ")
+            blockingReason: "MISSING_REQUIRED_FIELDS: " + missingFields.join(", ")
           } as any
         };
 
         await onUpdateTicketInDb(activeTicketId, {
-          status: finalStatus as any,
-          reviewReasonCode: finalReasonCode as any,
+          status: "missing_required_fields",
+          reviewReasonCode: "MISSING_REQUIRED_FIELDS",
           errorMsg: configErr.reviewReasonMessage,
           reviewError: configErr as any,
           missingFields: missingFields
         } as any);
-        await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, finalReasonCode);
+        await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, "MISSING_REQUIRED_FIELDS");
+        setIsAutomatingLoading(false);
+        return;
+      }
+
+      // C) Validate user's fiscal profile from connector.extractionContract.fiscalFields
+      if (contract && contract.fiscalFields) {
+        for (const field of contract.fiscalFields) {
+          if (field.required) {
+            const k = field.key.replace("fiscalProfile.", "");
+            let mappedKey = k;
+            if (k === "rfc") mappedKey = "rfc";
+            if (k === "businessName") mappedKey = "razonSocial";
+            if (k === "postalCode") mappedKey = "codigoPostal";
+            if (k === "taxRegime") mappedKey = "regimenFiscal";
+            if (k === "cfdiUse") mappedKey = "usoCFDI";
+            if (k === "email") mappedKey = "correoElectronico";
+
+            const val = fiscalProfile[mappedKey];
+            const cleanVal = (val || "").toString().trim();
+            
+            if (mappedKey === "rfc") {
+              if (cleanVal.length < 12) missingFields.push(field.key);
+            } else if (mappedKey === "correoElectronico") {
+              if (!cleanVal.includes("@")) missingFields.push(field.key);
+            } else {
+              if (!cleanVal) missingFields.push(field.key);
+            }
+          }
+        }
+      } else {
+        // Fallback checks for legacy connectors
+        if (!fiscalProfile.rfc || !fiscalProfile.rfc.trim()) missingFields.push("fiscalProfile.rfc");
+        if (!fiscalProfile.razonSocial || !fiscalProfile.razonSocial.trim()) missingFields.push("fiscalProfile.businessName");
+      }
+
+      // If fiscal profile fields are missing, stop here and report waiting_fiscal_profile
+      if (missingFields.length > 0) {
+        await addLog(`❌ Faltan campos del perfil fiscal: ${missingFields.join(", ")}`, 400);
+
+        const reasonMessage = "Ya tenemos los datos del ticket. Para completar la factura necesitamos tus datos fiscales.";
+        const configErr: ReviewError = {
+          reviewReasonCode: "MISSING_FISCAL_PROFILE",
+          reviewReasonMessage: reasonMessage,
+          lastAutomationStep: "connector_resolving",
+          connectorAttempted: true,
+          connectorId: activeConn.id || null,
+          connectorName: activeConn.nombre || null,
+          portalErrorMessage: `Campos fiscales faltantes: ${missingFields.join(", ")}`,
+          reviewError: {
+            connectorStatus: activeConn.status || "undefined",
+            runnerAvailable: activeConn.runnerAvailable || false,
+            isProductionReady: activeConn.isProductionReady || false,
+            portalMapFound: !!pMap,
+            portalMapApproved: pMap ? (pMap.isApproved === true || pMap.status === "approved") : false,
+            hasStepsJson: pMap ? !!pMap.stepsJson : false,
+            missingFields: missingFields,
+            blockingReason: "MISSING_FISCAL_PROFILE: " + missingFields.join(", ")
+          } as any
+        };
+
+        await onUpdateTicketInDb(activeTicketId, {
+          status: "waiting_fiscal_profile",
+          reviewReasonCode: "MISSING_FISCAL_PROFILE",
+          errorMsg: configErr.reviewReasonMessage,
+          reviewError: configErr as any,
+          missingFields: missingFields
+        } as any);
+        await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, "MISSING_FISCAL_PROFILE");
         setIsAutomatingLoading(false);
         return;
       }
