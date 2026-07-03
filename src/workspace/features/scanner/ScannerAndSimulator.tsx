@@ -394,15 +394,7 @@ export default function ScannerAndSimulator({
             if (f.key === "fecha") return !data.fechaCompra?.trim();
             return false;
           });
-          if (hasMissingTicketField) return true;
-
-          const hasMissingFiscalField = fields.some((f: any) => {
-            if (getFieldSource(f) !== "fiscalProfile" || !f.required) return false;
-            return isFiscalFieldInvalid(f.key);
-          });
-          if (hasMissingFiscalField) return true;
-
-          return false;
+          return hasMissingTicketField;
         }
       } catch (e) {
         // fallback
@@ -1057,14 +1049,14 @@ export default function ScannerAndSimulator({
       const rfcReceptorVal = fiscalProfile?.rfc || "";
       const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfcReceptorVal);
 
-      if (hasCritFields && isRfcReceptorValid) {
+      if (hasCritFields) {
         setActiveStep("automating");
         setTimeout(() => {
           handleTriggerAutomation(foundConnector, tId, ocrResult);
         }, 300);
       } else {
-        let fieldToCorrect: "folio" | "fecha" | "total" | "nombreEmisor" | "rfcReceptor" = "folio";
-        let reasonCode: "MISSING_FOLIO" | "MISSING_DATE" | "MISSING_TOTAL" | "MISSING_MERCHANT" | "PORTAL_REJECTED_RFC" = "MISSING_FOLIO";
+        let fieldToCorrect: "folio" | "fecha" | "total" | "nombreEmisor" = "folio";
+        let reasonCode: "MISSING_FOLIO" | "MISSING_DATE" | "MISSING_TOTAL" | "MISSING_MERCHANT" = "MISSING_FOLIO";
         let reasonMessage = "";
         let detectedValue = "";
 
@@ -1088,11 +1080,6 @@ export default function ScannerAndSimulator({
           reasonCode = "MISSING_FOLIO";
           reasonMessage = "El portal no reconoció el folio del ticket.";
           detectedValue = "";
-        } else if (!isRfcReceptorValid) {
-          fieldToCorrect = "rfcReceptor";
-          reasonCode = "PORTAL_REJECTED_RFC";
-          reasonMessage = "El RFC del receptor no tiene un formato válido ante el SAT.";
-          detectedValue = rfcReceptorVal;
         }
 
         const corrErr: CorrectionError = {
@@ -1490,14 +1477,14 @@ export default function ScannerAndSimulator({
       const rfcReceptorVal = fiscalProfile?.rfc || "";
       const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfcReceptorVal);
 
-      if (hasCritFields && isRfcReceptorValid) {
+      if (hasCritFields) {
         setActiveStep("automating");
         setTimeout(() => {
           handleTriggerAutomation(foundConnector, tId, ocrResult);
         }, 300);
       } else {
-        let fieldToCorrect: "folio" | "fecha" | "total" | "nombreEmisor" | "rfcReceptor" = "folio";
-        let reasonCode: "MISSING_FOLIO" | "MISSING_DATE" | "MISSING_TOTAL" | "MISSING_MERCHANT" | "PORTAL_REJECTED_RFC" = "MISSING_FOLIO";
+        let fieldToCorrect: "folio" | "fecha" | "total" | "nombreEmisor" = "folio";
+        let reasonCode: "MISSING_FOLIO" | "MISSING_DATE" | "MISSING_TOTAL" | "MISSING_MERCHANT" = "MISSING_FOLIO";
         let reasonMessage = "";
         let detectedValue = "";
 
@@ -1521,11 +1508,6 @@ export default function ScannerAndSimulator({
           reasonCode = "MISSING_FOLIO";
           reasonMessage = "El portal no reconoció el folio del ticket.";
           detectedValue = "";
-        } else if (!isRfcReceptorValid) {
-          fieldToCorrect = "rfcReceptor";
-          reasonCode = "PORTAL_REJECTED_RFC";
-          reasonMessage = "El RFC del receptor no tiene un formato válido ante el SAT.";
-          detectedValue = rfcReceptorVal;
         }
 
         const corrErr: CorrectionError = {
