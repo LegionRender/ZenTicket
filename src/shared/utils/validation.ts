@@ -16,8 +16,23 @@ export function sanitizeBillingReferenceForConnector(
   const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanValue);
   const hasInternalPrefix = /^ticket_|^job_|^OFFLINE-|^worker-/i.test(cleanValue);
   if (isUuid || hasInternalPrefix) {
-    console.log(`[Sanitizer] Blocked UUID or internal prefix: "${cleanValue}"`);
-    return "";
+    let contractField = fieldContract;
+    if (!contractField && connector && connector.extractionContract) {
+      contractField = connector.extractionContract.requiredPortalFields?.find(
+        (f: any) => f.canonicalKey === "billingReference" || f.key === "portalFields.billingReference"
+      );
+    }
+    let allowsUuid = false;
+    if (contractField && contractField.validationPattern) {
+      try {
+        const regex = new RegExp(contractField.validationPattern, "i");
+        allowsUuid = regex.test(cleanValue);
+      } catch (e) {}
+    }
+    if (!allowsUuid) {
+      console.log(`[Sanitizer] Blocked UUID or internal prefix: "${cleanValue}"`);
+      return "";
+    }
   }
 
   // 2. Length check: if value is > 20 characters and does not match the expected pattern, block it.

@@ -1197,11 +1197,11 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         normalizedValue: qrParsed ? String(qrParsed.total) : String(extractedData.total || 0)
       },
       folio: {
-        value: extractedData.folio || "",
-        confidence: extractedData.folio ? 0.93 : 0.0,
+        value: extractedData.folio || billingReference || "",
+        confidence: (extractedData.folio || billingReference) ? 0.93 : 0.0,
         source: "ocr",
-        rawText: extractedData.folio || "",
-        normalizedValue: extractedData.folio || ""
+        rawText: extractedData.folio || billingReference || "",
+        normalizedValue: extractedData.folio || billingReference || ""
       },
       referenciaFacturacion: {
         value: billingReference,

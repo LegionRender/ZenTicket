@@ -251,8 +251,8 @@ const connectorsSeed = [
             "Número impreso en el ticket requerido por el portal",
             "No confundir con UUID, folio interno, ticketId o UUID SAT"
           ],
-          validationPattern: "^\\d{12,13}$",
-          forbiddenPatterns: FORBIDDEN_PATTERNS,
+          validationPattern: "^\\d{12,13}$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          forbiddenPatterns: ["^ticket_", "^job_", "^OFFLINE-"],
           required: true,
           userEditable: true,
           source: "ticket",
