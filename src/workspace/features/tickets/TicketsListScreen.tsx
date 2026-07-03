@@ -474,6 +474,12 @@ export default function TicketsListScreen({
 
   const getDetailedReasonMsg = (ticket: any): string => {
     if (!ticket) return "Error desconocido.";
+    if (ticket.status === "training_required") {
+      return "Estamos entrenando a la IA para este comercio. Te notificaremos cuando esté listo.";
+    }
+    if (ticket.status === "connector_not_ready") {
+      return "El conector de este comercio está en mantenimiento técnico o ajustes.";
+    }
     const revErr = ticket.reviewError;
     const corrErr = ticket.correctionError;
 
@@ -1927,6 +1933,14 @@ export default function TicketsListScreen({
                               <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
                                 En revisión
                               </span>
+                            ) : (t.status as string) === "training_required" ? (
+                              <span className="bg-indigo-100 text-indigo-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
+                                Entrenando IA
+                              </span>
+                            ) : (t.status as string) === "connector_not_ready" ? (
+                              <span className="bg-amber-100 text-amber-800 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
+                                Conector no listo
+                              </span>
                             ) : isFailed ? (
                               <span className="bg-rose-100 text-rose-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
                                 No se pudo completar
@@ -1960,6 +1974,14 @@ export default function TicketsListScreen({
                            <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
                              En revisión
                            </span>
+                         ) : (t.status as string) === "training_required" ? (
+                           <span className="bg-indigo-100 text-indigo-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
+                             Entrenando IA
+                           </span>
+                         ) : (t.status as string) === "connector_not_ready" ? (
+                           <span className="bg-amber-100 text-amber-800 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none font-bold">
+                             Conector no listo
+                           </span>
                          ) : isFailed ? (
                            <span className="bg-rose-100 text-rose-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
                              No se pudo completar
@@ -1984,20 +2006,28 @@ export default function TicketsListScreen({
                     </div>
 
                     {/* Escalation/Failure Reason Card Block */}
-                    {(t.status === "review" || t.status === "requires_manual_review" || t.status === "requires_user_correction" || isFailed) && (
+                    {(t.status === "review" || t.status === "requires_manual_review" || t.status === "requires_user_correction" || (t.status as string) === "training_required" || (t.status as string) === "connector_not_ready" || isFailed) && (
                       <div className={`text-[11px] p-3.5 rounded-2xl leading-relaxed font-sans border ${
                         t.status === "requires_user_correction"
                           ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30 dark:border-orange-500/40"
                           : t.status === "requires_manual_review" || t.status === "review"
                             ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 dark:border-amber-500/40"
-                            : "bg-rose-500/10 text-rose-600 dark:text-rose-450 border-rose-500/30 dark:border-rose-500/40"
+                            : (t.status as string) === "training_required"
+                              ? "bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 border-indigo-500/30 dark:border-indigo-500/40"
+                              : (t.status as string) === "connector_not_ready"
+                                ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 dark:border-amber-500/40"
+                                : "bg-rose-500/10 text-rose-600 dark:text-rose-455 border-rose-500/30 dark:border-rose-500/40"
                       }`}>
                         <span className="font-bold block uppercase text-[9px] mb-1 tracking-wider">
                           {t.status === "requires_user_correction"
                             ? "Requiere Corrección:"
                             : t.status === "requires_manual_review" || t.status === "review"
                               ? "Revisión Requerida:"
-                              : "Error de Automatización:"}
+                              : (t.status as string) === "training_required"
+                                ? "Entrenando IA:"
+                                : (t.status as string) === "connector_not_ready"
+                                  ? "Conector en Ajustes:"
+                                  : "Error de Automatización:"}
                         </span>
                         {getDetailedReasonMsg(t)}
                       </div>

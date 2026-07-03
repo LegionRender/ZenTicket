@@ -135,8 +135,24 @@ function sanitizeBillingReferenceForConnector(value, rawOcrText, connector, fiel
   const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanValue);
   const hasInternalPrefix = /^ticket_|^job_|^OFFLINE-|^worker-/i.test(cleanValue);
   if (isUuid || hasInternalPrefix) {
-    console.log(`[Sanitizer] Blocked UUID or internal prefix: "${cleanValue}"`);
-    return "";
+    let contractField2 = fieldContract;
+    if (!contractField2 && connector && connector.extractionContract) {
+      contractField2 = connector.extractionContract.requiredPortalFields?.find(
+        (f) => f.canonicalKey === "billingReference" || f.key === "portalFields.billingReference"
+      );
+    }
+    let allowsUuid = false;
+    if (contractField2 && contractField2.validationPattern) {
+      try {
+        const regex = new RegExp(contractField2.validationPattern, "i");
+        allowsUuid = regex.test(cleanValue);
+      } catch (e) {
+      }
+    }
+    if (!allowsUuid) {
+      console.log(`[Sanitizer] Blocked UUID or internal prefix: "${cleanValue}"`);
+      return "";
+    }
   }
   if (cleanValue.length > 20) {
     let patternPassed = false;
@@ -198,6 +214,7 @@ function sanitizeBillingReferenceForConnector(value, rawOcrText, connector, fiel
 }
 
 // server.ts
+var import_fiscalUtils = __toESM(require_fiscalUtils(), 1);
 import_dotenv.default.config();
 var hasRealCredentials = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
 var adminDb;
@@ -214,7 +231,7 @@ if (hasRealCredentials) {
       });
     }
     console.log("[Firebase Admin] Inicializado exitosamente.");
-    adminDb = (0, import_firestore.getFirestore)();
+    adminDb = (0, import_firestore.getFirestore)(void 0, "ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee");
   } catch (e) {
     console.warn("[Firebase Admin Warning] No se pudo inicializar con credenciales reales.", e);
   }
@@ -776,24 +793,36 @@ app.post("/api/tickets/analyze", async (req, res) => {
         console.warn("Could not retrieve connectors list from DB:", e.message);
       }
     }
+    let brandAliases = [];
+    let billingUrl = "";
+    let evidence = "";
+    let confidence = 0;
     if (!fallbackToOcrMock && ai) {
+      let detectedName = "";
+      let detectedRfc = "";
       if (forceTargetedRetry && connectorId) {
         matchedConnector = connectorsList.find((c) => c.id === connectorId) || null;
         console.log(`[OCR Force Retry] Bypassing Stage 1. Forced connector: ${matchedConnector?.nombre}`);
+        if (matchedConnector) {
+          detectedName = matchedConnector.nombre;
+          detectedRfc = matchedConnector.rfc;
+        }
       } else {
-        let detectedName = "";
-        let detectedRfc = "";
         let successId = false;
         const idSchema = {
           type: "OBJECT",
           properties: {
-            rfcEmisor: { type: "STRING", description: "RFC del emisor de la tienda. Si no viene o no es legible, coloca 'XAXX010101000'." },
-            nombreEmisor: { type: "STRING", description: "Nombre de la tienda en may\xFAsculas." }
+            merchantName: { type: "STRING", description: "Nombre comercial o raz\xF3n social de la tienda en may\xFAsculas." },
+            emitterRfc: { type: "STRING", description: "RFC del emisor de la tienda. Si no viene o no es legible, coloca 'XAXX010101000'." },
+            brandAliases: { type: "ARRAY", items: { type: "STRING" }, description: "Lista de posibles marcas o nombres alternos por los que se conoce al comercio." },
+            billingUrl: { type: "STRING", description: "URL del portal de facturaci\xF3n visible en el ticket, si existe." },
+            evidence: { type: "STRING", description: "Evidencia textual o fragmento literal extra\xEDdo del ticket que demuestre el nombre del comercio." },
+            confidence: { type: "NUMBER", description: "Estimaci\xF3n de confianza en la identificaci\xF3n del comercio, de 0.0 a 1.0." }
           },
-          required: ["rfcEmisor", "nombreEmisor"]
+          required: ["merchantName", "emitterRfc", "confidence"]
         };
         const idPrompt = {
-          text: "Analiza esta fotograf\xEDa de un ticket de compra. Identifica \xFAnicamente el nombre del comercio (nombreEmisor) y su RFC (rfcEmisor). Si no encuentras el RFC, pon 'XAXX010101000'."
+          text: "Analiza la imagen de este ticket de compra. Identifica \xFAnicamente el comercio emisor, extrayendo su nombre comercial (merchantName), RFC (emitterRfc - si no viene usa XAXX010101000), nombres alternos o alias (brandAliases), la URL del portal de facturaci\xF3n oficial si viene impresa en el ticket (billingUrl), un fragmento literal del ticket que evidencie estos datos (evidence), y tu estimaci\xF3n de confianza en la identificaci\xF3n (confidence, de 0.0 a 1.0)."
         };
         for (const model of MODELS_TO_TRY) {
           if (successId) break;
@@ -809,8 +838,12 @@ app.post("/api/tickets/analyze", async (req, res) => {
             });
             if (response.text && response.text.trim()) {
               const parsed = JSON.parse(response.text.trim());
-              detectedName = parsed.nombreEmisor || "";
-              detectedRfc = parsed.rfcEmisor || "";
+              detectedName = parsed.merchantName || parsed.nombreEmisor || "";
+              detectedRfc = parsed.emitterRfc || parsed.rfcEmisor || "";
+              brandAliases = parsed.brandAliases || [];
+              billingUrl = parsed.billingUrl || "";
+              evidence = parsed.evidence || "";
+              confidence = parsed.confidence || 0.5;
               successId = true;
               console.log(`[OCR Stage 1] Identified: ${detectedName} (RFC: ${detectedRfc})`);
             }
@@ -819,6 +852,77 @@ app.post("/api/tickets/analyze", async (req, res) => {
           }
         }
         matchedConnector = backendMatchConnector(connectorsList, detectedName, detectedRfc);
+      }
+      if (!matchedConnector) {
+        console.log(`[OCR Pipeline] No connector matched for ${detectedName} (${detectedRfc}). Creating candidate.`);
+        if (adminDb && typeof adminDb.collection === "function") {
+          try {
+            const candidateRef = adminDb.collection("connector_candidates").doc();
+            await candidateRef.set({
+              nombre: detectedName || "Comercio por identificar",
+              rfc: detectedRfc || "XAXX010101000",
+              aliases: brandAliases || [],
+              portalUrl: billingUrl || "",
+              status: "pending_setup",
+              createdAt: (/* @__PURE__ */ new Date()).toISOString()
+            });
+            const reqRef = adminDb.collection("training_requests").doc();
+            await reqRef.set({
+              storeName: detectedName || "Comercio por identificar",
+              rfc: detectedRfc || "XAXX010101000",
+              officialBillingUrl: billingUrl || "",
+              status: "pending_training",
+              evidence: evidence || "",
+              createdAt: (/* @__PURE__ */ new Date()).toISOString()
+            });
+          } catch (e) {
+            console.warn("Could not save connector candidate/training request to Firestore:", e.message);
+          }
+        }
+        res.status(200).json({
+          ocrFailed: false,
+          status: "training_required",
+          nombreEmisor: detectedName || "Comercio por identificar",
+          rfcEmisor: detectedRfc || "XAXX010101000",
+          items: [],
+          rawOcrText: "",
+          portalFields: {},
+          portalFieldsConfidence: {}
+        });
+        return;
+      }
+      if (matchedConnector.status !== "production_ready" || matchedConnector.runnerAvailable !== true) {
+        console.log(`[OCR Pipeline] Connector matched (${matchedConnector.nombre}) but not ready. Creating training request.`);
+        if (adminDb && typeof adminDb.collection === "function") {
+          try {
+            const existingSnap = await adminDb.collection("training_requests").where("rfc", "==", matchedConnector.rfc || detectedRfc).limit(1).get();
+            if (existingSnap.empty) {
+              const reqRef = adminDb.collection("training_requests").doc();
+              await reqRef.set({
+                storeName: matchedConnector.nombre || detectedName,
+                rfc: matchedConnector.rfc || detectedRfc,
+                officialBillingUrl: matchedConnector.portalUrl || billingUrl || "",
+                status: "pending_training",
+                evidence: evidence || "Existente pero no listo",
+                createdAt: (/* @__PURE__ */ new Date()).toISOString()
+              });
+            }
+          } catch (e) {
+            console.warn("Could not save training request to Firestore:", e.message);
+          }
+        }
+        res.status(200).json({
+          ocrFailed: false,
+          status: "connector_not_ready",
+          nombreEmisor: matchedConnector.nombre || detectedName,
+          rfcEmisor: matchedConnector.rfc || detectedRfc,
+          connectorId: matchedConnector.id,
+          items: [],
+          rawOcrText: "",
+          portalFields: {},
+          portalFieldsConfidence: {}
+        });
+        return;
       }
       let targetedPromptText = "";
       let targetedSchema = {};
@@ -829,11 +933,13 @@ app.post("/api/tickets/analyze", async (req, res) => {
 `;
         targetedPromptText += `Extrae \xFAnicamente los campos requeridos por el portal de facturaci\xF3n oficial:
 `;
-        for (const f of contract.requiredPortalFields) {
+        const requiredPortalFields = contract.requiredPortalFields || [];
+        for (const f of requiredPortalFields) {
           const hints = f.fieldExtractionHints || {};
-          targetedPromptText += `- Campo: ${f.label} (clave: ${f.canonicalKey})
+          const fieldKey = String(f.canonicalKey || f.key || "").replace(/^portalFields\./, "");
+          targetedPromptText += `- Campo: ${f.label || fieldKey} (clave: ${fieldKey})
 `;
-          targetedPromptText += `  * Pistas: ${f.hints.join(". ")}
+          if (f.hints) targetedPromptText += `  * Pistas: ${f.hints.join(". ")}
 `;
           if (hints.likelyZones) targetedPromptText += `  * Zonas probables: ${hints.likelyZones.join(", ")}
 `;
@@ -871,7 +977,7 @@ INSTRUCCI\xD3N CR\xCDTICA DE SEGURIDAD: Queda estrictamente prohibido extraer, i
           }
         };
         const confidenceRequired = [];
-        for (const f of contract.requiredPortalFields) {
+        for (const f of requiredPortalFields) {
           const fieldKey = String(f.canonicalKey || f.key || "").replace(/^portalFields\./, "");
           if (!fieldKey) continue;
           const fieldType = ["number", "currency", "decimal"].includes(String(f.type || "").toLowerCase()) ? "NUMBER" : "STRING";
@@ -892,36 +998,6 @@ INSTRUCCI\xD3N CR\xCDTICA DE SEGURIDAD: Queda estrictamente prohibido extraer, i
           type: "OBJECT",
           properties: customProperties,
           required: ["rfcEmisor", "nombreEmisor", "rawOcrText", "items", "portalFieldsConfidence"]
-        };
-      } else {
-        console.log(`[OCR Stage 2] No matched connector. Using generic fallback schema.`);
-        targetedPromptText = "Analiza exhaustivamente esta fotograf\xEDa de un ticket de compra mexicano. Extrae con precisi\xF3n los datos y estructura el resultado exactamente seg\xFAn el esqueleto proporcionado. INSTRUCCI\xD3N CR\xCDTICA: No asumas marcas populares si el ticket no pertenece a ellas. Si es una farmacia o comercio local, extrae fielmente el nombre exacto de la marca. Si encuentras un c\xF3digo de barras largo o n\xFAmero de referencia, extr\xE1elos. Si no encuentras un dato literalmente, devuelve null y no inventes valores.";
-        targetedSchema = {
-          type: "OBJECT",
-          properties: {
-            rfcEmisor: { type: "STRING", description: "RFC del emisor de la tienda (12 o 13 car\xE1cteres). Si no viene o no es legible, coloca 'XAXX010101000'." },
-            nombreEmisor: { type: "STRING", description: "Nombre comercial o raz\xF3n social de la tienda en may\xFAsculas." },
-            fechaCompra: { type: "STRING", description: "Fecha de compra aproximada o exacta en formato YYYY-MM-DD" },
-            folio: { type: "STRING", description: "Folio del ticket, ID de transacci\xF3n, c\xF3digo de facturaci\xF3n o referencia de ticket." },
-            total: { type: "NUMBER", description: "Total monetario pagado en el ticket en pesos mexicanos" },
-            sucursal: { type: "STRING", description: "Sucursal o ubicaci\xF3n donde se realiz\xF3 la compra" },
-            referenciaFacturacion: { type: "STRING", description: "Referencia para facturaci\xF3n, c\xF3digo de facturaci\xF3n o c\xF3digo largo impreso en el ticket." },
-            codigoBarras: { type: "STRING", description: "C\xF3digo de barras num\xE9rico impreso en el ticket." },
-            rawOcrText: { type: "STRING", description: "El texto completo e \xEDntegro extra\xEDdo del ticket de forma literal, l\xEDnea por l\xEDnea." },
-            items: {
-              type: "ARRAY",
-              description: "Lista de conceptos comprados descritos en el ticket",
-              items: {
-                type: "OBJECT",
-                properties: {
-                  description: { type: "STRING", description: "Concepto del producto" },
-                  amount: { type: "NUMBER", description: "Precio o importe de este concepto" }
-                },
-                required: ["description", "amount"]
-              }
-            }
-          },
-          required: ["rfcEmisor", "nombreEmisor", "fechaCompra", "folio", "total", "rawOcrText", "items"]
         };
       }
       let successTarget = false;
@@ -988,7 +1064,7 @@ INSTRUCCI\xD3N CR\xCDTICA DE SEGURIDAD: Queda estrictamente prohibido extraer, i
     pipelineLogs.push("Etapa 1: Recibida imagen del ticket y decodificada.");
     let qrDetected = false;
     let qrValue = "";
-    let qrParsed = parseSatQrUrl(textResult) || extractedData && (parseSatQrUrl(extractedData.folio) || parseSatQrUrl(extractedData.sucursal));
+    let qrParsed = (0, import_fiscalUtils.parseSatQrUrl)(textResult) || extractedData && ((0, import_fiscalUtils.parseSatQrUrl)(extractedData.folio) || (0, import_fiscalUtils.parseSatQrUrl)(extractedData.sucursal));
     if (qrParsed) {
       qrDetected = true;
       qrValue = `https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?id=${qrParsed.uuid}&re=${qrParsed.rfcEmisor}&rr=${qrParsed.rfcReceptor}&tt=${qrParsed.total}`;
@@ -1205,11 +1281,11 @@ INSTRUCCI\xD3N CR\xCDTICA DE SEGURIDAD: Queda estrictamente prohibido extraer, i
         normalizedValue: qrParsed ? String(qrParsed.total) : String(extractedData.total || 0)
       },
       folio: {
-        value: extractedData.folio || "",
-        confidence: extractedData.folio ? 0.93 : 0,
+        value: extractedData.folio || billingReference || "",
+        confidence: extractedData.folio || billingReference ? 0.93 : 0,
         source: "ocr",
-        rawText: extractedData.folio || "",
-        normalizedValue: extractedData.folio || ""
+        rawText: extractedData.folio || billingReference || "",
+        normalizedValue: extractedData.folio || billingReference || ""
       },
       referenciaFacturacion: {
         value: billingReference,
@@ -1983,7 +2059,7 @@ app.post("/api/admin/discover-portal", async (req, res) => {
   console.log(`[Discover Portal] Starting Playwright discovery on: ${officialBillingUrl}`);
   let browser = null;
   try {
-    const { chromium } = require("playwright");
+    const { chromium } = await import("playwright");
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     await page.goto(officialBillingUrl, { waitUntil: "load", timeout: 2e4 });
@@ -2192,19 +2268,13 @@ app.post("/api/admin/analyze-html", async (req, res) => {
     res.status(500).json({ error: "Fallo durante el an\xE1lisis del HTML: " + err.message });
   }
 });
-var {
-  parseSatQrUrl,
-  validateXmlStructure,
-  parseCfdiInfo,
-  verifyCfdiWithSat
-} = require_fiscalUtils();
 app.post("/api/cfdi/verify-sat", async (req, res) => {
   const { xmlContent } = req.body;
   if (!xmlContent) {
     res.status(400).json({ error: "Missing xmlContent in request body" });
     return;
   }
-  const isStructuralValid = validateXmlStructure(xmlContent);
+  const isStructuralValid = (0, import_fiscalUtils.validateXmlStructure)(xmlContent);
   if (!isStructuralValid) {
     res.json({
       status: "invalid_structure",
@@ -2213,7 +2283,7 @@ app.post("/api/cfdi/verify-sat", async (req, res) => {
     });
     return;
   }
-  const info = parseCfdiInfo(xmlContent);
+  const info = (0, import_fiscalUtils.parseCfdiInfo)(xmlContent);
   if (!info.uuid || !info.rfcEmisor || !info.rfcReceptor || !info.total) {
     res.json({
       status: "invalid_xml",
@@ -2222,7 +2292,7 @@ app.post("/api/cfdi/verify-sat", async (req, res) => {
     });
     return;
   }
-  const verification = await verifyCfdiWithSat(info.rfcEmisor, info.rfcReceptor, info.total, info.uuid);
+  const verification = await (0, import_fiscalUtils.verifyCfdiWithSat)(info.rfcEmisor, info.rfcReceptor, info.total, info.uuid);
   res.json({
     status: verification.status,
     satStatus: verification.satStatus,

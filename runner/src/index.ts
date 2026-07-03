@@ -9,6 +9,7 @@ import { executePortalMap } from "./executor/executePortalMap";
 import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiXml";
 import { createRunnerLog, setActiveJobContext } from "./logging/createRunnerLog";
 import { validateJobContract } from "./validators/validateJobContract";
+import { verifySatCfdi } from "./validators/verifySatCfdi";
 
 const workerId = `worker-node-${process.pid}`;
 const serviceAccountPath = path.join(__dirname, "../../serviceAccountKey.json");
@@ -128,8 +129,23 @@ async function processJob(jobId: string) {
         updatedAt: new Date().toISOString()
       });
 
+      let finalStatus = "invoice_obtained";
+      try {
+        const isSatValid = await verifySatCfdi(
+          xmlResult.rfcEmisor,
+          xmlResult.rfcReceptor,
+          xmlResult.total,
+          xmlResult.uuid
+        );
+        if (isSatValid) {
+          finalStatus = "cfdi_validated";
+        }
+      } catch (satErr: any) {
+        console.warn(`[Runner] Error validating CFDI with SAT in Flow A, falling back to invoice_obtained: ${satErr.message}`);
+      }
+
       await ticketRef.update({
-        status: "invoice_obtained",
+        status: finalStatus,
         invoiceId,
         updatedAt: new Date().toISOString()
       });
@@ -287,8 +303,23 @@ async function processJob(jobId: string) {
       updatedAt: new Date().toISOString()
     });
 
+    let finalStatus = "invoice_obtained";
+    try {
+      const isSatValid = await verifySatCfdi(
+        xmlResult.rfcEmisor,
+        xmlResult.rfcReceptor,
+        xmlResult.total,
+        xmlResult.uuid
+      );
+      if (isSatValid) {
+        finalStatus = "cfdi_validated";
+      }
+    } catch (satErr: any) {
+      console.warn(`[Runner] Error validating CFDI with SAT in Flow B, falling back to invoice_obtained: ${satErr.message}`);
+    }
+
     await ticketRef.update({
-      status: "invoice_obtained",
+      status: finalStatus,
       invoiceId,
       updatedAt: new Date().toISOString()
     });

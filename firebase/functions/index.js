@@ -710,26 +710,39 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
       }
 
       let matchedConnector = null;
+      let brandAliases = [];
+      let billingUrl = "";
+      let evidence = "";
+      let confidence = 0.0;
+      let detectedName = "";
+      let detectedRfc = "";
+
       if (forceTargetedRetry && connectorId) {
         matchedConnector = connectorsList.find(c => c.id === connectorId) || null;
         console.log(`[OCR Force Retry Cloud] Forced connector: ${matchedConnector?.nombre}`);
+        if (matchedConnector) {
+          detectedName = matchedConnector.nombre;
+          detectedRfc = matchedConnector.rfc;
+        }
       } else {
         // STAGE 1: Identify Merchant
-        let detectedName = "";
-        let detectedRfc = "";
         let successId = false;
 
         const idSchema = {
           type: "OBJECT",
           properties: {
-            rfcEmisor: { type: "STRING", description: "RFC del emisor de la tienda. Si no viene o no es legible, coloca 'XAXX010101000'." },
-            nombreEmisor: { type: "STRING", description: "Nombre de la tienda en mayúsculas." }
+            merchantName: { type: "STRING", description: "Nombre comercial o razón social de la tienda en mayúsculas." },
+            emitterRfc: { type: "STRING", description: "RFC del emisor de la tienda. Si no viene o no es legible, coloca 'XAXX010101000'." },
+            brandAliases: { type: "ARRAY", items: { type: "STRING" }, description: "Lista de posibles marcas o nombres alternos por los que se conoce al comercio." },
+            billingUrl: { type: "STRING", description: "URL del portal de facturación visible en el ticket, si existe." },
+            evidence: { type: "STRING", description: "Evidencia textual o fragmento literal extraído del ticket que demuestre el nombre del comercio." },
+            confidence: { type: "NUMBER", description: "Estimación de confianza en la identificación del comercio, de 0.0 a 1.0." }
           },
-          required: ["rfcEmisor", "nombreEmisor"]
+          required: ["merchantName", "emitterRfc", "confidence"]
         };
 
         const idPrompt = {
-          text: "Analiza esta fotografía de un ticket de compra. Identifica únicamente el nombre del comercio (nombreEmisor) y su RFC (rfcEmisor). Si no encuentras el RFC, pon 'XAXX010101000'."
+          text: "Analiza la imagen de este ticket de compra. Identifica únicamente el comercio emisor, extrayendo su nombre comercial (merchantName), RFC (emitterRfc - si no viene usa XAXX010101000), nombres alternos o alias (brandAliases), la URL del portal de facturación oficial si viene impresa en el ticket (billingUrl), un fragmento literal del ticket que evidencie estos datos (evidence), y tu estimación de confianza en la identificación (confidence, de 0.0 a 1.0)."
         };
 
         const imagePart = {
@@ -753,8 +766,12 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
             });
             if (response.text && response.text.trim()) {
               const parsed = JSON.parse(response.text.trim());
-              detectedName = parsed.nombreEmisor || "";
-              detectedRfc = parsed.rfcEmisor || "";
+              detectedName = parsed.merchantName || parsed.nombreEmisor || "";
+              detectedRfc = parsed.emitterRfc || parsed.rfcEmisor || "";
+              brandAliases = parsed.brandAliases || [];
+              billingUrl = parsed.billingUrl || "";
+              evidence = parsed.evidence || "";
+              confidence = parsed.confidence || 0.5;
               successId = true;
               console.log(`[OCR Stage 1 Cloud] Identified: ${detectedName} (RFC: ${detectedRfc})`);
             }
@@ -776,7 +793,6 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         const tNombre = cleanStr(detectedName || "");
 
         const candidates = connectorsList.filter((c) => {
-          // Filter out disabled/duplicate mock connectors
           if (c.status === "disabled" || c.disabledReason === "DUPLICATE_MOCK_CONNECTOR") return false;
 
           const cRfc = (c.rfc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -796,7 +812,6 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         });
 
         if (candidates.length > 0) {
-          // Prioritized Sorting
           candidates.sort((a, b) => {
             const aProd = a.status === "production_ready" ? 1 : 0;
             const bProd = b.status === "production_ready" ? 1 : 0;
@@ -812,7 +827,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
 
             const aMock = (a.status === "mock_only" || a.isMock === true) ? 1 : 0;
             const bMock = (b.status === "mock_only" || b.isMock === true) ? 1 : 0;
-            if (aMock !== bMock) return aMock - bMock; // prefer non-mock (0) over mock (1)
+            if (aMock !== bMock) return aMock - bMock;
 
             const aContract = (a.extractionContract && a.extractionContract.requiredPortalFields && a.extractionContract.requiredPortalFields.length > 0) ? 1 : 0;
             const bContract = (b.extractionContract && b.extractionContract.requiredPortalFields && b.extractionContract.requiredPortalFields.length > 0) ? 1 : 0;
@@ -821,9 +836,81 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
             return 0;
           });
           matchedConnector = candidates[0];
-        } else {
-          matchedConnector = null;
         }
+      }
+
+      // Check conector readiness
+      if (!matchedConnector) {
+        console.log(`[OCR Pipeline Cloud] No connector matched for ${detectedName} (${detectedRfc}). Creating candidate.`);
+        try {
+          const candidateRef = db.collection("connector_candidates").doc();
+          await candidateRef.set({
+            nombre: detectedName || "Comercio por identificar",
+            rfc: detectedRfc || "XAXX010101000",
+            aliases: brandAliases || [],
+            portalUrl: billingUrl || "",
+            status: "pending_setup",
+            createdAt: new Date().toISOString()
+          });
+
+          const reqRef = db.collection("training_requests").doc();
+          await reqRef.set({
+            storeName: detectedName || "Comercio por identificar",
+            rfc: detectedRfc || "XAXX010101000",
+            officialBillingUrl: billingUrl || "",
+            status: "pending_training",
+            evidence: evidence || "",
+            createdAt: new Date().toISOString()
+          });
+        } catch (e) {
+          console.warn("Could not save connector candidate/training request to Firestore:", e.message);
+        }
+
+        return {
+          ocrFailed: false,
+          status: "training_required",
+          nombreEmisor: detectedName || "Comercio por identificar",
+          rfcEmisor: detectedRfc || "XAXX010101000",
+          items: [],
+          rawOcrText: "",
+          portalFields: {},
+          portalFieldsConfidence: {}
+        };
+      }
+
+      if (matchedConnector.status !== "production_ready" || matchedConnector.runnerAvailable !== true) {
+        console.log(`[OCR Pipeline Cloud] Connector matched (${matchedConnector.nombre}) but not ready. Creating training request.`);
+        try {
+          const existingSnap = await db.collection("training_requests")
+            .where("rfc", "==", matchedConnector.rfc || detectedRfc)
+            .limit(1)
+            .get();
+          if (existingSnap.empty) {
+            const reqRef = db.collection("training_requests").doc();
+            await reqRef.set({
+              storeName: matchedConnector.nombre || detectedName,
+              rfc: matchedConnector.rfc || detectedRfc,
+              officialBillingUrl: matchedConnector.portalUrl || billingUrl || "",
+              status: "pending_training",
+              evidence: evidence || "Existente pero no listo",
+              createdAt: new Date().toISOString()
+            });
+          }
+        } catch (e) {
+          console.warn("Could not save training request to Firestore:", e.message);
+        }
+
+        return {
+          ocrFailed: false,
+          status: "connector_not_ready",
+          nombreEmisor: matchedConnector.nombre || detectedName,
+          rfcEmisor: matchedConnector.rfc || detectedRfc,
+          connectorId: matchedConnector.id,
+          items: [],
+          rawOcrText: "",
+          portalFields: {},
+          portalFieldsConfidence: {}
+        };
       }
 
       // STAGE 2: Targeted OCR

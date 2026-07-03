@@ -291,8 +291,8 @@ const connectorsSeed = [
       ]
     },
     createdAt: new Date().toISOString(),
-    status: "automation_available",
-    isProductionReady: false,
+    status: "production_ready",
+    isProductionReady: true,
     isMock: false,
     isRestricted: false,
     runnerAvailable: true,

@@ -83,6 +83,9 @@ export interface ExtractedTicketData {
   items: TicketItem[];
   ocrFailed?: boolean;
   ocrError?: string;
+  portalFields?: Record<string, any>;
+  portalFieldsConfidence?: Record<string, number>;
+  status?: string;
 }
 
 export type TicketStatus = 
@@ -99,6 +102,14 @@ export type TicketStatus =
   | "invoice_obtained"
   | "requires_manual_review"
   | "failed"
+  | "training_required"
+  | "connector_not_ready"
+  | "connector_resolving"
+  | "pending_portal_submission"
+  | "submitted_to_merchant"
+  | "waiting_portal_result"
+  | "sat_verifying"
+  | "waiting_fiscal_profile"
   // Backwards compatibility
   | "extracted"
   | "processing"
@@ -175,6 +186,17 @@ export interface Ticket {
   startedAt?: string;
   finishedAt?: string;
   updatedAt?: string;
+  portalFields?: Record<string, any>;
+  portalFieldsConfidence?: Record<string, number>;
+  rawOcrText?: string;
+  missingFields?: string[];
+  reviewReasonCode?: string;
+  shortCode?: string;
+  billingReference?: string;
+  referenciaFacturacion?: string;
+  extractionState?: string;
+  jobId?: string;
+  extractionDiagnostics?: any;
 }
 
 export interface InvoiceJob {
@@ -233,6 +255,13 @@ export interface Connector {
   learnedFrom?: "automatizacion_ticket" | "portal_admin"; // Origin of learning
   userName?: string;
   userEmail?: string;
+  runnerAvailable?: boolean;
+  status?: string;
+  isProductionReady?: boolean;
+  extractionContract?: any;
+  aliases?: string[];
+  isMock?: boolean;
+  disabledReason?: string;
 }
 
 export interface Invoice {
@@ -248,6 +277,11 @@ export interface Invoice {
   xmlContent: string;
   pdfHtml?: string; // HTML invoice layout
   createdAt: string;
+  status?: string;
+  emailReceptor?: string;
+  regimenFiscalReceptor?: string;
+  usoCfdiReceptor?: string;
+  regimenFiscalEmisor?: string;
   cost?: number;
   rawCost?: number; // Raw model execution token-based cost
   connectorType?: "existente" | "nuevo";

@@ -727,27 +727,41 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       }
     }
 
+    let brandAliases: string[] = [];
+    let billingUrl = "";
+    let evidence = "";
+    let confidence = 0.0;
+
     if (!fallbackToOcrMock && ai) {
+      let detectedName = "";
+      let detectedRfc = "";
+
       if (forceTargetedRetry && connectorId) {
         matchedConnector = connectorsList.find(c => c.id === connectorId) || null;
         console.log(`[OCR Force Retry] Bypassing Stage 1. Forced connector: ${matchedConnector?.nombre}`);
+        if (matchedConnector) {
+          detectedName = matchedConnector.nombre;
+          detectedRfc = matchedConnector.rfc;
+        }
       } else {
         // STAGE 1: Identify Merchant
-        let detectedName = "";
-        let detectedRfc = "";
         let successId = false;
 
         const idSchema = {
           type: "OBJECT",
           properties: {
-            rfcEmisor: { type: "STRING", description: "RFC del emisor de la tienda. Si no viene o no es legible, coloca 'XAXX010101000'." },
-            nombreEmisor: { type: "STRING", description: "Nombre de la tienda en mayúsculas." }
+            merchantName: { type: "STRING", description: "Nombre comercial o razón social de la tienda en mayúsculas." },
+            emitterRfc: { type: "STRING", description: "RFC del emisor de la tienda. Si no viene o no es legible, coloca 'XAXX010101000'." },
+            brandAliases: { type: "ARRAY", items: { type: "STRING" }, description: "Lista de posibles marcas o nombres alternos por los que se conoce al comercio." },
+            billingUrl: { type: "STRING", description: "URL del portal de facturación visible en el ticket, si existe." },
+            evidence: { type: "STRING", description: "Evidencia textual o fragmento literal extraído del ticket que demuestre el nombre del comercio." },
+            confidence: { type: "NUMBER", description: "Estimación de confianza en la identificación del comercio, de 0.0 a 1.0." }
           },
-          required: ["rfcEmisor", "nombreEmisor"]
+          required: ["merchantName", "emitterRfc", "confidence"]
         };
 
         const idPrompt = {
-          text: "Analiza esta fotografía de un ticket de compra. Identifica únicamente el nombre del comercio (nombreEmisor) y su RFC (rfcEmisor). Si no encuentras el RFC, pon 'XAXX010101000'."
+          text: "Analiza la imagen de este ticket de compra. Identifica únicamente el comercio emisor, extrayendo su nombre comercial (merchantName), RFC (emitterRfc - si no viene usa XAXX010101000), nombres alternos o alias (brandAliases), la URL del portal de facturación oficial si viene impresa en el ticket (billingUrl), un fragmento literal del ticket que evidencie estos datos (evidence), y tu estimación de confianza en la identificación (confidence, de 0.0 a 1.0)."
         };
 
         for (const model of MODELS_TO_TRY) {
@@ -764,8 +778,12 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
             });
             if (response.text && response.text.trim()) {
               const parsed = JSON.parse(response.text.trim());
-              detectedName = parsed.nombreEmisor || "";
-              detectedRfc = parsed.rfcEmisor || "";
+              detectedName = parsed.merchantName || parsed.nombreEmisor || "";
+              detectedRfc = parsed.emitterRfc || parsed.rfcEmisor || "";
+              brandAliases = parsed.brandAliases || [];
+              billingUrl = parsed.billingUrl || "";
+              evidence = parsed.evidence || "";
+              confidence = parsed.confidence || 0.5;
               successId = true;
               console.log(`[OCR Stage 1] Identified: ${detectedName} (RFC: ${detectedRfc})`);
             }
@@ -777,7 +795,87 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         matchedConnector = backendMatchConnector(connectorsList, detectedName, detectedRfc);
       }
 
-      // STAGE 2: Targeted OCR or generic fallback
+      // Check conector existence and readiness
+      if (!matchedConnector) {
+        console.log(`[OCR Pipeline] No connector matched for ${detectedName} (${detectedRfc}). Creating candidate.`);
+        if (adminDb && typeof adminDb.collection === "function") {
+          try {
+            const candidateRef = adminDb.collection("connector_candidates").doc();
+            await candidateRef.set({
+              nombre: detectedName || "Comercio por identificar",
+              rfc: detectedRfc || "XAXX010101000",
+              aliases: brandAliases || [],
+              portalUrl: billingUrl || "",
+              status: "pending_setup",
+              createdAt: new Date().toISOString()
+            });
+
+            const reqRef = adminDb.collection("training_requests").doc();
+            await reqRef.set({
+              storeName: detectedName || "Comercio por identificar",
+              rfc: detectedRfc || "XAXX010101000",
+              officialBillingUrl: billingUrl || "",
+              status: "pending_training",
+              evidence: evidence || "",
+              createdAt: new Date().toISOString()
+            });
+          } catch (e: any) {
+            console.warn("Could not save connector candidate/training request to Firestore:", e.message);
+          }
+        }
+
+        res.status(200).json({
+          ocrFailed: false,
+          status: "training_required",
+          nombreEmisor: detectedName || "Comercio por identificar",
+          rfcEmisor: detectedRfc || "XAXX010101000",
+          items: [],
+          rawOcrText: "",
+          portalFields: {},
+          portalFieldsConfidence: {}
+        });
+        return;
+      }
+
+      if (matchedConnector.status !== "production_ready" || matchedConnector.runnerAvailable !== true) {
+        console.log(`[OCR Pipeline] Connector matched (${matchedConnector.nombre}) but not ready. Creating training request.`);
+        if (adminDb && typeof adminDb.collection === "function") {
+          try {
+            const existingSnap = await adminDb.collection("training_requests")
+              .where("rfc", "==", matchedConnector.rfc || detectedRfc)
+              .limit(1)
+              .get();
+            if (existingSnap.empty) {
+              const reqRef = adminDb.collection("training_requests").doc();
+              await reqRef.set({
+                storeName: matchedConnector.nombre || detectedName,
+                rfc: matchedConnector.rfc || detectedRfc,
+                officialBillingUrl: matchedConnector.portalUrl || billingUrl || "",
+                status: "pending_training",
+                evidence: evidence || "Existente pero no listo",
+                createdAt: new Date().toISOString()
+              });
+            }
+          } catch (e: any) {
+            console.warn("Could not save training request to Firestore:", e.message);
+          }
+        }
+
+        res.status(200).json({
+          ocrFailed: false,
+          status: "connector_not_ready",
+          nombreEmisor: matchedConnector.nombre || detectedName,
+          rfcEmisor: matchedConnector.rfc || detectedRfc,
+          connectorId: matchedConnector.id,
+          items: [],
+          rawOcrText: "",
+          portalFields: {},
+          portalFieldsConfidence: {}
+        });
+        return;
+      }
+
+      // STAGE 2: Targeted OCR using extractionContract only
       let targetedPromptText = "";
       let targetedSchema: any = {};
 
@@ -787,10 +885,12 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
 
         targetedPromptText = `Analiza la imagen del ticket de compra comercial del comercio: ${matchedConnector.nombre} (también conocido como: ${matchedConnector.aliases ? matchedConnector.aliases.join(", ") : "n/a"}).\n`;
         targetedPromptText += `Extrae únicamente los campos requeridos por el portal de facturación oficial:\n`;
-        for (const f of contract.requiredPortalFields) {
+        const requiredPortalFields = contract.requiredPortalFields || [];
+        for (const f of requiredPortalFields) {
           const hints = f.fieldExtractionHints || {};
-          targetedPromptText += `- Campo: ${f.label} (clave: ${f.canonicalKey})\n`;
-          targetedPromptText += `  * Pistas: ${f.hints.join(". ")}\n`;
+          const fieldKey = String(f.canonicalKey || f.key || "").replace(/^portalFields\./, "");
+          targetedPromptText += `- Campo: ${f.label || fieldKey} (clave: ${fieldKey})\n`;
+          if (f.hints) targetedPromptText += `  * Pistas: ${f.hints.join(". ")}\n`;
           if (hints.likelyZones) targetedPromptText += `  * Zonas probables: ${hints.likelyZones.join(", ")}\n`;
           if (hints.nearbyWords) targetedPromptText += `  * Palabras clave cercanas: ${hints.nearbyWords.join(", ")}\n`;
           if (f.validationPattern) targetedPromptText += `  * Formato esperado (Regex): ${f.validationPattern}\n`;
@@ -823,7 +923,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
 
         // Add every portal field declared by the connector contract.
         const confidenceRequired: string[] = [];
-        for (const f of contract.requiredPortalFields) {
+        for (const f of requiredPortalFields) {
           const fieldKey = String(f.canonicalKey || f.key || "").replace(/^portalFields\./, "");
           if (!fieldKey) continue;
           const fieldType = ["number", "currency", "decimal"].includes(String(f.type || "").toLowerCase())
@@ -847,36 +947,6 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
           type: "OBJECT",
           properties: customProperties,
           required: ["rfcEmisor", "nombreEmisor", "rawOcrText", "items", "portalFieldsConfidence"]
-        };
-      } else {
-        console.log(`[OCR Stage 2] No matched connector. Using generic fallback schema.`);
-        targetedPromptText = "Analiza exhaustivamente esta fotografía de un ticket de compra mexicano. Extrae con precisión los datos y estructura el resultado exactamente según el esqueleto proporcionado. INSTRUCCIÓN CRÍTICA: No asumas marcas populares si el ticket no pertenece a ellas. Si es una farmacia o comercio local, extrae fielmente el nombre exacto de la marca. Si encuentras un código de barras largo o número de referencia, extráelos. Si no encuentras un dato literalmente, devuelve null y no inventes valores.";
-        targetedSchema = {
-          type: "OBJECT",
-          properties: {
-            rfcEmisor: { type: "STRING", description: "RFC del emisor de la tienda (12 o 13 carácteres). Si no viene o no es legible, coloca 'XAXX010101000'." },
-            nombreEmisor: { type: "STRING", description: "Nombre comercial o razón social de la tienda en mayúsculas." },
-            fechaCompra: { type: "STRING", description: "Fecha de compra aproximada o exacta en formato YYYY-MM-DD" },
-            folio: { type: "STRING", description: "Folio del ticket, ID de transacción, código de facturación o referencia de ticket." },
-            total: { type: "NUMBER", description: "Total monetario pagado en el ticket en pesos mexicanos" },
-            sucursal: { type: "STRING", description: "Sucursal o ubicación donde se realizó la compra" },
-            referenciaFacturacion: { type: "STRING", description: "Referencia para facturación, código de facturación o código largo impreso en el ticket." },
-            codigoBarras: { type: "STRING", description: "Código de barras numérico impreso en el ticket." },
-            rawOcrText: { type: "STRING", description: "El texto completo e íntegro extraído del ticket de forma literal, línea por línea." },
-            items: {
-              type: "ARRAY",
-              description: "Lista de conceptos comprados descritos en el ticket",
-              items: {
-                type: "OBJECT",
-                properties: {
-                  description: { type: "STRING", description: "Concepto del producto" },
-                  amount: { type: "NUMBER", description: "Precio o importe de este concepto" },
-                },
-                required: ["description", "amount"],
-              },
-            },
-          },
-          required: ["rfcEmisor", "nombreEmisor", "fechaCompra", "folio", "total", "rawOcrText", "items"],
         };
       }
 
