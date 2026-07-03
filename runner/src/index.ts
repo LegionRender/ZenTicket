@@ -324,7 +324,7 @@ async function processJob(jobId: string) {
 }
 
 async function runWorkerLoop() {
-  console.log(`[Worker: ${workerId}] Iniciando ciclo del runner...`);
+  console.log(`[Runner] Polling invoice_jobs...`);
   try {
     // Stale jobs timeout check (more than 5 minutes)
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -369,13 +369,15 @@ async function runWorkerLoop() {
 
     const pendingJobIds = await pollJobs();
     if (pendingJobIds.length > 0) {
-      console.log(`[Worker: ${workerId}] Encontrados ${pendingJobIds.length} jobs pendientes.`);
+      console.log(`[Runner] Pending jobs encontrados: ${pendingJobIds.length}`);
       for (const jobId of pendingJobIds) {
         await processJob(jobId);
       }
+    } else {
+      console.log(`[Runner] Sin jobs pendientes. Esperando...`);
     }
   } catch (err: any) {
-    console.error("Error in worker loop:", err.message);
+    console.error(`[Runner] Error en loop: ${err.message}`);
   }
   // Run every 5 seconds
   setTimeout(runWorkerLoop, 5000);

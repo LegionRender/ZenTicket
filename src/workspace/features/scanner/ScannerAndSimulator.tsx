@@ -887,10 +887,13 @@ export default function ScannerAndSimulator({
       }
       setIsEditing(false);
       setActiveStep("correction");
-    } else if (tStatus === "cfdi_validated" || tStatus === "completed") {
+    } else if (tStatus === "cfdi_validated" || tStatus === "completed" || tStatus === "invoice_obtained") {
       setIsAutomatingLoading(false);
       setSimulationProgress(100);
       setActiveStep("success");
+    } else if (tStatus === "requires_manual_review" || tStatus === "failed") {
+      setIsAutomatingLoading(false);
+      setActiveStep("tracking");
     }
   }, [ticketId, tickets, activeStep, liveTicket]);
 
