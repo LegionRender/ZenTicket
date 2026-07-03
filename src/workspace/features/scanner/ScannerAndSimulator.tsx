@@ -2276,6 +2276,26 @@ export default function ScannerAndSimulator({
       }
     } else {
       // Standard generic merchant validations
+      const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(fiscalProfile?.rfc || "");
+      if (!isRfcReceptorValid) {
+        const val = (customProfileFields.rfcReceptor || "").trim().toUpperCase();
+        const validFormat = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(val);
+        if (!validFormat) {
+          setValidationError("El RFC del receptor no tiene un formato válido ante el SAT.");
+          return;
+        }
+        // Save to fiscalProfile
+        const updatedProfile = { ...fiscalProfile, rfc: val };
+        if (onSaveProfile) {
+          try {
+            await onSaveProfile(updatedProfile);
+            toast.success("Se actualizó tu RFC receptor en tu perfil fiscal.");
+          } catch (e) {
+            console.error("Error saving updated profile RFC:", e);
+          }
+        }
+      }
+
       if (!editRfc.trim()) {
         setValidationError("El RFC del emisor es obligatorio.");
         return;
@@ -3812,6 +3832,27 @@ return list.map(n => {
                                 className={getInputClass(isRfcInvalid, false, true)}
                               />
                             </div>
+
+                            {/* RFC Receptor (Tú) */}
+                            {!/^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(fiscalProfile?.rfc || "") && (
+                              <div>
+                                <div className="flex justify-between items-center mb-1.5">
+                                  <label className="text-[9px] text-[#0B53F4] font-black uppercase tracking-wider block">RFC del Receptor (Tú) *</label>
+                                  <span className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                                    ⚠️ Requerido
+                                  </span>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={customProfileFields.rfcReceptor || ""}
+                                  onChange={(e) => setCustomProfileFields({ ...customProfileFields, rfcReceptor: e.target.value })}
+                                  placeholder="Ej. GORL940812S1A"
+                                  maxLength={13}
+                                  className={getInputClass(!/^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(customProfileFields.rfcReceptor || ""), correctionError?.fieldToCorrect === "rfcReceptor", true)}
+                                  autoFocus={correctionError?.fieldToCorrect === "rfcReceptor"}
+                                />
+                              </div>
+                            )}
 
                             {/* Fecha Compra */}
                             <div>

@@ -227,8 +227,8 @@ export const Dashboard = () => {
           return {
             ...parsed,
             userId: parsed.userId || user.uid,
-            rfc: isMockRfc ? "" : (parsed.rfc || ""),
-            razonSocial: isMockName ? (user.displayName || "") : (parsed.razonSocial || user.displayName || ""),
+            rfc: (isMockRfc && !isAdminEmailProfile) ? "" : (parsed.rfc || ""),
+            razonSocial: (isMockName && !isAdminEmailProfile) ? (user.displayName || "") : (parsed.razonSocial || user.displayName || ""),
             correoElectronico: parsed.correoElectronico || user.email || "",
             correoRecepcion: parsed.correoRecepcion || user.email || "",
             correoPago: parsed.correoPago || user.email || "",
