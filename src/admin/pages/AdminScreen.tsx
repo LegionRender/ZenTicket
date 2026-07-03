@@ -143,6 +143,13 @@ export default function AdminScreen({
   const [activeTrainings, setActiveTrainings] = useState<any[]>([]);
   const [ocrJobs, setOcrJobs] = useState<any[]>([]);
   const [ocrAlerts, setOcrAlerts] = useState<any[]>([]);
+  const [selectedConnId, setSelectedConnId] = useState("");
+  const [officialUrl, setOfficialUrl] = useState("");
+  const [htmlContent, setHtmlContent] = useState("");
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryResult, setDiscoveryResult] = useState<any | null>(null);
+  const [reviewContractChecked, setReviewContractChecked] = useState(false);
+  const [reviewStepsChecked, setReviewStepsChecked] = useState(false);
 
   // Real tickets tracker state for testers
   const [invoiceJobs, setInvoiceJobs] = useState<any[]>([]);
@@ -349,32 +356,150 @@ export default function AdminScreen({
 
 
 
-  // Handle learn new portal
-  const handleLearnSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newNombre.trim()) {
-      toast.error("Proporciona el nombre de la empresa para iniciar el modelado IA.", "Nombre Requerido");
+  const handleStartDiscovery = async () => {
+    if (!officialUrl.trim() || !officialUrl.startsWith("http")) {
+      toast.error("Proporciona una URL válida del portal (http:// o https://).", "URL Requerida");
       return;
     }
-    const cleanRfc = newRfc.trim().toUpperCase();
-    if (cleanRfc && (cleanRfc.length < 12 || cleanRfc.length > 13)) {
-      toast.error("El RFC proporcionado debe contener entre 12 y 13 dígitos.", "RFC Inválido");
+    setDiscoveryLoading(true);
+    setDiscoveryResult(null);
+    setReviewContractChecked(false);
+    setReviewStepsChecked(false);
+    try {
+      const res = await fetch("/api/admin/discover-portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ officialBillingUrl: officialUrl.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Fallo en descubrimiento");
+      setDiscoveryResult(data);
+      toast.success("Descubrimiento de portal por Playwright finalizado con éxito.", "Discovery Completado");
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Error durante el descubrimiento: " + e.message, "Error");
+    } finally {
+      setDiscoveryLoading(false);
+    }
+  };
+
+  const handleAnalyzeHtml = async () => {
+    if (!htmlContent.trim()) {
+      toast.error("Pega el código HTML del formulario para poder analizarlo.", "HTML Requerido");
+      return;
+    }
+    setDiscoveryLoading(true);
+    setDiscoveryResult(null);
+    setReviewContractChecked(false);
+    setReviewStepsChecked(false);
+    try {
+      const res = await fetch("/api/admin/analyze-html", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ htmlContent: htmlContent.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Fallo en análisis");
+      setDiscoveryResult(data);
+      toast.success("Análisis del HTML completado con éxito.", "Análisis Completado");
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Error durante el análisis: " + e.message, "Error");
+    } finally {
+      setDiscoveryLoading(false);
+    }
+  };
+
+  const handleSaveDiscovery = async () => {
+    if (!selectedConnId) {
+      toast.error("Selecciona un conector/comercio para guardar el mapeo.", "Conector Requerido");
+      return;
+    }
+    if (!discoveryResult) return;
+    if (!reviewContractChecked || !reviewStepsChecked) {
+      toast.error("Debes revisar y marcar que has verificado el contrato y los pasos.", "Revisión Obligatoria");
       return;
     }
 
     try {
-      await onLearnConnector(newNombre.trim(), cleanRfc, tokenSaver);
-      toast.success(
-        `¡Portal '${newNombre}' mapeado exitosamente! Se han programado selectores dinámicos de facturación.`,
-        "Entrenamiento Exitoso"
-      );
-      setNewNombre("");
-      setNewRfc("");
-    } catch (err: any) {
-      if (err.message === "PROCESO_CANCELADO_POR_USUARIO") {
-        return;
+      const connRef = doc(db, "connectors", selectedConnId);
+      const contract = discoveryResult.suggestedExtractionContract;
+      
+      const fields = contract.requiredPortalFields.map((f: any) => ({
+        key: f.canonicalKey,
+        name: f.label,
+        selector: "input",
+        type: f.type === "number" ? "number" : "text",
+        required: f.required !== false,
+        source: "ticket"
+      }));
+
+      await updateDoc(connRef, {
+        extractionContract: contract,
+        fieldsJson: JSON.stringify(fields),
+        status: "automation_pending_setup",
+        updatedAt: new Date().toISOString()
+      });
+
+      const portalMapsRef = collection(db, "portal_maps");
+      const q = query(portalMapsRef, where("connectorId", "==", selectedConnId));
+      const qSnap = await getDocs(q);
+
+      const reqFieldsList = contract.requiredPortalFields.map((f: any) => ({
+        key: f.key,
+        label: f.label,
+        source: "portalFields",
+        required: f.required !== false,
+        userEditable: true
+      }));
+
+      const fiscalKeys = ["rfc", "businessName", "postalCode", "taxRegime", "cfdiUse", "email"];
+      fiscalKeys.forEach(k => {
+        const matched = contract.fiscalFields?.find((f: any) => f.key.endsWith("." + k));
+        reqFieldsList.push({
+          key: matched?.key || `fiscalProfile.${k}`,
+          label: matched?.label || k,
+          source: "fiscalProfile",
+          required: true,
+          userEditable: true
+        });
+      });
+
+      const portalMapData = {
+        connectorId: selectedConnId,
+        entryUrl: officialUrl || "",
+        url: officialUrl || "",
+        requiredFields: reqFieldsList,
+        fiscalFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"],
+        captchaSelectorsJson: JSON.stringify(["iframe[src*='recaptcha']", ".g-recaptcha", "#captcha"]),
+        errorSelectorsJson: JSON.stringify([".swal-text", ".alert-danger", "#error-msg", ".text-danger"]),
+        successSelectorsJson: JSON.stringify([".success-msg", "#download-area"]),
+        downloadRulesJson: JSON.stringify({ xmlRequired: true, pdfRequired: false }),
+        stepsJson: discoveryResult.suggestedStepsJson,
+        isApproved: false,
+        status: "pending_approval",
+        updatedAt: new Date().toISOString()
+      };
+
+      if (!qSnap.empty) {
+        await updateDoc(doc(db, "portal_maps", qSnap.docs[0].id), {
+          ...portalMapData
+        });
+      } else {
+        await addDoc(portalMapsRef, {
+          ...portalMapData,
+          createdAt: new Date().toISOString()
+        });
       }
-      toast.error(err.message || "No se pudo entrenar la IA para este portal.", "Error de Aprendizaje");
+
+      toast.success("Contrato de extracción y portalMap guardados con éxito en Firestore.", "Guardado Correctamente");
+      setDiscoveryResult(null);
+      setOfficialUrl("");
+      setHtmlContent("");
+      setSelectedConnId("");
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Error al guardar la especificación: " + e.message, "Error");
     }
   };
 
@@ -1401,137 +1526,174 @@ export default function AdminScreen({
           <div className="absolute top-0 right-0 w-32 h-32 bg-[#0B53F4]/5 rounded-full blur-2xl pointer-events-none" />
           
           <div>
-            {/* Rounded interactive floating badge matching the picture */}
             <div className="flex gap-4 items-start pb-5">
               <div className="w-12 h-12 rounded-full bg-[#0B53F4]/10 border border-[#0B53F4]/15 flex items-center justify-center text-[#0B53F4] shrink-0">
                 <Brain className="w-6 h-6 stroke-[2.3]" />
               </div>
               <div className="text-left leading-tight">
-                <h3 className="text-base font-black text-slate-9 tracking-tight">Aprender Portal con IA</h3>
-                <p className="text-xs text-slate-450 mt-1">Registra y entrena nuevas integraciones con el poder de la IA</p>
+                <h3 className="text-base font-black text-slate-9 tracking-tight">Discovery de Portales Real</h3>
+                <p className="text-xs text-slate-450 mt-1">Inspecciona y mapea el DOM real del portal con Playwright + Gemini</p>
               </div>
             </div>
 
-            <form onSubmit={handleLearnSubmit} className="space-y-4">
-              <div className="space-y-1">
+            <div className="space-y-4">
+              <div className="space-y-1 text-left">
                 <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-                  Nombre de la empresa
+                  1. Comercio a entrenar
+                </label>
+                <select
+                  value={selectedConnId}
+                  onChange={(e) => {
+                    setSelectedConnId(e.target.value);
+                    const selectedConn = connectors.find(c => c.id === e.target.value);
+                    if (selectedConn && selectedConn.portalUrl) {
+                      setOfficialUrl(selectedConn.portalUrl);
+                    }
+                  }}
+                  className="w-full text-sm font-semibold bg-[#F1F3FE]/70 border border-slate-200/40 hover:bg-[#F1F3FE] focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-slate-800 focus:outline-none transition-all"
+                >
+                  <option value="">-- Selecciona un comercio --</option>
+                  {connectors
+                    .filter(c => c.status === "automation_pending_setup" || c.status === "mock_only")
+                    .map(c => (
+                      <option key={c.id} value={c.id}>{c.nombre} ({c.rfc || "Sin RFC"})</option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="space-y-1 text-left">
+                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+                  2. URL oficial del portal
                 </label>
                 <input
                   type="text"
-                  required
-                  value={newNombre}
-                  onChange={(e) => setNewNombre(e.target.value)}
-                  placeholder="Costco, Starbucks, Amazon..."
+                  value={officialUrl}
+                  onChange={(e) => setOfficialUrl(e.target.value)}
+                  placeholder="https://..."
                   className="w-full text-sm font-medium bg-[#F1F3FE]/70 border border-slate-200/40 hover:bg-[#F1F3FE] focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-slate-800 placeholder-slate-400 focus:outline-none transition-all"
                 />
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-1 text-left">
                 <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-                  RFC Emisor (Opcional)
+                  3. Código HTML del portal (Auxiliar / Opcional)
                 </label>
-                <input
-                  type="text"
-                  maxLength={13}
-                  value={newRfc}
-                  onChange={(e) => setNewRfc(e.target.value.toUpperCase())}
-                  placeholder="ABCD123456XYZ"
-                  className="w-full text-sm font-mono font-bold bg-[#F1F3FE]/70 border border-slate-200/40 hover:bg-[#F1F3FE] focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-slate-800 placeholder-slate-400 focus:outline-none transition-all uppercase"
+                <textarea
+                  value={htmlContent}
+                  onChange={(e) => setHtmlContent(e.target.value)}
+                  placeholder="Pega el código HTML del portal aquí para análisis directo..."
+                  rows={3}
+                  className="w-full text-xs font-mono bg-[#F1F3FE]/70 border border-slate-200/40 hover:bg-[#F1F3FE] focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 placeholder-slate-400 focus:outline-none transition-all"
                 />
               </div>
 
-              <div className="bg-slate-50 border border-slate-200/50 rounded-2xl p-3.5 flex items-start gap-2.5 transition-all text-left">
-                <input
-                  type="checkbox"
-                  id="tokenSaverChecked"
-                  checked={tokenSaver}
-                  onChange={(e) => setTokenSaver(e.target.checked)}
-                  className="mt-1 w-4 h-4 rounded border-slate-300 text-[#0B53F4] focus:ring-[#0B53F4] accent-[#0B53F4]"
-                />
-                <label htmlFor="tokenSaverChecked" className="cursor-pointer text-xs select-none">
-                  <span className="block font-black text-slate-700">Ahorro de Tokens (Modo ECO)</span>
-                  <span className="block text-[11px] text-slate-400 mt-0.5 leading-normal">Optimiza drásticamente las consultas redundantes y restringe el uso de tokens de razonamiento pesado en la API de Gemini.</span>
-                </label>
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  disabled={discoveryLoading || !officialUrl}
+                  onClick={handleStartDiscovery}
+                  className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-55 text-white font-black text-xs py-3.5 rounded-2xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#0B53F4]/15 active:scale-[0.98] select-none border-none outline-none"
+                >
+                  {discoveryLoading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 text-white" />
+                      <span>Descubriendo DOM...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5 text-white fill-white shrink-0" />
+                      <span>Descubrir Portal</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={discoveryLoading || !htmlContent}
+                  onClick={handleAnalyzeHtml}
+                  className="w-full bg-slate-100 hover:bg-slate-200 disabled:opacity-55 text-slate-700 font-black text-xs py-3.5 rounded-2xl transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98] select-none border-none outline-none"
+                >
+                  <span>Analizar HTML</span>
+                </button>
               </div>
 
-              <button
-                type="submit"
-                disabled={isLearningLoading}
-                className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-55 text-white font-black text-sm py-4 rounded-2xl transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-[#0B53F4]/15 active:scale-[0.98] select-none"
-              >
-                {isLearningLoading ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin shrink-0 text-white" />
-                    <span>Mapeando Selectores...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4 text-white fill-white shrink-0" />
-                    <span>Aprender Portal</span>
-                  </>
-                )}
-              </button>
+              {discoveryResult && (
+                <div className="border border-slate-150 rounded-2xl p-4 bg-slate-50 text-left space-y-4 text-xs font-sans">
+                  <span className="block text-[10px] font-black text-[#0B53F4] uppercase tracking-wider font-mono">
+                    Resultado del Análisis IA
+                  </span>
 
-              {isLearningLoading && (
-                <div className={`mt-4 border p-4.5 rounded-2xl transition-all duration-300 text-left space-y-3 ${
-                  learningProgress >= 65
-                    ? "bg-amber-500/10 border-amber-300 text-amber-900"
-                    : "bg-blue-50/50 border-blue-100 text-[#0E1629]"
-                }`}>
-                  <div className="flex justify-between items-center">
-                    <span className={`text-[10px] font-black uppercase tracking-wider font-mono px-2 py-0.5 rounded-md ${
-                      learningProgress >= 65 ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-[#0B53F4]"
-                    }`}>
-                      {learningProgress >= 65 ? "Complicación detectada / Optimización" : "Procesando Portal..."}
-                    </span>
-                    <span className="text-xs font-black font-mono">
-                      {learningProgress}%
-                    </span>
-                  </div>
-
-                  {/* Progress Bar Container */}
-                  <div className="w-full bg-slate-200/60 h-2 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full transition-all duration-300 ease-out ${
-                        learningProgress >= 65 ? "bg-amber-500" : "bg-[#0B53F4]"
-                      }`}
-                      style={{ width: `${learningProgress}%` }}
-                    />
-                  </div>
-
-                  {/* Company & Status Label info */}
-                  <div className="text-xs space-y-1 font-sans">
-                    <div className="font-extrabold text-slate-705">
-                      Portal: <span className="text-slate-900 font-black">{learningCompany || "Portal..."}</span>
-                    </div>
-                    <div className="text-[11px] text-slate-450 leading-relaxed font-mono flex items-center gap-1.5">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 text-[#0B53F4]" />
-                      <span>{learningStatus || "Inicializando analizador AI..."}</span>
-                    </div>
-                  </div>
-
-                  {/* High-visibility complication alert text */}
-                  {learningProgress >= 65 && (
-                    <div className="text-[11px] bg-white/80 p-3 border border-amber-200 rounded-xl leading-relaxed text-amber-800 font-sans shadow-4xs">
-                      <span className="font-bold">⚠️ Complicaciones en el portal:</span> El emisor presenta esquemas complejos de validación o el tiempo de respuesta está demorando. Optimizando análisis con heurísticas alternativas para evitar rebasar límites de tokens.
+                  {discoveryResult.screenshot && (
+                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-4xs bg-white">
+                      <span className="block text-[8.5px] uppercase font-black text-slate-400 p-2 border-b border-slate-100 bg-slate-50">Evidencia de Captura</span>
+                      <img src={discoveryResult.screenshot} alt="Visual" className="w-full max-h-40 object-cover" />
                     </div>
                   )}
 
-                  {/* Cancellation button capsule */}
-                  <div className="pt-2">
-                    <button
-                      type="button"
-                      onClick={onCancelLearning}
-                      className="w-full bg-white hover:bg-slate-50 border border-slate-250 text-slate-700 font-extrabold text-xs py-2.5 rounded-xl uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-[0.98] shadow-3xs"
-                    >
-                      <X className="w-4 h-4 shrink-0 text-slate-500" />
-                      <span>Cancelar Entrenamiento</span>
-                    </button>
+                  {discoveryResult.warnings && discoveryResult.warnings.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 space-y-1 text-[11px] leading-tight">
+                      <span className="font-bold block">Advertencias del portal:</span>
+                      <ul className="list-disc pl-4 space-y-0.5">
+                        {discoveryResult.warnings.map((w: string, idx: number) => (
+                          <li key={idx}>{w}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <span className="font-bold text-slate-600 block">Campos Requeridos Sugeridos:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {discoveryResult.suggestedExtractionContract.requiredPortalFields.map((f: any) => (
+                        <span key={f.key} className="px-2.5 py-1 text-[10px] font-bold bg-white border border-slate-200 text-slate-700 rounded-lg shadow-4xs">
+                          {f.label} ({f.canonicalKey})
+                        </span>
+                      ))}
+                    </div>
                   </div>
+
+                  <div className="space-y-1">
+                    <span className="font-bold text-slate-600 block">Pasos de Navegación Playwright:</span>
+                    <pre className="p-3 bg-white border border-slate-200 rounded-xl text-[10px] font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap leading-relaxed shadow-4xs">
+                      {JSON.stringify(JSON.parse(discoveryResult.suggestedStepsJson), null, 2)}
+                    </pre>
+                  </div>
+
+                  <div className="border-t border-slate-200 pt-3 space-y-2">
+                    <span className="font-bold text-slate-600 block">Verificación y Aprobación Obligatoria:</span>
+                    <div className="space-y-2">
+                      <label className="flex items-start gap-2.5 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={reviewContractChecked}
+                          onChange={(e) => setReviewContractChecked(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 text-[#0B53F4]"
+                        />
+                        <span className="leading-tight font-semibold text-[11.5px]">He revisado el contrato de extracción propuesto y confirmo que coincide con el portal oficial.</span>
+                      </label>
+                      
+                      <label className="flex items-start gap-2.5 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={reviewStepsChecked}
+                          onChange={(e) => setReviewStepsChecked(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 text-[#0B53F4]"
+                        />
+                        <span className="leading-tight font-semibold text-[11.5px]">He revisado los pasos Playwright de navegación y confirmo que son lógicos y seguros.</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveDiscovery}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3.5 rounded-2xl transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98] select-none border-none outline-none"
+                  >
+                    <span>Guardar y Habilitar como Pendiente</span>
+                  </button>
                 </div>
               )}
-            </form>
+            </div>
           </div>
         </div>
 

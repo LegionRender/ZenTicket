@@ -51,8 +51,10 @@ service cloud.firestore {
     // Path: connectors/{connectorId}
     match /connectors/{connectorId} {
       allow read: if isSignedIn();
-      allow create, update: if (isSignedIn() 
-        && (request.resource.data.userId == request.auth.uid || request.resource.data.userId == "system")) || isAdmin();
+      allow create: if (isSignedIn() && request.resource.data.userId == request.auth.uid) || isAdmin();
+      allow update: if (isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid) || isAdmin();
       allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
     }
 

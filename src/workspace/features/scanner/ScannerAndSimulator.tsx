@@ -18,6 +18,7 @@ import { useAuth } from "@/auth/context/AuthContext";
 import logoLight from "@/assets/logos/logo-light.png";
 import logoDark from "@/assets/logos/logo-dark.png";
 import { sanitizeBillingReferenceForConnector } from "@/shared/utils/validation";
+import { buildPortalFieldsSnapshot, hasUsableExtractionContract, validatePortalFields } from "@/shared/utils/extraction-contract";
 
 export interface CorrectionError {
   reasonCode: "MISSING_FOLIO" | "MISSING_DATE" | "MISSING_TOTAL" | "MISSING_MERCHANT" | "PORTAL_REJECTED_FOLIO" | "PORTAL_REJECTED_DATE" | "PORTAL_REJECTED_TOTAL" | "PORTAL_REJECTED_RFC" | "LOW_IMAGE_QUALITY_CRITICAL";
@@ -183,15 +184,6 @@ function sanitizePortalFieldsForConnector(
   // Call the central sanitization function
   billingRef = sanitizeBillingReferenceForConnector(billingRef, ocrText, connector);
 
-  // Attempt to extract reference from rawOcrText for Farmacias Similares if not found
-  if (!billingRef && ocrText) {
-    // Similares references are 12-digit numeric sequences
-    const matches = ocrText.match(/\b\d{12}\b/g);
-    if (matches && matches.length > 0) {
-      billingRef = matches[0];
-    }
-  }
-
   const total = parseFloat(String(detectedData.total || 0));
   const date = detectedData.fechaCompra || detectedData.date || "";
   const ticketNumber = billingRef;
@@ -244,13 +236,11 @@ function validatePortalFieldsAgainstPortalMap(
       if (!pFields.date || !pFields.date.trim()) {
         missingFields.push("portalFields.date");
       }
-    }
-  }
-
-  // Also enforce basic billingReference check for Similares if not explicitly listed
-  if (!pFields.billingReference || !pFields.billingReference.trim()) {
-    if (!missingFields.includes("portalFields.billingReference")) {
-      missingFields.push("portalFields.billingReference");
+    } else if (fieldKey.startsWith("portalFields.")) {
+      const key = fieldKey.replace("portalFields.", "");
+      if (pFields[key] === undefined || pFields[key] === null || (typeof pFields[key] === "string" && !pFields[key].trim())) {
+        missingFields.push(fieldKey);
+      }
     }
   }
 
@@ -665,7 +655,10 @@ export default function ScannerAndSimulator({
     const tRfc = (tEmisorRfc || "").toLowerCase().trim();
     const tNombre = cleanStr(tEmisorName || "");
 
-    const found = connectors.find((c) => {
+    const candidates = connectors.filter((c) => {
+      // Filter out disabled/duplicate mock connectors
+      if (c.status === "disabled" || c.disabledReason === "DUPLICATE_MOCK_CONNECTOR") return false;
+
       // 1. Match by RFC
       const cRfc = (c.rfc || "").toLowerCase().trim();
       if (tRfc && cRfc && tRfc === cRfc) return true;
@@ -700,7 +693,34 @@ export default function ScannerAndSimulator({
       return false;
     });
 
-    return found || null;
+    if (candidates.length === 0) return null;
+
+    // Prioritized Sorting
+    candidates.sort((a, b) => {
+      const aProd = a.status === "production_ready" ? 1 : 0;
+      const bProd = b.status === "production_ready" ? 1 : 0;
+      if (aProd !== bProd) return bProd - aProd;
+
+      const aAvail = (a.status === "automation_available" || a.status === "real_validation") ? 1 : 0;
+      const bAvail = (b.status === "automation_available" || b.status === "real_validation") ? 1 : 0;
+      if (aAvail !== bAvail) return bAvail - aAvail;
+
+      const aSys = a.userId === "system" ? 1 : 0;
+      const bSys = b.userId === "system" ? 1 : 0;
+      if (aSys !== bSys) return bSys - aSys;
+
+      const aMock = (a.status === "mock_only" || a.isMock === true) ? 1 : 0;
+      const bMock = (b.status === "mock_only" || b.isMock === true) ? 1 : 0;
+      if (aMock !== bMock) return aMock - bMock; // prefer non-mock (0) over mock (1)
+
+      const aContract = (a.extractionContract && a.extractionContract.requiredPortalFields && a.extractionContract.requiredPortalFields.length > 0) ? 1 : 0;
+      const bContract = (b.extractionContract && b.extractionContract.requiredPortalFields && b.extractionContract.requiredPortalFields.length > 0) ? 1 : 0;
+      if (aContract !== bContract) return bContract - aContract;
+
+      return 0;
+    });
+
+    return candidates[0];
   };
 
   // Preload a ticket if triggered from tickets screen
@@ -1199,6 +1219,7 @@ export default function ScannerAndSimulator({
 
   const tryAutoEnqueueBatchTicket = async (ticketId: string, ocrResult: any, foundConnector: any) => {
     if (!foundConnector) return false;
+    if (!hasUsableExtractionContract(foundConnector.extractionContract)) return false;
     if (foundConnector.runnerAvailable !== true || foundConnector.status === "automation_pending_setup") {
       return false;
     }
@@ -1209,13 +1230,9 @@ export default function ScannerAndSimulator({
       if (pMapsSnap.empty) return false;
       
       const pMap = pMapsSnap.docs[0].data();
-      const pFields = sanitizePortalFieldsForConnector(foundConnector, ocrResult, ocrResult.rawOcrText);
-      
-      const validationResult = validatePortalFieldsAgainstPortalMap(
-        { ...ocrResult, portalFields: pFields },
-        { ...pMap, id: pMapsSnap.docs[0].id }
-      );
-      const missingFields = [...validationResult.missingFields];
+      const pFields = ocrResult.portalFields || {};
+      const validationResult = validatePortalFields(foundConnector.extractionContract, pFields);
+      const missingFields = [...validationResult.missingFields, ...validationResult.invalidFields];
       
       if (!fiscalProfile || !fiscalProfile.userId) return false;
       if (!fiscalProfile.rfc || !fiscalProfile.rfc.trim()) return false;
@@ -1231,14 +1248,9 @@ export default function ScannerAndSimulator({
       
       const ticketDataSnapshot = {
         merchantName: ocrResult.nombreEmisor || "",
-        billingReference: pFields.billingReference || ocrResult.folio || "",
-        total: parseFloat(pFields.total || ocrResult.total || 0),
-        ticketNumber: pFields.ticketNumber || ocrResult.folio || "",
-        date: pFields.date || ocrResult.fechaCompra || "",
-        barcode: ocrResult.barcode || "",
+        portalFields: buildPortalFieldsSnapshot(foundConnector.extractionContract, pFields),
+        expectedTicketTotal: Number(ocrResult.total || 0),
         rawOcrText: ocrResult.rawOcrText || "",
-        folio: pFields.billingReference || ocrResult.folio || "",
-        fechaCompra: pFields.date || ocrResult.fechaCompra || "",
       };
       
       const fiscalProfileSnapshot = {
@@ -1742,23 +1754,20 @@ export default function ScannerAndSimulator({
   };
 
   const ensureTrainingRequest = async (ocrResult: any, foundConnector: any, tId: string | null) => {
-    if (foundConnector && (foundConnector.runnerAvailable === false || foundConnector.status === "automation_pending_setup")) {
+    if (!foundConnector || foundConnector.runnerAvailable === false || foundConnector.status === "automation_pending_setup") {
       try {
-        const reqRef = doc(db, "training_requests", foundConnector.id);
+        const requestId = `${user?.uid || "guest"}_${tId || "unknown"}`;
+        const reqRef = doc(db, "training_requests", requestId);
+        const existingRequest = await getDoc(reqRef);
+        if (existingRequest.exists()) return;
         await setDoc(reqRef, {
           userId: user?.uid || "guest",
-          ticketId: tId || null,
-          connectorId: foundConnector.id,
-          storeName: foundConnector.nombre,
-          rfcEmisor: foundConnector.rfc || "",
-          rawOcrText: ocrResult.rawOcrText || "",
-          ticketImagePath: null,
-          status: "pending_runner_setup",
-          reason: "CONNECTOR_RUNNER_NOT_AVAILABLE",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-        console.log(`[Training Request] Created/Updated for connector: ${foundConnector.nombre}`);
+          storeName: foundConnector?.nombre || ocrResult?.nombreEmisor || "Comercio por identificar",
+          rfc: foundConnector?.rfc || ocrResult?.rfcEmisor || "",
+          officialBillingUrl: foundConnector?.portalUrl || "",
+          createdAt: new Date().toISOString()
+        });
+        console.log(`[Training Request] Created for: ${foundConnector?.nombre || ocrResult?.nombreEmisor}`);
       } catch (e) {
         console.warn("Could not save training request:", e);
       }
@@ -1902,6 +1911,7 @@ export default function ScannerAndSimulator({
 
       if (!activeConn) {
         await addLog("❌ Error: No se localizó un conector automático para este comercio.", 1000);
+        await ensureTrainingRequest(activeExtractedData, null, activeTicketId);
         
         const reviewErr: ReviewError = {
           reviewReasonCode: "CONNECTOR_NOT_FOUND",
@@ -1927,13 +1937,9 @@ export default function ScannerAndSimulator({
 
       // Scheme validation
       let flowSteps = [];
-      if (!activeConn.extractionContract) {
+      if (!hasUsableExtractionContract(activeConn.extractionContract)) {
         try {
-          const hasInvalidField = fieldsSchema.some((f: any) => !f.key || !f.name || !f.selector || !f.type || f.required === undefined);
-          if (hasInvalidField) {
-            throw new Error("Esquema de campos inválido: Falta key, name, selector o type en uno de los campos.");
-          }
-          flowSteps = JSON.parse(activeConn.flowJson || "[]");
+          throw new Error("El conector no tiene un extractionContract aprobado con campos reales del portal.");
         } catch (e: any) {
           const schemaErr: ReviewError = {
             reviewReasonCode: "CONNECTOR_SCHEMA_INVALID",
@@ -2068,7 +2074,7 @@ export default function ScannerAndSimulator({
       await addAutomationEvent("connector_resolving", "success", `Portal oficial de facturación del comercio identificado como: ${activeConn.nombre}`);
       await addLog(`✅ Mapa de navegación verificado y aprobado.`, 400);
 
-      // GUARDA PORTAL FIELDS EN FIRESTORE ANTES DE LEER TICKET
+      // portalFields must already come from contract-directed OCR or explicit user input.
       const ticketDocRef = doc(db, "tickets", activeTicketId);
       const currentTicketDoc = await getDoc(ticketDocRef);
       if (!currentTicketDoc.exists()) {
@@ -2076,24 +2082,7 @@ export default function ScannerAndSimulator({
       }
       const currentTicketData = currentTicketDoc.data();
       
-      let pFields = currentTicketData.portalFields;
-      if (!pFields) {
-        const sanitized = sanitizePortalFieldsForConnector(activeConn, {
-          billingReference: activeExtractedData.folio,
-          total: activeExtractedData.total,
-          fechaCompra: activeExtractedData.fechaCompra
-        }, currentTicketData.rawOcrText);
-
-        pFields = {
-          billingReference: sanitized.billingReference || "",
-          total: sanitized.total || 0,
-          ticketNumber: sanitized.billingReference || "",
-          date: sanitized.date || ""
-        };
-        await updateDoc(ticketDocRef, {
-          portalFields: pFields
-        });
-      }
+      let pFields = currentTicketData.portalFields || {};
 
       // LEER DE NUEVO TICKET DESDE FIRESTORE (Snapshot real e inmutable)
       await addLog("⚙️ Validando campos persistidos en la base de datos (Firestore)...", 400);
@@ -2154,34 +2143,16 @@ export default function ScannerAndSimulator({
         return;
       }
 
-      // B) Get required fields for the initial stage (ScreenIndex 1 in screenOrder)
-      let initialRequiredFields: string[] = [];
       const contract = activeConn.extractionContract;
-      
-      if (contract && contract.screenOrder && contract.screenOrder.length > 0) {
-        const screen1 = contract.screenOrder.find((s: any) => s.screenIndex === 1);
-        if (screen1 && screen1.requiredFields) {
-          initialRequiredFields = [...screen1.requiredFields];
-        }
-      }
-      
-      // Default initial required fields if none found
-      if (initialRequiredFields.length === 0) {
-        initialRequiredFields = ["portalFields.billingReference"];
-      }
-
-      // Check which of the initial required fields are missing
-      let missingTicketFields: string[] = [];
+      const portalValidation = validatePortalFields(contract, pFields);
+      let missingTicketFields: string[] = [...portalValidation.missingFields, ...portalValidation.invalidFields];
       let missingFiscalFields: string[] = [];
+      const initialRequiredFields: string[] = Array.isArray(contract?.screenOrder)
+        ? (contract.screenOrder.find((s: any) => s.screenIndex === 1)?.requiredFields || [])
+        : [];
 
       for (const fieldKey of initialRequiredFields) {
-        if (fieldKey.startsWith("portalFields.")) {
-          const key = fieldKey.replace("portalFields.", "");
-          const val = pFields[key];
-          if (val === undefined || val === null || (typeof val === "string" && !val.trim()) || (typeof val === "number" && isNaN(val))) {
-            missingTicketFields.push(fieldKey);
-          }
-        } else if (fieldKey.startsWith("fiscalProfile.")) {
+        if (fieldKey.startsWith("fiscalProfile.")) {
           const k = fieldKey.replace("fiscalProfile.", "");
           let mappedKey = k;
           if (k === "rfc") mappedKey = "rfc";
@@ -2287,14 +2258,9 @@ export default function ScannerAndSimulator({
       await addLog("📥 Creando ticketDataSnapshot y fiscalProfileSnapshot...", 300);
       const ticketDataSnapshot = {
         merchantName: freshTicketData.nombreEmisor || "",
-        billingReference: pFields.billingReference || freshTicketData.folio || "",
-        total: parseFloat(pFields.total || freshTicketData.total || 0),
-        ticketNumber: pFields.ticketNumber || freshTicketData.folio || "",
-        date: pFields.date || freshTicketData.fechaCompra || "",
-        barcode: freshTicketData.barcode || "",
+        portalFields: buildPortalFieldsSnapshot(contract, pFields),
+        expectedTicketTotal: Number(freshTicketData.total || 0),
         rawOcrText: freshTicketData.rawOcrText || "",
-        folio: pFields.billingReference || freshTicketData.folio || "",
-        fechaCompra: pFields.date || freshTicketData.fechaCompra || "",
       };
 
       const fiscalProfileSnapshot: FiscalProfile = {
@@ -5084,9 +5050,16 @@ return list.map(n => {
                           : fieldKey === "fiscalProfile.taxRegime" ? "Régimen Fiscal Receptor"
                           : fieldKey === "fiscalProfile.cfdiUse" ? "Uso CFDI Receptor"
                           : fieldKey === "fiscalProfile.email" ? "Correo del Receptor" : fieldKey)
-                        : (fieldKey === "portalFields.billingReference" ? "Referencia del Ticket"
-                          : fieldKey === "portalFields.total" ? "Total del Ticket"
-                          : fieldKey === "portalFields.date" ? "Fecha del Ticket" : fieldKey);
+                        : (fieldKey === "portalFields.billingReference" ? "Referencia de Facturación"
+                          : fieldKey === "portalFields.total" ? "Total de la compra"
+                          : fieldKey === "portalFields.date" ? "Fecha del Ticket" 
+                          : fieldKey === "portalFields.branch" ? "Sucursal"
+                          : fieldKey === "portalFields.barcode" ? "Código de barras"
+                          : fieldKey === "portalFields.transactionNumber" ? "Número de transacción"
+                          : fieldKey === "portalFields.ticketNumber" ? "Número de ticket"
+                          : fieldKey === "portalFields.storeNumber" ? "Número de tienda"
+                          : fieldKey === "portalFields.purchaseTime" ? "Hora de compra"
+                          : fieldKey.replace("portalFields.", "").replace(/^\w/, (c) => c.toUpperCase()));
 
                       const inputType = (fieldKey === "portalFields.total") ? "number" : "text";
 

@@ -561,7 +561,9 @@ async function runSecondaryExtraction(
   connector: any,
   missingFieldKey: string
 ): Promise<string | null> {
+  if (!connector || !connector.extractionContract) return null;
   const contract = connector.extractionContract;
+  if (!contract.requiredPortalFields) return null;
   const field = contract.requiredPortalFields.find((f: any) => f.canonicalKey === missingFieldKey);
   if (!field) return null;
 
@@ -652,7 +654,10 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       const tRfc = (tEmisorRfc || "").toLowerCase().trim();
       const tNombre = cleanStr(tEmisorName || "");
 
-      const found = connectorsList.find((c) => {
+      const candidates = connectorsList.filter((c) => {
+        // Filter out disabled/duplicate mock connectors
+        if (c.status === "disabled" || c.disabledReason === "DUPLICATE_MOCK_CONNECTOR") return false;
+
         const cRfc = (c.rfc || "").toLowerCase().trim();
         if (tRfc && cRfc && tRfc === cRfc) return true;
 
@@ -676,7 +681,34 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         return false;
       });
 
-      return found || null;
+      if (candidates.length === 0) return null;
+
+      // Prioritized Sorting
+      candidates.sort((a, b) => {
+        const aProd = a.status === "production_ready" ? 1 : 0;
+        const bProd = b.status === "production_ready" ? 1 : 0;
+        if (aProd !== bProd) return bProd - aProd;
+
+        const aAvail = (a.status === "automation_available" || a.status === "real_validation") ? 1 : 0;
+        const bAvail = (b.status === "automation_available" || b.status === "real_validation") ? 1 : 0;
+        if (aAvail !== bAvail) return bAvail - aAvail;
+
+        const aSys = a.userId === "system" ? 1 : 0;
+        const bSys = b.userId === "system" ? 1 : 0;
+        if (aSys !== bSys) return bSys - aSys;
+
+        const aMock = (a.status === "mock_only" || a.isMock === true) ? 1 : 0;
+        const bMock = (b.status === "mock_only" || b.isMock === true) ? 1 : 0;
+        if (aMock !== bMock) return aMock - bMock; // prefer non-mock (0) over mock (1)
+
+        const aContract = (a.extractionContract && a.extractionContract.requiredPortalFields && a.extractionContract.requiredPortalFields.length > 0) ? 1 : 0;
+        const bContract = (b.extractionContract && b.extractionContract.requiredPortalFields && b.extractionContract.requiredPortalFields.length > 0) ? 1 : 0;
+        if (aContract !== bContract) return bContract - aContract;
+
+        return 0;
+      });
+
+      return candidates[0];
     }
 
     let textResult = "";
@@ -1963,6 +1995,247 @@ app.post("/api/connectors/learn", async (req: Request, res: Response): Promise<v
         rawCost: 0
       });
     }
+  }
+});
+
+app.post("/api/admin/discover-portal", async (req: Request, res: Response): Promise<void> => {
+  const { officialBillingUrl } = req.body;
+  const customKey = req.headers["x-gemini-api-key"] as string | undefined;
+
+  if (!officialBillingUrl) {
+    res.status(400).json({ error: "Falta la URL oficial de facturación (officialBillingUrl)." });
+    return;
+  }
+
+  console.log(`[Discover Portal] Starting Playwright discovery on: ${officialBillingUrl}`);
+  let browser = null;
+  try {
+    const { chromium } = require("playwright");
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(officialBillingUrl, { waitUntil: "load", timeout: 20000 });
+    
+    // Wait an extra 3 seconds for SPA elements
+    await page.waitForTimeout(3000);
+
+    const screenshotB64 = await page.screenshot({ encoding: "base64" });
+
+    // Extract DOM information
+    const discoveredElements = await page.evaluate(() => {
+      const inputs = Array.from(document.querySelectorAll("input, select, textarea, button")).map(el => {
+        let labelText = "";
+        if (el.id) {
+          const lbl = document.querySelector(`label[for="${el.id}"]`);
+          if (lbl) labelText = lbl.textContent?.trim() || "";
+        }
+        if (!labelText) {
+          const parentLbl = el.closest("label");
+          if (parentLbl) labelText = parentLbl.textContent?.trim() || "";
+        }
+        if (!labelText) {
+          labelText = el.getAttribute("placeholder") || el.getAttribute("aria-label") || "";
+        }
+        return {
+          tag: el.tagName.toLowerCase(),
+          id: el.id || "",
+          name: (el as any).name || "",
+          type: el.getAttribute("type") || "",
+          placeholder: el.getAttribute("placeholder") || "",
+          labelText: labelText.replace(/\s+/g, " ").trim(),
+          className: el.className || "",
+          value: (el as any).value || "",
+          options: el.tagName === "SELECT" ? Array.from((el as HTMLSelectElement).options).map(o => o.text.trim()) : []
+        };
+      });
+
+      // Get page title and basic text
+      const title = document.title;
+      const bodyText = document.body.innerText.substring(0, 1000).replace(/\s+/g, " ");
+
+      return { title, bodyText, inputs };
+    });
+
+    await browser.close();
+
+    // Call Gemini to analyze the DOM and suggest the extraction contract
+    const ai = getGeminiClient(customKey);
+    const geminiPrompt = `Analiza la estructura del portal de facturación y propón el extractionContract y stepsJson correspondientes.
+    
+    Título del portal: ${discoveredElements.title}
+    Muestra del texto del portal: ${discoveredElements.bodyText}
+    Elementos inputs/selects encontrados:
+    ${JSON.stringify(discoveredElements.inputs, null, 2)}
+
+    El extractionContract debe mapear únicamente los campos reales que el portal solicita en su primer formulario para identificar el ticket de consumo.
+    Campos permitidos en portalFields:
+    - billingReference (Referencia de facturación)
+    - total (Total de la compra)
+    - date (Fecha del ticket)
+    - ticketNumber (Número de ticket)
+    - storeNumber (Número de tienda)
+    - branch (Sucursal)
+    - barcode (Código de barras)
+    - transactionNumber (Número de transacción)
+    - purchaseTime (Hora de compra)
+
+    Devuelve un JSON estructurado con:
+    1. requiredPortalFields: array de campos del contrato (key, canonicalKey, label, type, hints, validationPattern, required: true/false, userEditable: true).
+    2. fiscalFields: array con los campos fiscales del receptor (rfc, businessName, postalCode, taxRegime, cfdiUse, email).
+    3. stepsJson: un array de pasos Playwright propuesto para interactuar con la página.
+    4. warnings: advertencias sobre CAPTCHAs, iframes o complejidad observada.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: geminiPrompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            requiredPortalFields: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  key: { type: "STRING" },
+                  canonicalKey: { type: "STRING" },
+                  label: { type: "STRING" },
+                  type: { type: "STRING" },
+                  hints: { type: "ARRAY", items: { type: "STRING" } },
+                  validationPattern: { type: "STRING" },
+                  required: { type: "BOOLEAN" },
+                  userEditable: { type: "BOOLEAN" }
+                },
+                required: ["key", "canonicalKey", "label", "type", "required"]
+              }
+            },
+            fiscalFields: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  key: { type: "STRING" },
+                  label: { type: "STRING" },
+                  required: { type: "BOOLEAN" }
+                }
+              }
+            },
+            stepsJson: { type: "STRING" },
+            warnings: { type: "ARRAY", items: { type: "STRING" } }
+          },
+          required: ["requiredPortalFields", "fiscalFields", "stepsJson", "warnings"]
+        }
+      }
+    });
+
+    const geminiResult = JSON.parse(response.text || "{}");
+
+    res.json({
+      success: true,
+      screenshot: `data:image/png;base64,${screenshotB64}`,
+      discoveredInputs: discoveredElements.inputs,
+      suggestedExtractionContract: {
+        requiredPortalFields: geminiResult.requiredPortalFields,
+        fiscalFields: geminiResult.fiscalFields,
+        screenOrder: [
+          { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: geminiResult.requiredPortalFields.map((f: any) => f.key) },
+          { screenIndex: 2, description: "Datos fiscales", requiredFields: geminiResult.fiscalFields.map((f: any) => f.key) }
+        ]
+      },
+      suggestedStepsJson: geminiResult.stepsJson,
+      warnings: geminiResult.warnings
+    });
+
+  } catch (err: any) {
+    if (browser) {
+      try { await browser.close(); } catch(e) {}
+    }
+    console.error("Playwright discovery failed:", err);
+    res.status(500).json({ error: "Fallo durante el descubrimiento con Playwright: " + err.message });
+  }
+});
+
+app.post("/api/admin/analyze-html", async (req: Request, res: Response): Promise<void> => {
+  const { htmlContent } = req.body;
+  const customKey = req.headers["x-gemini-api-key"] as string | undefined;
+
+  if (!htmlContent) {
+    res.status(400).json({ error: "Falta el contenido HTML (htmlContent)." });
+    return;
+  }
+
+  try {
+    const ai = getGeminiClient(customKey);
+    const geminiPrompt = `Analiza este fragmento HTML de un portal de facturación e identifica qué inputs y campos requiere para iniciar la facturación.
+    
+    HTML:
+    ${htmlContent.substring(0, 15000)}
+
+    Devuelve un JSON estructurado con requiredPortalFields, fiscalFields, stepsJson y warnings.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: geminiPrompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            requiredPortalFields: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  key: { type: "STRING" },
+                  canonicalKey: { type: "STRING" },
+                  label: { type: "STRING" },
+                  type: { type: "STRING" },
+                  hints: { type: "ARRAY", items: { type: "STRING" } },
+                  validationPattern: { type: "STRING" },
+                  required: { type: "BOOLEAN" },
+                  userEditable: { type: "BOOLEAN" }
+                },
+                required: ["key", "canonicalKey", "label", "type", "required"]
+              }
+            },
+            fiscalFields: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  key: { type: "STRING" },
+                  label: { type: "STRING" },
+                  required: { type: "BOOLEAN" }
+                }
+              }
+            },
+            stepsJson: { type: "STRING" },
+            warnings: { type: "ARRAY", items: { type: "STRING" } }
+          },
+          required: ["requiredPortalFields", "fiscalFields", "stepsJson", "warnings"]
+        }
+      }
+    });
+
+    const geminiResult = JSON.parse(response.text || "{}");
+
+    res.json({
+      success: true,
+      suggestedExtractionContract: {
+        requiredPortalFields: geminiResult.requiredPortalFields,
+        fiscalFields: geminiResult.fiscalFields,
+        screenOrder: [
+          { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: geminiResult.requiredPortalFields.map((f: any) => f.key) },
+          { screenIndex: 2, description: "Datos fiscales", requiredFields: geminiResult.fiscalFields.map((f: any) => f.key) }
+        ]
+      },
+      suggestedStepsJson: geminiResult.stepsJson,
+      warnings: [...geminiResult.warnings, "Análisis basado únicamente en HTML estático pegado. Se recomienda verificación Playwright."]
+    });
+
+  } catch (err: any) {
+    console.error("HTML analysis failed:", err);
+    res.status(500).json({ error: "Fallo durante el análisis del HTML: " + err.message });
   }
 });
 

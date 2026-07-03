@@ -1134,44 +1134,8 @@ export const Dashboard = () => {
 
   // Learn a new portal on-the-fly inside the Scanner multi-step loader
   const onLearnConnectorInline = async (nombre, rfc, learnedFrom = "automatizacion_ticket") => {
-    // Return a Promise that resolves to the newly created Connector object
-    const fields = [
-      { key: "rfc", name: "RFC Receptor", selector: "input#receptor_rfc", type: "text", required: true },
-      { key: "folio", name: "Código de Facturación", selector: "input#ticket_id_folio", type: "text", required: true },
-      { key: "total", name: "Total Facturado", selector: "input#total_amount_charge", type: "number", required: true },
-      { key: "fecha", name: "Fecha del Ticket", selector: "input#fecha_day", type: "date", required: true }
-    ];
-    const flow = [
-      "1. Acceder al portal remoto de facturación corporativa",
-      "2. Ingresar código de referencia y RFC de receptor",
-      "3. Configurar Uso de CFDI 4.0 seleccionado",
-      "4. Obtener CFDI oficial",
-      "5. Sincronizar comprobantes PDF y XML obtenidos"
-    ];
-
-    const newConnector = {
-      userId: user.uid,
-      nombre: nombre.toUpperCase(),
-      rfc: rfc.toUpperCase(),
-      portalUrl: `https://${nombre.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "")}.com.mx/facturacion`,
-      fieldsJson: JSON.stringify(fields),
-      flowJson: JSON.stringify(flow),
-      createdAt: new Date().toISOString(),
-      cost: 15.00,
-      rawCost: 0.12,
-      learnedFrom,
-      userName: fiscalProfile?.razonSocial || user?.displayName || "Usuario Integrado",
-      userEmail: user?.email || "usuario@mail.com"
-    };
-
-    const docRef = doc(collection(db, "connectors"));
-    await setDoc(docRef, newConnector);
-
-    // Refresh selectors
-    const updated = [...connectors, { id: docRef.id, ...newConnector }];
-    setConnectors(updated);
-
-    return { id: docRef.id, ...newConnector };
+    toast.error("El entrenamiento simulado ha sido desactivado. Se requiere un discovery real Playwright.");
+    throw new Error("El entrenamiento simulado ha sido desactivado. Se requiere un discovery real.");
   };
 
   // Administrative training cancellation
@@ -1182,89 +1146,12 @@ export const Dashboard = () => {
     setIsLearningLoading(false);
     setLearningStatus("");
     setLearningProgress(0);
-    toast.error("Entrenamiento IA abortado de forma administrativa por presupuesto.");
   };
 
   // Administrative dynamic portal trainer
   const onLearnConnector = async (nombre, rfc, tokenSaver = true) => {
-    setIsLearningLoading(true);
-    setLearningCompany(nombre);
-    setLearningProgress(0);
-    setLearningStatus("Iniciando motor cognitivo SAT...");
-
-    const trainingDocRef = doc(collection(db, "automation_trainings"));
-    await setDoc(trainingDocRef, {
-      userId: user.uid,
-      company: nombre.toUpperCase(),
-      progress: 0,
-      status: "Iniciando motor cognitivo SAT...",
-      userEmail: user?.email || "usuario@mail.com",
-      createdAt: new Date().toISOString()
-    });
-
-    const steps = [
-      { progress: 10, status: "Evaluando estructura del portal web..." },
-      { progress: 28, status: "Estructurando grafo de navegación Playwright..." },
-      { progress: 45, status: "Emparejando campos (RFC, Folio, Monto)..." },
-      { progress: 62, status: "Verificando CAPTCHAs y protecciones anti-bot..." },
-      { progress: 80, status: "Compilando conector robótico en formato JSON..." },
-      { progress: 95, status: "Registrando conector de forma global..." },
-      { progress: 100, status: "Sincronización completada con éxito." }
-    ];
-
-    try {
-      for (const step of steps) {
-        await new Promise((resolve) => {
-          learningTimeoutRef.current = setTimeout(resolve, tokenSaver ? 1200 : 700);
-        });
-        setLearningProgress(step.progress);
-        setLearningStatus(step.status);
-        await setDoc(trainingDocRef, {
-          progress: step.progress,
-          status: step.status
-        }, { merge: true });
-      }
-
-      const fields = [
-        { key: "rfc", name: "RFC Emisor", selector: "input[name='rfc_receptor']", type: "text", required: true },
-        { key: "folio", name: "Folio de Factura", selector: "input#folio_ticket", type: "text", required: true },
-        { key: "total", name: "Total Neto", selector: "input.amount_sub", type: "number", required: true },
-        { key: "fecha", name: "Fecha del Ticket", selector: "input#fecha_day", type: "date", required: true }
-      ];
-      const flow = [
-        "1. Navegar al dominio de autofactura",
-        "2. Identificar el ticket de consumo",
-        "3. Llenar los datos de receptor fiscal",
-        "4. Obtener CFDI",
-        "5. Descargar XML y representaciones visuales"
-      ];
-
-      const newConnector = {
-        userId: user.uid,
-        nombre: nombre.toUpperCase(),
-        rfc: rfc.toUpperCase(),
-        portalUrl: `https://${nombre.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "")}.com.mx/facturacion`,
-        fieldsJson: JSON.stringify(fields),
-        flowJson: JSON.stringify(flow),
-        createdAt: new Date().toISOString(),
-        cost: tokenSaver ? 12.50 : 25.00,
-        rawCost: tokenSaver ? 0.08 : 0.22,
-        learnedFrom: "portal_admin",
-        userName: fiscalProfile?.razonSocial || user?.displayName || "Usuario Integrado",
-        userEmail: user?.email || "usuario@mail.com"
-      };
-
-      const docRef = doc(collection(db, "connectors"));
-      await setDoc(docRef, newConnector);
-      toast.success(`Mapeador para ${nombre} entrenado y en operación SAT.`);
-    } catch (e) {
-      console.error(e);
-      toast.error("Error durante el flujo cognitivo de entrenamiento de campos.");
-    } finally {
-      setIsLearningLoading(false);
-      setLearningProgress(0);
-      setLearningStatus("");
-    }
+    toast.error("El entrenamiento simulado ha sido desactivado. Utiliza el módulo de Discovery Real en la Consola de Administración.");
+    setIsLearningLoading(false);
   };
 
   const onUpdateLearningBudgetLimit = async (newLimit) => {

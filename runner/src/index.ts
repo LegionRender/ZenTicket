@@ -8,6 +8,7 @@ import { lockJob } from "./jobs/lockJob";
 import { executePortalMap } from "./executor/executePortalMap";
 import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiXml";
 import { createRunnerLog, setActiveJobContext } from "./logging/createRunnerLog";
+import { validateJobContract } from "./validators/validateJobContract";
 
 const workerId = `worker-node-${process.pid}`;
 const serviceAccountPath = path.join(__dirname, "../../serviceAccountKey.json");
@@ -59,6 +60,14 @@ async function processJob(jobId: string) {
     if (!connector) {
       throw { message: "Datos del conector vacíos.", code: "CONNECTOR_NOT_FOUND" };
     }
+    const contractMissingFields = validateJobContract(connector, lockedJob.ticketDataSnapshot);
+    if (contractMissingFields.length > 0) {
+      throw {
+        message: `Faltan campos requeridos por el contrato: ${contractMissingFields.join(", ")}`,
+        code: "MISSING_REQUIRED_FIELDS",
+        missingFields: contractMissingFields
+      };
+    }
 
     // ----------------------------------------------------
     // FLOW A: Safe migration / retry for validating_sat
@@ -84,7 +93,7 @@ async function processJob(jobId: string) {
         xmlContent,
         connector.rfc,
         lockedJob.fiscalProfileSnapshot.rfc,
-        lockedJob.ticketDataSnapshot.total
+        lockedJob.ticketDataSnapshot.expectedTicketTotal
       );
 
       if (!xmlResult.isValid) {
@@ -147,13 +156,18 @@ async function processJob(jobId: string) {
     await createRunnerLog(jobId, ticketId, "INFO", "Iniciando descarga y navegación en el portal.");
 
     // 3. Fetch portalMap
-    const portalMapsSnap = await db.collection("portal_maps")
-      .where("connectorId", "==", lockedJob.connectorId)
-      .get();
-    if (portalMapsSnap.empty) {
+    if (!lockedJob.portalMapId) {
       throw { message: "Mapa de navegación no encontrado.", code: "PORTAL_MAP_NOT_FOUND" };
     }
-    const portalMap = portalMapsSnap.docs[0].data();
+    const portalMapDoc = await db.collection("portal_maps").doc(lockedJob.portalMapId).get();
+    if (!portalMapDoc.exists) throw { message: "Mapa de navegación no encontrado.", code: "PORTAL_MAP_NOT_FOUND" };
+    const portalMap = portalMapDoc.data();
+    if (!portalMap || portalMap.connectorId !== lockedJob.connectorId) {
+      throw { message: "El mapa no pertenece al conector del job.", code: "CONNECTOR_SCHEMA_INVALID" };
+    }
+    if (portalMap.isApproved !== true && portalMap.status !== "approved") {
+      throw { message: "El mapa de navegación no está aprobado.", code: "PORTAL_MAP_NOT_APPROVED" };
+    }
 
     // 4. Run navigation
     const result = await executePortalMap(
@@ -206,7 +220,7 @@ async function processJob(jobId: string) {
       result.xmlContent || "",
       connector.rfc,
       lockedJob.fiscalProfileSnapshot.rfc,
-      lockedJob.ticketDataSnapshot.total
+      lockedJob.ticketDataSnapshot.expectedTicketTotal
     );
 
     if (!xmlResult.isValid) {

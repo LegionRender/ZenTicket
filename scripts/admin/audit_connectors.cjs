@@ -39,8 +39,8 @@ async function auditConnectors() {
     }
 
     console.log(`\nConectores encontrados: ${snapshot.size}\n`);
-    console.log("| ID | Nombre | RFC | Status | Runner Available | Production Ready | Has Extraction Contract | Has Portal Map | Has stepsJson | Entry URL Verified | Reason Not Runnable | Last Real Run | Last Result | Last XML Result | Eligible For Production |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    console.log("| ID | Nombre | RFC | Status | Source | Created By | Canonical ID | Duplicate Of | Disabled Reason | Mock | Runner Available | Production Ready | Has Extraction Contract | Has Portal Map | Has stepsJson | Entry URL Verified | Reason Not Runnable | Last Real Run | Last Result | Last XML Result | Eligible For Production |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
 
     for (const doc of snapshot.docs) {
       const data = doc.data();
@@ -144,7 +144,14 @@ async function auditConnectors() {
       // Calculate Eligibility based on navigation success and local structural validation
       const eligibleForProd = portalMapApproved && latestRealJob && latestRealJob.status === "succeeded" && latestRealJob.result && latestRealJob.result.xmlStoragePath ? "Sí" : "No";
 
-      console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${data.status || "mock_only"} | ${data.runnerAvailable || false} | ${data.isProductionReady || false} | ${hasContract} | ${hasPortalMap} | ${hasSteps} | ${entryUrlVerified} | ${reasonNotRunnable} | ${lastRealRun} | ${lastResult} | ${lastXmlResult} | ${eligibleForProd} |`);
+      const source = data.learnedFrom || "system";
+      const createdBy = data.userId || "system";
+      const canonicalId = data.canonicalConnectorId || "";
+      const duplicateOf = data.canonicalConnectorId ? "Sí" : "No";
+      const disabledReason = data.disabledReason || "";
+      const isMock = (data.isMock === true || data.status === "mock_only") ? "Sí" : "No";
+
+      console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${data.status || "mock_only"} | ${source} | ${createdBy} | ${canonicalId} | ${duplicateOf} | ${disabledReason} | ${isMock} | ${data.runnerAvailable || false} | ${data.isProductionReady || false} | ${hasContract} | ${hasPortalMap} | ${hasSteps} | ${entryUrlVerified} | ${reasonNotRunnable} | ${lastRealRun} | ${lastResult} | ${lastXmlResult} | ${eligibleForProd} |`);
     }
   } catch (err) {
     console.error("Fallo al auditar conectores:", err.message);

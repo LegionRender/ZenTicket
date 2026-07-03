@@ -754,7 +754,10 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         const tRfc = (detectedRfc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
         const tNombre = cleanStr(detectedName || "");
 
-        matchedConnector = connectorsList.find((c) => {
+        const candidates = connectorsList.filter((c) => {
+          // Filter out disabled/duplicate mock connectors
+          if (c.status === "disabled" || c.disabledReason === "DUPLICATE_MOCK_CONNECTOR") return false;
+
           const cRfc = (c.rfc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
           if (tRfc && cRfc && tRfc === cRfc) return true;
 
@@ -769,7 +772,37 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
             if (matchingAlias) return true;
           }
           return false;
-        }) || null;
+        });
+
+        if (candidates.length > 0) {
+          // Prioritized Sorting
+          candidates.sort((a, b) => {
+            const aProd = a.status === "production_ready" ? 1 : 0;
+            const bProd = b.status === "production_ready" ? 1 : 0;
+            if (aProd !== bProd) return bProd - aProd;
+
+            const aAvail = (a.status === "automation_available" || a.status === "real_validation") ? 1 : 0;
+            const bAvail = (b.status === "automation_available" || b.status === "real_validation") ? 1 : 0;
+            if (aAvail !== bAvail) return bAvail - aAvail;
+
+            const aSys = a.userId === "system" ? 1 : 0;
+            const bSys = b.userId === "system" ? 1 : 0;
+            if (aSys !== bSys) return bSys - aSys;
+
+            const aMock = (a.status === "mock_only" || a.isMock === true) ? 1 : 0;
+            const bMock = (b.status === "mock_only" || b.isMock === true) ? 1 : 0;
+            if (aMock !== bMock) return aMock - bMock; // prefer non-mock (0) over mock (1)
+
+            const aContract = (a.extractionContract && a.extractionContract.requiredPortalFields && a.extractionContract.requiredPortalFields.length > 0) ? 1 : 0;
+            const bContract = (b.extractionContract && b.extractionContract.requiredPortalFields && b.extractionContract.requiredPortalFields.length > 0) ? 1 : 0;
+            if (aContract !== bContract) return bContract - aContract;
+
+            return 0;
+          });
+          matchedConnector = candidates[0];
+        } else {
+          matchedConnector = null;
+        }
       }
 
       // STAGE 2: Targeted OCR

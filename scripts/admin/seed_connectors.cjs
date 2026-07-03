@@ -225,8 +225,10 @@ const connectorsSeed = [
     rfc: "FSI120304XYZ",
     portalUrl: "https://facturacion.gpupm.com/simifactura/portal",
     fieldsJson: JSON.stringify([
-      { key: "referenciaFacturacion", name: "Referencia de facturación", selector: "input#ref_simi", type: "text", required: true, source: "ticket" },
-      { key: "total", name: "Total Facturado", selector: "input#total_simi", type: "number", required: true, source: "ticket" },
+      { key: "referenciaFacturacion", name: "Referencia de facturación", selector: "input#Referencia", type: "text", required: true, source: "ticket" },
+      { key: "sucursal", name: "Sucursal", selector: "input#Sucursal", type: "text", required: true, source: "ticket" },
+      { key: "codigoBarras", name: "Código de barras", selector: "input#CodigoBarras", type: "text", required: true, source: "ticket" },
+      { key: "total", name: "Total", selector: "input#total_simi", type: "number", required: true, source: "ticket" },
       { key: "rfcReceptor", name: "RFC Receptor", selector: "input#rfc_simi", type: "text", required: true, source: "fiscalProfile" },
       { key: "razonSocial", name: "Razón Social", selector: "input#razon_simi", type: "text", required: true, source: "fiscalProfile" },
       { key: "codigoPostal", name: "Código Postal", selector: "input#cp_simi", type: "text", required: true, source: "fiscalProfile" },
@@ -236,7 +238,7 @@ const connectorsSeed = [
     ]),
     flowJson: JSON.stringify([
       "1. Navegar al dominio de facturación de Farmacias Similares",
-      "2. Ingresar la referencia de facturación y el importe total",
+      "2. Ingresar la referencia de facturación, sucursal, código de barras y el importe total",
       "3. Autocompletar RFC, Razón Social, C.P. y Régimen desde el perfil del usuario",
       "4. Solicitar CFDI y guardar XML"
     ]),
@@ -258,9 +260,35 @@ const connectorsSeed = [
           source: "ticket"
         },
         {
+          key: "portalFields.branch",
+          canonicalKey: "branch",
+          label: "Sucursal",
+          type: "string",
+          hints: [
+            "Número de sucursal emisor del ticket"
+          ],
+          validationPattern: "^\\d+$",
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        },
+        {
+          key: "portalFields.barcode",
+          canonicalKey: "barcode",
+          label: "Código de barras",
+          type: "string",
+          hints: [
+            "Código de barras impreso en el ticket"
+          ],
+          validationPattern: "^\\d+$",
+          required: true,
+          userEditable: true,
+          source: "ticket"
+        },
+        {
           key: "portalFields.total",
           canonicalKey: "total",
-          label: "Total facturado",
+          label: "Total",
           type: "number",
           hints: [
             "Importe total de la compra tal como aparece en el ticket"
@@ -273,9 +301,8 @@ const connectorsSeed = [
       ],
       fiscalFields: DEFAULT_FISCAL_FIELDS,
       screenOrder: [
-        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: ["portalFields.billingReference"] },
-        { screenIndex: 2, description: "Monto de ticket", requiredFields: ["portalFields.total"] },
-        { screenIndex: 3, description: "Datos fiscales", requiredFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"] }
+        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: ["portalFields.billingReference", "portalFields.branch", "portalFields.barcode", "portalFields.total"] },
+        { screenIndex: 2, description: "Datos fiscales", requiredFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"] }
       ]
     },
     createdAt: new Date().toISOString(),
@@ -366,6 +393,20 @@ async function seedConnectors() {
               rejectIfLooksLike: ["uuid", "internal_id"],
               allowSecondaryOcr: false
             };
+          } else if (f.canonicalKey === "branch") {
+            f.fieldExtractionHints = {
+              likelyZones: ["top", "header"],
+              nearbyWords: ["sucursal", "suc", "tienda", "no"],
+              rejectIfLooksLike: ["uuid"],
+              allowSecondaryOcr: true
+            };
+          } else if (f.canonicalKey === "barcode") {
+            f.fieldExtractionHints = {
+              likelyZones: ["bottom", "barcode_area"],
+              nearbyWords: ["codigo", "barras", "ticket"],
+              rejectIfLooksLike: ["uuid"],
+              allowSecondaryOcr: true
+            };
           }
         }
       }
@@ -411,8 +452,8 @@ async function seedConnectors() {
           steps = [
             { type: "goto", url: "{{portalMap.entryUrl}}" },
             { type: "fill", selector: "input#Referencia", value: "{{ticket.billingReference}}", transform: "trim" },
-            { type: "click", selector: "button:has-text('Continuar')" },
-            { type: "waitForSelector", selector: "input#total_simi" },
+            { type: "fill", selector: "input#Sucursal", value: "{{ticket.branch}}", transform: "trim" },
+            { type: "fill", selector: "input#CodigoBarras", value: "{{ticket.barcode}}", transform: "trim" },
             { type: "fill", selector: "input#total_simi", value: "{{ticket.total}}", transform: "fixed2" },
             { type: "click", selector: "button#btnBuscar" },
             { type: "waitForSelector", selector: "input#rfc_simi" },
@@ -434,64 +475,29 @@ async function seedConnectors() {
           ];
         }
 
-        const reqFieldsList = [
-          {
-            key: "portalFields.billingReference",
-            label: "Referencia de facturación",
-            source: "portalFields",
-            required: true,
-            userEditable: true
-          },
-          {
-            key: "portalFields.total",
-            label: "Total facturado",
-            source: "portalFields",
-            required: true,
-            userEditable: true
-          },
-          {
-            key: "fiscalProfile.rfc",
-            label: "RFC receptor",
+        const reqFieldsList = [];
+        if (item.extractionContract && item.extractionContract.requiredPortalFields) {
+          item.extractionContract.requiredPortalFields.forEach(f => {
+            reqFieldsList.push({
+              key: f.key,
+              label: f.label,
+              source: f.source || "portalFields",
+              required: f.required !== false,
+              userEditable: f.userEditable !== false
+            });
+          });
+        }
+        const fiscalKeys = ["rfc", "businessName", "postalCode", "taxRegime", "cfdiUse", "email"];
+        fiscalKeys.forEach(k => {
+          const matched = item.extractionContract.fiscalFields?.find(f => f.key.endsWith("." + k));
+          reqFieldsList.push({
+            key: matched?.key || `fiscalProfile.${k}`,
+            label: matched?.label || (k === "rfc" ? "RFC receptor" : k === "businessName" ? "Razón Social" : k === "postalCode" ? "Código Postal" : k === "taxRegime" ? "Régimen Fiscal" : k === "cfdiUse" ? "Uso CFDI" : "Correo electrónico"),
             source: "fiscalProfile",
             required: true,
             userEditable: true
-          },
-          {
-            key: "fiscalProfile.businessName",
-            label: "Razón Social",
-            source: "fiscalProfile",
-            required: true,
-            userEditable: true
-          },
-          {
-            key: "fiscalProfile.postalCode",
-            label: "Código Postal",
-            source: "fiscalProfile",
-            required: true,
-            userEditable: true
-          },
-          {
-            key: "fiscalProfile.taxRegime",
-            label: "Régimen Fiscal",
-            source: "fiscalProfile",
-            required: true,
-            userEditable: true
-          },
-          {
-            key: "fiscalProfile.cfdiUse",
-            label: "Uso CFDI",
-            source: "fiscalProfile",
-            required: true,
-            userEditable: true
-          },
-          {
-            key: "fiscalProfile.email",
-            label: "Correo electrónico",
-            source: "fiscalProfile",
-            required: true,
-            userEditable: true
-          }
-        ];
+          });
+        });
 
         const portalMapData = {
           connectorId,
@@ -522,6 +528,47 @@ async function seedConnectors() {
         }
       }
     }
+    // CLEANUP DUPLICATES
+    console.log("Starting cleanup of user-created duplicate / mock connectors...");
+    const cleanStr = (s) => 
+      (s || "")
+       .toLowerCase()
+       .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
+       .replace(/[^a-z0-9\s]/g, "") // remove punctuation
+       .replace(/\b(sa|de|cv|sapi|srl|de|cv|grupo|comercial|cadena|tiendas|sucursal|santa|fe|magna|pemex)\b/g, "")
+       .trim();
+
+    const connSnapshot = await db.collection("connectors").get();
+    for (const d of connSnapshot.docs) {
+      const data = d.data();
+      const isOfficial = data.userId === "system";
+      if (!isOfficial && data.status !== "disabled") {
+        const cleanName = cleanStr(data.nombre);
+        const officialMatch = connectorsSeed.find(official => {
+          const cleanOfficial = cleanStr(official.nombre);
+          return (data.rfc && official.rfc && data.rfc === official.rfc) || (cleanName && cleanOfficial && cleanName === cleanOfficial);
+        });
+
+        if (officialMatch) {
+          const officialQuery = await db.collection("connectors")
+            .where("userId", "==", "system")
+            .where("nombre", "==", officialMatch.nombre)
+            .get();
+          
+          if (!officialQuery.empty) {
+            const canonicalId = officialQuery.docs[0].id;
+            await d.ref.update({
+              status: "disabled",
+              disabledReason: "DUPLICATE_MOCK_CONNECTOR",
+              canonicalConnectorId: canonicalId,
+              updatedAt: new Date().toISOString()
+            });
+            console.log(`Disabled mock duplicate connector for: ${data.nombre} (ID: ${d.id}) -> canonical ID: ${canonicalId}`);
+          }
+        }
+      }
+    }
+
     console.log("Connectors and Portal Maps seed run successfully completed!");
   } catch (err) {
     console.error("Critical seed failure:", err.message);
