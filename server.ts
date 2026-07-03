@@ -1025,7 +1025,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
     }
 
     let billingReference = sanitizeBillingReferenceForConnector(
-      extractedData.billingReference || extractedData.referenciaFacturacion || extractedData.folio || "",
+      extractedData.billingReference || extractedData.referenciaFacturacion || "",
       textResult,
       matchedConnector
     );

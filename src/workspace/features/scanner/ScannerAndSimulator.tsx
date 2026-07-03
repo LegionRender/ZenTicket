@@ -178,7 +178,7 @@ function sanitizePortalFieldsForConnector(
   rawOcrText: string | undefined | null
 ): { billingReference: string; total: number; date: string; ticketNumber: string } {
   const ocrText = rawOcrText || "";
-  let billingRef = detectedData.billingReference || detectedData.folio || "";
+  let billingRef = detectedData.billingReference || detectedData.referenciaFacturacion || "";
 
   // Call the central sanitization function
   billingRef = sanitizeBillingReferenceForConnector(billingRef, ocrText, connector);
@@ -713,6 +713,7 @@ export default function ScannerAndSimulator({
       setTicketImage(ticket.imageUrl || null);
 
       const parsedItems = ticket.itemsJson ? JSON.parse(ticket.itemsJson) : [];
+      const found = matchConnector(ticket.nombreEmisor, ticket.rfcEmisor);
       const data: ExtractedTicketData = {
         rfcEmisor: ticket.rfcEmisor,
         nombreEmisor: ticket.nombreEmisor,
@@ -721,9 +722,10 @@ export default function ScannerAndSimulator({
         total: ticket.total,
         sucursal: ticket.sucursal,
         items: parsedItems,
-      };
+        billingReference: ticket.billingReference || ticket.referenciaFacturacion || "",
+        referenciaFacturacion: ticket.billingReference || ticket.referenciaFacturacion || "",
+      } as any;
       setExtractedData(data);
-      const found = matchConnector(ticket.nombreEmisor, ticket.rfcEmisor);
       const sanitized = sanitizePortalFieldsForConnector(found, ticket.portalFields || data, ticket.rawOcrText);
       const persistedReference = sanitizeBillingReferenceForConnector(
         ticket.portalFields?.billingReference,
@@ -2076,7 +2078,10 @@ export default function ScannerAndSimulator({
       if (missingTicketFields.length > 0) {
         await addLog(`❌ Faltan campos físicos iniciales del ticket: ${missingTicketFields.join(", ")}`, 400);
 
-        const reasonMessage = "Necesitamos completar algunos datos del ticket para solicitar la factura en el portal oficial.";
+        const hasBillingRefMissing = missingTicketFields.includes("portalFields.billingReference");
+        const reasonMessage = hasBillingRefMissing
+          ? "Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura."
+          : "Necesitamos completar algunos datos del ticket para solicitar la factura en el portal oficial.";
         const configErr: ReviewError = {
           reviewReasonCode: "MISSING_REQUIRED_FIELDS",
           reviewReasonMessage: reasonMessage,
@@ -3973,7 +3978,7 @@ return list.map(n => {
                             setEditNombre(extractedData.nombreEmisor || "");
                             setEditRfc(extractedData.rfcEmisor || "");
                             setEditFecha(extractedData.fechaCompra || "");
-                            setEditFolio(extractedData.folio || "");
+                            setEditFolio(extractedData.billingReference || "");
                             setEditSucursal(extractedData.sucursal || "");
                             setEditTotal(extractedData.total || 0);
                             setValidationError(null);
@@ -4253,7 +4258,7 @@ return list.map(n => {
                             setEditNombre(extractedData.nombreEmisor || "");
                             setEditRfc(extractedData.rfcEmisor || "");
                             setEditFecha(extractedData.fechaCompra || "");
-                            setEditFolio(extractedData.folio || "");
+                            setEditFolio(extractedData.billingReference || "");
                             setEditSucursal(extractedData.sucursal || "");
                             setEditTotal(extractedData.total || 0);
                             setValidationError(null);

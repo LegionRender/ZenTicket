@@ -1053,7 +1053,7 @@ app.post("/api/tickets/analyze", async (req, res) => {
       rawCost = (promptTokens * 0.075 + outputTokens * 0.3) / 1e6 * exchangeRate;
     }
     let billingReference = sanitizeBillingReferenceForConnector(
-      extractedData.billingReference || extractedData.referenciaFacturacion || extractedData.folio || "",
+      extractedData.billingReference || extractedData.referenciaFacturacion || "",
       textResult,
       matchedConnector
     );

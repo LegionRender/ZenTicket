@@ -19,9 +19,9 @@ export function resolveValue(
       if (key === "billingReference" || key === "folio" || key === "ticketNumber") {
         let val = pFields.billingReference || ticketData.billingReference || ticketData.folio || "";
         const isUuid = /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/i.test(val);
-        const hasMockPrefix = /^ticket_|^job_|^OFFLINE-/i.test(val);
+        const hasMockPrefix = /^ticket_|^job_|^OFFLINE-|^worker-/i.test(val);
         if (isUuid || hasMockPrefix) {
-          val = "";
+          throw { message: "UUID o ID interno no permitido en Referencia de facturación", code: "INVALID_PORTAL_FIELD_VALUE" };
         }
         return val;
       }
@@ -58,12 +58,12 @@ export function resolveValue(
       const key = parts[1];
       if (base === "ticket" || base === "portalFields") {
         const pFields = ticketData.portalFields || {};
-        if (key === "billingReference" || key === "folio" || key === "ticketNumber") {
+         if (key === "billingReference" || key === "folio" || key === "ticketNumber") {
           let val = pFields.billingReference || ticketData.billingReference || ticketData.folio || "";
           const isUuid = /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/i.test(val);
-          const hasMockPrefix = /^ticket_|^job_|^OFFLINE-/i.test(val);
+          const hasMockPrefix = /^ticket_|^job_|^OFFLINE-|^worker-/i.test(val);
           if (isUuid || hasMockPrefix) {
-            val = "";
+            throw { message: "UUID o ID interno no permitido en Referencia de facturación", code: "INVALID_PORTAL_FIELD_VALUE" };
           }
           resolved = val;
         } else if (key === "total") {

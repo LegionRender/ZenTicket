@@ -29,23 +29,24 @@ if (fs.existsSync(firebaseConfigPath)) {
 
 const db = getFirestore(undefined, databaseId);
 
-async function cleanInvalidTickets() {
+async function cleanInvalidTicketsAndJobs() {
   console.log("=================================================================");
   console.log("  DATABASE CLEANER: Sanitización de Referencias de Facturación");
   console.log("  Database ID:", databaseId || "default");
   console.log("=================================================================\n");
 
-  const ticketsSnap = await db.collection("tickets").get();
-  let cleanedCount = 0;
-
   const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
   const internalPrefixRegex = /^ticket_|^job_|^OFFLINE-|^worker-/i;
+
+  // 1. Limpiar tickets
+  console.log("🔍 Escaneando la colección 'tickets'...");
+  const ticketsSnap = await db.collection("tickets").get();
+  let cleanedTicketsCount = 0;
 
   for (const doc of ticketsSnap.docs) {
     const ticket = doc.data();
     const status = ticket.status;
 
-    // Do not touch finalized or successful tickets
     if (status === "invoice_obtained" || status === "cfdi_validated" || status === "completed") {
       continue;
     }
@@ -75,18 +76,60 @@ async function cleanInvalidTickets() {
         portalFields: updatedPortalFields,
         status: "missing_required_fields",
         reviewReasonCode: "MISSING_REQUIRED_FIELDS",
-        errorMsg: "La referencia de facturación es inválida (ej. UUID/ID interno). Por favor captura el dato del ticket impreso.",
+        errorMsg: "Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura.",
         missingFields,
+        reviewError: {
+          reason: "INVALID_UUID_BILLING_REFERENCE_CLEANED",
+          message: "UUID/ID interno de facturación purgado."
+        },
         updatedAt: new Date().toISOString()
       });
 
       console.log(`   - Estatus actualizado a 'missing_required_fields'`);
       console.log("-----------------------------------------------------------------");
-      cleanedCount++;
+      cleanedTicketsCount++;
     }
   }
 
-  console.log(`\nProceso completado. Se limpiaron ${cleanedCount} tickets contaminados.`);
+  // 2. Limpiar/Detener invoice_jobs
+  console.log("\n🔍 Escaneando la colección 'invoice_jobs'...");
+  const jobsSnap = await db.collection("invoice_jobs").get();
+  let cleanedJobsCount = 0;
+
+  for (const doc of jobsSnap.docs) {
+    const job = doc.data();
+    const status = job.status;
+
+    if (status === "succeeded" || status === "completed") {
+      continue;
+    }
+
+    const tSnapshot = job.ticketDataSnapshot || {};
+    const jobBillingRef = tSnapshot.billingReference || "";
+
+    const isUuid = uuidRegex.test(jobBillingRef);
+    const hasInternalPrefix = internalPrefixRegex.test(jobBillingRef);
+
+    if (isUuid || hasInternalPrefix) {
+      console.log(`🛑 Cancelando y marcando job contaminado (${doc.id}):`);
+      console.log(`   - Referencia en snapshot: "${jobBillingRef}"`);
+
+      await doc.ref.update({
+        status: "failed",
+        lastErrorCode: "INVALID_UUID_BILLING_REFERENCE_CLEANED",
+        lastError: "Se canceló el job porque contenía una referencia inválida (UUID).",
+        updatedAt: new Date().toISOString()
+      });
+
+      console.log(`   - Job marcado como 'failed'`);
+      console.log("-----------------------------------------------------------------");
+      cleanedJobsCount++;
+    }
+  }
+
+  console.log(`\nProceso completado.`);
+  console.log(`- Se limpiaron ${cleanedTicketsCount} tickets contaminados.`);
+  console.log(`- Se purgaron/cancelaron ${cleanedJobsCount} jobs contaminados.`);
 }
 
-cleanInvalidTickets().catch(console.error);
+cleanInvalidTicketsAndJobs().catch(console.error);

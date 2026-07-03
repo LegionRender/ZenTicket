@@ -288,6 +288,33 @@ async function processJob(jobId: string) {
     await createRunnerLog(jobId, ticketId, "ERROR", `Procesamiento fallido: ${errorMessage} (Código: ${errorCode})`);
     setActiveJobContext(null, null, null, null);
 
+    if (errorCode === "INVALID_PORTAL_FIELD_VALUE") {
+      await jobRef.update({
+        status: "failed",
+        lastError: errorMessage,
+        lastErrorTime: new Date().toISOString(),
+        attempts: FieldValue.increment(1),
+        updatedAt: new Date().toISOString()
+      });
+
+      await ticketRef.update({
+        status: "missing_required_fields",
+        errorMsg: "Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura.",
+        reviewReasonCode: "MISSING_REQUIRED_FIELDS",
+        missingFields: ["portalFields.billingReference"],
+        reviewError: {
+          reviewReasonCode: "MISSING_REQUIRED_FIELDS",
+          reviewReasonMessage: "Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura.",
+          lastAutomationStep: "runner_processing",
+          connectorAttempted: true,
+          connectorId: lockedJob.connectorId,
+          portalErrorMessage: errorMessage
+        },
+        updatedAt: new Date().toISOString()
+      });
+      return;
+    }
+
     const isRejected = errorCode === "PORTAL_RETURNED_ERROR";
     const finalJobStatus = isRejected ? "manual_review" : "failed";
     const finalReviewReasonCode = isRejected ? "PORTAL_REJECTED_TICKET_DATA" : errorCode;

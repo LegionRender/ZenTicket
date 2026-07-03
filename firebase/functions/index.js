@@ -735,11 +735,19 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           normalizedValue: extractedData.folio || ""
         },
         referenciaFacturacion: {
-          value: extractedData.referenciaFacturacion || "",
-          confidence: extractedData.referenciaFacturacion ? 0.95 : 0.0,
+          value: sanitizeBillingReferenceForConnector(
+            extractedData.billingReference || extractedData.referenciaFacturacion || "",
+            null,
+            matchedConnector
+          ),
+          confidence: (extractedData.billingReference || extractedData.referenciaFacturacion) ? 0.95 : 0.0,
           source: "ocr",
-          rawText: extractedData.referenciaFacturacion || "",
-          normalizedValue: extractedData.referenciaFacturacion || ""
+          rawText: extractedData.billingReference || extractedData.referenciaFacturacion || "",
+          normalizedValue: sanitizeBillingReferenceForConnector(
+            extractedData.billingReference || extractedData.referenciaFacturacion || "",
+            null,
+            matchedConnector
+          )
         },
         codigoBarras: {
           value: extractedData.codigoBarras || "",
@@ -825,6 +833,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         ocrProvider: provider.id,
         ocrModel: result.model,
         ocrJobId: jobRef.id,
+        qrCfdiUuid: qrParsed ? qrParsed.uuid : null,
         matchedConnector: matchedConnector ? {
           id: matchedConnector.id,
           nombre: matchedConnector.nombre,
@@ -833,7 +842,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           fieldsJson: matchedConnector.fieldsJson,
           flowJson: matchedConnector.flowJson,
           status: matchedConnector.status
-        } : null
+        } : null,
         cost: provider.provider === "openai" ? 0.75 : 0.5,
         rawCost: result.rawCost
       };
