@@ -870,6 +870,7 @@ INSTRUCCI\xD3N CR\xCDTICA DE SEGURIDAD: Queda estrictamente prohibido extraer, i
             }
           }
         };
+        const confidenceRequired = [];
         for (const f of contract.requiredPortalFields) {
           const fieldKey = String(f.canonicalKey || f.key || "").replace(/^portalFields\./, "");
           if (!fieldKey) continue;
@@ -882,6 +883,10 @@ INSTRUCCI\xD3N CR\xCDTICA DE SEGURIDAD: Queda estrictamente prohibido extraer, i
             type: "NUMBER",
             description: `Confianza de 0.0 a 1.0 para ${f.label || fieldKey}; devuelve 0.0 si no aparece.`
           };
+          confidenceRequired.push(fieldKey);
+        }
+        if (confidenceRequired.length > 0) {
+          customProperties.portalFieldsConfidence.required = confidenceRequired;
         }
         targetedSchema = {
           type: "OBJECT",

@@ -226,8 +226,6 @@ const connectorsSeed = [
     portalUrl: "https://facturacion.gpupm.com/simifactura/portal",
     fieldsJson: JSON.stringify([
       { key: "referenciaFacturacion", name: "Referencia de facturación", selector: "input#Referencia", type: "text", required: true, source: "ticket" },
-      { key: "sucursal", name: "Sucursal", selector: "input#Sucursal", type: "text", required: true, source: "ticket" },
-      { key: "codigoBarras", name: "Código de barras", selector: "input#CodigoBarras", type: "text", required: true, source: "ticket" },
       { key: "total", name: "Total", selector: "input#total_simi", type: "number", required: true, source: "ticket" },
       { key: "rfcReceptor", name: "RFC Receptor", selector: "input#rfc_simi", type: "text", required: true, source: "fiscalProfile" },
       { key: "razonSocial", name: "Razón Social", selector: "input#razon_simi", type: "text", required: true, source: "fiscalProfile" },
@@ -238,7 +236,7 @@ const connectorsSeed = [
     ]),
     flowJson: JSON.stringify([
       "1. Navegar al dominio de facturación de Farmacias Similares",
-      "2. Ingresar la referencia de facturación, sucursal, código de barras y el importe total",
+      "2. Ingresar la referencia de facturación y el importe total",
       "3. Autocompletar RFC, Razón Social, C.P. y Régimen desde el perfil del usuario",
       "4. Solicitar CFDI y guardar XML"
     ]),
@@ -253,37 +251,18 @@ const connectorsSeed = [
             "Número impreso en el ticket requerido por el portal",
             "No confundir con UUID, folio interno, ticketId o UUID SAT"
           ],
-          validationPattern: "^\\d{12}$",
+          validationPattern: "^\\d{12,13}$",
           forbiddenPatterns: FORBIDDEN_PATTERNS,
           required: true,
           userEditable: true,
-          source: "ticket"
-        },
-        {
-          key: "portalFields.branch",
-          canonicalKey: "branch",
-          label: "Sucursal",
-          type: "string",
-          hints: [
-            "Número de sucursal emisor del ticket"
-          ],
-          validationPattern: "^\\d+$",
-          required: true,
-          userEditable: true,
-          source: "ticket"
-        },
-        {
-          key: "portalFields.barcode",
-          canonicalKey: "barcode",
-          label: "Código de barras",
-          type: "string",
-          hints: [
-            "Código de barras impreso en el ticket"
-          ],
-          validationPattern: "^\\d+$",
-          required: true,
-          userEditable: true,
-          source: "ticket"
+          source: "ticket",
+          fieldExtractionHints: {
+            likelyZones: ["bottom", "near_barcode", "invoice_instructions"],
+            nearbyWords: ["referencia", "facturacion", "factura", "portal", "codigo", "ticket", "folio"],
+            rejectIfLooksLike: ["uuid", "internal_id", "cfdi_uuid"],
+            allowSecondaryOcr: true,
+            requireLiteralMatch: true
+          }
         },
         {
           key: "portalFields.total",
@@ -296,12 +275,18 @@ const connectorsSeed = [
           validationPattern: "^[0-9]+(\\.[0-9]{1,2})?$",
           required: true,
           userEditable: true,
-          source: "ticket"
+          source: "ticket",
+          fieldExtractionHints: {
+            likelyZones: ["bottom", "summary"],
+            nearbyWords: ["total", "neto", "importe", "pago", "monto"],
+            rejectIfLooksLike: ["uuid", "internal_id"],
+            allowSecondaryOcr: false
+          }
         }
       ],
       fiscalFields: DEFAULT_FISCAL_FIELDS,
       screenOrder: [
-        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: ["portalFields.billingReference", "portalFields.branch", "portalFields.barcode", "portalFields.total"] },
+        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: ["portalFields.billingReference", "portalFields.total"] },
         { screenIndex: 2, description: "Datos fiscales", requiredFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"] }
       ]
     },
@@ -452,10 +437,7 @@ async function seedConnectors() {
           steps = [
             { type: "goto", url: "{{portalMap.entryUrl}}" },
             { type: "fill", selector: "input#Referencia", value: "{{portalFields.billingReference}}", transform: "trim" },
-            { type: "fill", selector: "input#Sucursal", value: "{{portalFields.branch}}", transform: "trim" },
-            { type: "fill", selector: "input#CodigoBarras", value: "{{portalFields.barcode}}", transform: "trim" },
-            { type: "fill", selector: "input#total_simi", value: "{{portalFields.total}}", transform: "fixed2" },
-            { type: "click", selector: "button#btnBuscar" },
+            { type: "click", selector: "button.btn-celeste" },
             { type: "waitForSelector", selector: "input#rfc_simi" },
             { type: "fill", selector: "input#rfc_simi", value: "{{fiscalProfile.rfc}}", transform: "uppercase" },
             { type: "fill", selector: "input#razon_simi", value: "{{fiscalProfile.businessName}}", transform: "uppercase" },

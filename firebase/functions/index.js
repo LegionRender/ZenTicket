@@ -323,11 +323,7 @@ async function runGeminiOcr(provider, image, mimeType, matchedConnector = null) 
       rawOcrText: { type: "STRING", description: "El texto completo e íntegro extraído del ticket de forma literal, línea por línea." },
       portalFieldsConfidence: {
         type: "OBJECT",
-        properties: {
-          billingReference: { type: "NUMBER", description: "Confianza estimada de 0.0 a 1.0 para la referencia de facturación. Si no se extrae, devuelve 0.0." },
-          total: { type: "NUMBER", description: "Confianza estimada de 0.0 a 1.0 para el total. Si no se extrae, devuelve 0.0." }
-        },
-        required: ["billingReference", "total"]
+        properties: {}
       },
       items: {
         type: "ARRAY",
@@ -343,18 +339,25 @@ async function runGeminiOcr(provider, image, mimeType, matchedConnector = null) 
       }
     };
 
+    const confidenceRequired = [];
     for (const f of contract.requiredPortalFields) {
-      if (f.canonicalKey === "billingReference") {
-        customProperties.billingReference = {
-          type: "STRING",
-          description: `${f.label}. Si no se encuentra literal en el ticket, devuelve null.`
-        };
-      } else if (f.canonicalKey === "total") {
-        customProperties.total = {
-          type: "NUMBER",
-          description: `${f.label}. Si no se encuentra literal en el ticket, devuelve null.`
-        };
-      }
+      const fieldKey = String(f.canonicalKey || f.key || "").replace(/^portalFields\./, "");
+      if (!fieldKey) continue;
+      const fieldType = ["number", "currency", "decimal"].includes(String(f.type || "").toLowerCase())
+        ? "NUMBER"
+        : "STRING";
+      customProperties[fieldKey] = {
+        type: fieldType,
+        description: `${f.label || fieldKey}. Devuelve solamente el valor literal del ticket; si no aparece, devuelve ${fieldType === "NUMBER" ? "0" : "una cadena vacía"}.`
+      };
+      customProperties.portalFieldsConfidence.properties[fieldKey] = {
+        type: "NUMBER",
+        description: `Confianza de 0.0 a 1.0 para ${f.label || fieldKey}; devuelve 0.0 si no aparece.`
+      };
+      confidenceRequired.push(fieldKey);
+    }
+    if (confidenceRequired.length > 0) {
+      customProperties.portalFieldsConfidence.required = confidenceRequired;
     }
 
     targetedSchema = {

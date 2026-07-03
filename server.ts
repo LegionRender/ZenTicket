@@ -822,6 +822,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         };
 
         // Add every portal field declared by the connector contract.
+        const confidenceRequired: string[] = [];
         for (const f of contract.requiredPortalFields) {
           const fieldKey = String(f.canonicalKey || f.key || "").replace(/^portalFields\./, "");
           if (!fieldKey) continue;
@@ -836,6 +837,10 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
             type: "NUMBER",
             description: `Confianza de 0.0 a 1.0 para ${f.label || fieldKey}; devuelve 0.0 si no aparece.`
           };
+          confidenceRequired.push(fieldKey);
+        }
+        if (confidenceRequired.length > 0) {
+          customProperties.portalFieldsConfidence.required = confidenceRequired;
         }
 
         targetedSchema = {
