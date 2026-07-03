@@ -1986,32 +1986,58 @@ export default function ScannerAndSimulator({
         return;
       }
 
-      // B) Validate ticket physical fields from connector.extractionContract.requiredPortalFields
-      let missingFields: string[] = [];
+      // B) Get required fields for the initial stage (ScreenIndex 1 in screenOrder)
+      let initialRequiredFields: string[] = [];
       const contract = activeConn.extractionContract;
       
-      if (contract && contract.requiredPortalFields) {
-        for (const field of contract.requiredPortalFields) {
-          if (field.required) {
-            const key = field.canonicalKey;
-            const val = pFields[key];
-            if (val === undefined || val === null || (typeof val === "string" && !val.trim()) || (typeof val === "number" && isNaN(val))) {
-              missingFields.push(`portalFields.${key}`);
-            }
-          }
+      if (contract && contract.screenOrder && contract.screenOrder.length > 0) {
+        const screen1 = contract.screenOrder.find((s: any) => s.screenIndex === 1);
+        if (screen1 && screen1.requiredFields) {
+          initialRequiredFields = [...screen1.requiredFields];
         }
-      } else {
-        // Fallback for legacy connectors
-        const validationResult = validatePortalFieldsAgainstPortalMap(
-          { ...freshTicketData, portalFields: pFields },
-          pMap
-        );
-        missingFields = validationResult.missingFields.filter(f => f.startsWith("portalFields."));
+      }
+      
+      // Default initial required fields if none found
+      if (initialRequiredFields.length === 0) {
+        initialRequiredFields = ["portalFields.billingReference"];
       }
 
-      // If physical ticket fields are missing, stop immediately and report missing_required_fields
-      if (missingFields.length > 0) {
-        await addLog(`❌ Faltan campos físicos del ticket: ${missingFields.join(", ")}`, 400);
+      // Check which of the initial required fields are missing
+      let missingTicketFields: string[] = [];
+      let missingFiscalFields: string[] = [];
+
+      for (const fieldKey of initialRequiredFields) {
+        if (fieldKey.startsWith("portalFields.")) {
+          const key = fieldKey.replace("portalFields.", "");
+          const val = pFields[key];
+          if (val === undefined || val === null || (typeof val === "string" && !val.trim()) || (typeof val === "number" && isNaN(val))) {
+            missingTicketFields.push(fieldKey);
+          }
+        } else if (fieldKey.startsWith("fiscalProfile.")) {
+          const k = fieldKey.replace("fiscalProfile.", "");
+          let mappedKey = k;
+          if (k === "rfc") mappedKey = "rfc";
+          if (k === "businessName") mappedKey = "razonSocial";
+          if (k === "postalCode") mappedKey = "codigoPostal";
+          if (k === "taxRegime") mappedKey = "regimenFiscal";
+          if (k === "cfdiUse") mappedKey = "usoCFDI";
+          if (k === "email") mappedKey = "correoElectronico";
+
+          const val = fiscalProfile[mappedKey];
+          const cleanVal = (val || "").toString().trim();
+          if (mappedKey === "rfc") {
+            if (cleanVal.length < 12) missingFiscalFields.push(fieldKey);
+          } else if (mappedKey === "correoElectronico") {
+            if (!cleanVal.includes("@")) missingFiscalFields.push(fieldKey);
+          } else {
+            if (!cleanVal) missingFiscalFields.push(fieldKey);
+          }
+        }
+      }
+
+      // If initial physical fields are missing, stop immediately and report missing_required_fields
+      if (missingTicketFields.length > 0) {
+        await addLog(`❌ Faltan campos físicos iniciales del ticket: ${missingTicketFields.join(", ")}`, 400);
 
         const reasonMessage = "Necesitamos completar algunos datos del ticket para solicitar la factura en el portal oficial.";
         const configErr: ReviewError = {
@@ -2021,7 +2047,7 @@ export default function ScannerAndSimulator({
           connectorAttempted: true,
           connectorId: activeConn.id || null,
           connectorName: activeConn.nombre || null,
-          portalErrorMessage: `Campos del ticket faltantes: ${missingFields.join(", ")}`,
+          portalErrorMessage: `Campos físicos requeridos para iniciar faltantes: ${missingTicketFields.join(", ")}`,
           reviewError: {
             connectorStatus: activeConn.status || "undefined",
             runnerAvailable: activeConn.runnerAvailable || false,
@@ -2029,8 +2055,8 @@ export default function ScannerAndSimulator({
             portalMapFound: !!pMap,
             portalMapApproved: pMap ? (pMap.isApproved === true || pMap.status === "approved") : false,
             hasStepsJson: pMap ? !!pMap.stepsJson : false,
-            missingFields: missingFields,
-            blockingReason: "MISSING_REQUIRED_FIELDS: " + missingFields.join(", ")
+            missingFields: missingTicketFields,
+            blockingReason: "MISSING_REQUIRED_FIELDS: " + missingTicketFields.join(", ")
           } as any
         };
 
@@ -2039,49 +2065,18 @@ export default function ScannerAndSimulator({
           reviewReasonCode: "MISSING_REQUIRED_FIELDS",
           errorMsg: configErr.reviewReasonMessage,
           reviewError: configErr as any,
-          missingFields: missingFields
+          missingFields: missingTicketFields
         } as any);
         await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, "MISSING_REQUIRED_FIELDS");
         setIsAutomatingLoading(false);
         return;
       }
 
-      // C) Validate user's fiscal profile from connector.extractionContract.fiscalFields
-      if (contract && contract.fiscalFields) {
-        for (const field of contract.fiscalFields) {
-          if (field.required) {
-            const k = field.key.replace("fiscalProfile.", "");
-            let mappedKey = k;
-            if (k === "rfc") mappedKey = "rfc";
-            if (k === "businessName") mappedKey = "razonSocial";
-            if (k === "postalCode") mappedKey = "codigoPostal";
-            if (k === "taxRegime") mappedKey = "regimenFiscal";
-            if (k === "cfdiUse") mappedKey = "usoCFDI";
-            if (k === "email") mappedKey = "correoElectronico";
+      // If initial fiscal fields are missing, stop here and report waiting_fiscal_profile
+      if (missingFiscalFields.length > 0) {
+        await addLog(`❌ Faltan campos fiscales requeridos para la primera pantalla: ${missingFiscalFields.join(", ")}`, 400);
 
-            const val = fiscalProfile[mappedKey];
-            const cleanVal = (val || "").toString().trim();
-            
-            if (mappedKey === "rfc") {
-              if (cleanVal.length < 12) missingFields.push(field.key);
-            } else if (mappedKey === "correoElectronico") {
-              if (!cleanVal.includes("@")) missingFields.push(field.key);
-            } else {
-              if (!cleanVal) missingFields.push(field.key);
-            }
-          }
-        }
-      } else {
-        // Fallback checks for legacy connectors
-        if (!fiscalProfile.rfc || !fiscalProfile.rfc.trim()) missingFields.push("fiscalProfile.rfc");
-        if (!fiscalProfile.razonSocial || !fiscalProfile.razonSocial.trim()) missingFields.push("fiscalProfile.businessName");
-      }
-
-      // If fiscal profile fields are missing, stop here and report waiting_fiscal_profile
-      if (missingFields.length > 0) {
-        await addLog(`❌ Faltan campos del perfil fiscal: ${missingFields.join(", ")}`, 400);
-
-        const reasonMessage = "Ya tenemos los datos del ticket. Para completar la factura necesitamos tus datos fiscales.";
+        const reasonMessage = "El portal necesita tus datos fiscales para continuar con la factura.";
         const configErr: ReviewError = {
           reviewReasonCode: "MISSING_FISCAL_PROFILE",
           reviewReasonMessage: reasonMessage,
@@ -2089,7 +2084,7 @@ export default function ScannerAndSimulator({
           connectorAttempted: true,
           connectorId: activeConn.id || null,
           connectorName: activeConn.nombre || null,
-          portalErrorMessage: `Campos fiscales faltantes: ${missingFields.join(", ")}`,
+          portalErrorMessage: `Campos fiscales requeridos para iniciar faltantes: ${missingFiscalFields.join(", ")}`,
           reviewError: {
             connectorStatus: activeConn.status || "undefined",
             runnerAvailable: activeConn.runnerAvailable || false,
@@ -2097,8 +2092,8 @@ export default function ScannerAndSimulator({
             portalMapFound: !!pMap,
             portalMapApproved: pMap ? (pMap.isApproved === true || pMap.status === "approved") : false,
             hasStepsJson: pMap ? !!pMap.stepsJson : false,
-            missingFields: missingFields,
-            blockingReason: "MISSING_FISCAL_PROFILE: " + missingFields.join(", ")
+            missingFields: missingFiscalFields,
+            blockingReason: "MISSING_FISCAL_PROFILE: " + missingFiscalFields.join(", ")
           } as any
         };
 
@@ -2107,7 +2102,7 @@ export default function ScannerAndSimulator({
           reviewReasonCode: "MISSING_FISCAL_PROFILE",
           errorMsg: configErr.reviewReasonMessage,
           reviewError: configErr as any,
-          missingFields: missingFields
+          missingFields: missingFiscalFields
         } as any);
         await addAutomationEvent("connector_resolving", "failed", configErr.reviewReasonMessage, undefined, "MISSING_FISCAL_PROFILE");
         setIsAutomatingLoading(false);
@@ -2155,16 +2150,21 @@ export default function ScannerAndSimulator({
         fiscalProfileSnapshot,
         attempts: 0,
         maxAttempts: 3,
+        currentStepIndex: 0,
+        waitingForFields: [],
+        canResume: true,
+        lastCompletedStepIndex: null,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
 
       const jobsCollection = collection(db, "invoice_jobs");
-      await addDoc(jobsCollection, jobData);
+      const jobRef = await addDoc(jobsCollection, jobData);
       
       await onUpdateTicketInDb(activeTicketId, {
         status: "queued_for_runner",
-        connectorId: activeConn.id || ""
+        connectorId: activeConn.id || "",
+        jobId: jobRef.id
       });
 
       await addAutomationEvent("connector_resolving", "success", "Ticket encolado para procesamiento por el motor robotizado.");
@@ -2562,10 +2562,47 @@ export default function ScannerAndSimulator({
       }
 
       // Save fiscal profile updates if any
-      if (Object.keys(profileUpdates).length > 0 && fiscalProfile) {
-        const updatedProfile = { ...fiscalProfile, ...profileUpdates };
+      let finalProfile = { ...(fiscalProfile || {}) };
+      if (Object.keys(profileUpdates).length > 0) {
+        finalProfile = { ...finalProfile, ...profileUpdates };
         if (onSaveProfile) {
-          await onSaveProfile(updatedProfile);
+          await onSaveProfile(finalProfile);
+        }
+      }
+
+      // Reset associated invoice_job if it exists (Case C)
+      if (ticketData.jobId) {
+        try {
+          const jobDocRef = doc(db, "invoice_jobs", ticketData.jobId);
+          const jobSnap = await getDoc(jobDocRef);
+          if (jobSnap.exists()) {
+            const jobOldData = jobSnap.data();
+            const ticketDataSnapshot = {
+              ...(jobOldData.ticketDataSnapshot || {}),
+              ...ticketUpdates,
+              folio: newPortalFields.billingReference || jobOldData.ticketDataSnapshot?.folio || "",
+              billingReference: newPortalFields.billingReference || jobOldData.ticketDataSnapshot?.billingReference || "",
+              total: newPortalFields.total !== undefined ? newPortalFields.total : (jobOldData.ticketDataSnapshot?.total || 0),
+              date: newPortalFields.date || jobOldData.ticketDataSnapshot?.date || ""
+            };
+            
+            const fiscalProfileSnapshot = {
+              ...(jobOldData.fiscalProfileSnapshot || {}),
+              ...profileUpdates
+            };
+
+            await updateDoc(jobDocRef, {
+              status: "pending",
+              attempts: 0,
+              ticketDataSnapshot,
+              fiscalProfileSnapshot,
+              waitingForFields: [],
+              canResume: true,
+              updatedAt: new Date().toISOString()
+            });
+          }
+        } catch (jobErr) {
+          console.error("Error updating/resetting invoice_job in Firestore:", jobErr);
         }
       }
 
@@ -2573,7 +2610,7 @@ export default function ScannerAndSimulator({
       const finalTicketUpdates = {
         ...ticketUpdates,
         portalFields: newPortalFields,
-        status: "connector_resolving", // Transition back to trigger rerun
+        status: "queued_for_runner", // Queue back for runner
         errorMsg: null,
         reviewReasonCode: null,
         reviewError: null
@@ -2587,14 +2624,18 @@ export default function ScannerAndSimulator({
 
       toast.success("Campos guardados. Reintentando procesamiento automático...");
       
-      const activeConn = matchingConnector || matchConnector(ticketData.nombreEmisor || "", ticketData.rfcEmisor || "");
-      if (activeConn) {
-        await handleTriggerAutomation(activeConn, ticketId, {
-          ...ticketData,
-          ...finalTicketUpdates
-        });
+      if (!ticketData.jobId) {
+        const activeConn = matchingConnector || matchConnector(ticketData.nombreEmisor || "", ticketData.rfcEmisor || "");
+        if (activeConn) {
+          await handleTriggerAutomation(activeConn, ticketId, {
+            ...ticketData,
+            ...finalTicketUpdates
+          });
+        } else {
+          toast.error("No se pudo iniciar el proceso: conector no identificado.");
+          setIsAutomatingLoading(false);
+        }
       } else {
-        toast.error("No se pudo iniciar el proceso: conector no identificado.");
         setIsAutomatingLoading(false);
       }
     } catch (err: any) {
@@ -4574,14 +4615,14 @@ return list.map(n => {
           if (tStatus === "connector_resolving" || tStatus === "extracted" || tStatus === "connector_detected") {
             return "Revisa los datos";
           }
-          if (tStatus === "missing_required_fields" || tStatus === "waiting_fiscal_profile") {
-            return "Necesitamos completar algunos datos";
+          if (tStatus === "missing_required_fields") {
+            return "Necesitamos completar algunos datos del ticket para solicitar la factura en el portal oficial.";
           }
-          if (tStatus === "queued_for_runner" || tStatus === "pending_portal_submission" || tStatus === "submitting_to_portal" || tStatus === "submitted_to_merchant" || tStatus === "waiting_portal_result") {
-            return "Solicitando factura";
+          if (tStatus === "waiting_fiscal_profile") {
+            return "El portal necesita tus datos fiscales para continuar con la factura.";
           }
-          if (tStatus === "runner_processing") {
-            return "Solicitando factura en el portal oficial";
+          if (tStatus === "queued_for_runner" || tStatus === "runner_processing" || tStatus === "pending_portal_submission" || tStatus === "submitting_to_portal" || tStatus === "submitted_to_merchant" || tStatus === "waiting_portal_result") {
+            return "Estamos solicitando la factura en el portal oficial.";
           }
           if (tStatus === "merchant_cfdi_downloaded") {
             return "Validando CFDI";

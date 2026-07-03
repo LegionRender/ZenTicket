@@ -7,6 +7,8 @@ import { createRunnerLog } from "../logging/createRunnerLog";
 
 export interface ExecutionResult {
   success: boolean;
+  paused?: boolean;
+  waitingForFields?: string[];
   xmlContent?: string;
   pdfHtml?: string;
   error?: string;
@@ -181,6 +183,51 @@ export async function executePortalMap(
       currentStepIdx = i;
       const step = steps[i];
       await createRunnerLog(jobId, ticketId, "INFO", `Ejecutando paso ${i + 1}/${steps.length}: [${step.type}]`, { stepIndex: i, stepType: step.type });
+
+      // Check if step requires missing fields
+      if (step.type === "fill" || step.type === "select" || step.type === "assertText") {
+        const template = step.value || "";
+        const matches = [...template.matchAll(/\{\{([^}]+)\}\}/g)];
+        const missingFieldsForStep: string[] = [];
+
+        for (const m of matches) {
+          const pathStr = m[1].trim();
+          const parts = pathStr.split(".");
+          const base = parts[0];
+          const key = parts[1];
+
+          if (base === "fiscalProfile") {
+            let mappedKey = key;
+            if (key === "rfc") mappedKey = "rfc";
+            else if (key === "businessName" || key === "razonSocial") mappedKey = "razonSocial";
+            else if (key === "postalCode" || key === "codigoPostal") mappedKey = "codigoPostal";
+            else if (key === "taxRegime" || key === "regimenFiscal") mappedKey = "regimenFiscal";
+            else if (key === "cfdiUse" || key === "usoCFDI") mappedKey = "usoCFDI";
+            else if (key === "email") mappedKey = "correoElectronico";
+
+            const val = fiscalProfile[mappedKey];
+            if (!val || !val.trim()) {
+              missingFieldsForStep.push(`fiscalProfile.${key}`);
+            }
+          } else if (base === "portalFields" || base === "ticket") {
+            const pFields = ticketData.portalFields || {};
+            const val = pFields[key] || ticketData[key];
+            if (val === undefined || val === null || (typeof val === "string" && !val.trim())) {
+              missingFieldsForStep.push(`portalFields.${key}`);
+            }
+          }
+        }
+
+        if (missingFieldsForStep.length > 0) {
+          await createRunnerLog(jobId, ticketId, "WARNING", `Ejecución pausada: Faltan campos requeridos en el paso ${i + 1} (${missingFieldsForStep.join(", ")})`);
+          return {
+            success: false,
+            paused: true,
+            stepIndex: i,
+            waitingForFields: missingFieldsForStep
+          };
+        }
+      }
 
       // Pre-step Captcha and Portal Error checks
       if (await checkCaptcha(page, captchaSelectors)) {

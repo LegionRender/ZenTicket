@@ -197,6 +197,31 @@ async function processJob(jobId: string) {
       lockedJob.fiscalProfileSnapshot
     );
 
+    if (result.paused) {
+      // Pause the execution!
+      await jobRef.update({
+        status: "waiting_user_input",
+        currentStepIndex: result.stepIndex,
+        waitingForFields: result.waitingForFields || [],
+        canResume: true,
+        lockedBy: null,
+        lockedAt: null,
+        updatedAt: new Date().toISOString()
+      });
+
+      await ticketRef.update({
+        status: "waiting_fiscal_profile",
+        reviewReasonCode: "MISSING_FISCAL_PROFILE",
+        errorMsg: "El portal necesita tus datos fiscales para continuar con la factura.",
+        missingFields: result.waitingForFields || [],
+        updatedAt: new Date().toISOString()
+      });
+
+      await createRunnerLog(jobId, ticketId, "INFO", `Ejecución pausada esperando datos del usuario: ${result.waitingForFields?.join(", ")}`);
+      setActiveJobContext(null, null, null, null);
+      return;
+    }
+
     if (!result.success) {
       throw {
         message: result.error || "Fallo en la navegación del portal.",
