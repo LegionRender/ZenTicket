@@ -132,10 +132,10 @@ async function processJob(jobId: string) {
       let finalStatus = "invoice_obtained";
       try {
         const isSatValid = await verifySatCfdi(
-          xmlResult.rfcEmisor,
-          xmlResult.rfcReceptor,
-          xmlResult.total,
-          xmlResult.uuid
+          xmlResult.rfcEmisor || "",
+          xmlResult.rfcReceptor || "",
+          xmlResult.total ?? 0,
+          xmlResult.uuid || ""
         );
         if (isSatValid) {
           finalStatus = "cfdi_validated";
@@ -306,10 +306,10 @@ async function processJob(jobId: string) {
     let finalStatus = "invoice_obtained";
     try {
       const isSatValid = await verifySatCfdi(
-        xmlResult.rfcEmisor,
-        xmlResult.rfcReceptor,
-        xmlResult.total,
-        xmlResult.uuid
+        xmlResult.rfcEmisor || "",
+        xmlResult.rfcReceptor || "",
+        xmlResult.total ?? 0,
+        xmlResult.uuid || ""
       );
       if (isSatValid) {
         finalStatus = "cfdi_validated";

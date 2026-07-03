@@ -282,9 +282,9 @@ export default function AdminScreen({
     try {
       const connRef = doc(db, "connectors", connectorId);
       await updateDoc(connRef, {
-        status: "automation_available",
+        status: "production_ready",
         runnerAvailable: true,
-        isProductionReady: false,
+        isProductionReady: true,
         updatedAt: new Date().toISOString()
       });
       toast.success("Automatización habilitada para este comercio exitosamente.", "Comercio Habilitado");
