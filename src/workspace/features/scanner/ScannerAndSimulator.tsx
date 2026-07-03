@@ -769,7 +769,19 @@ export default function ScannerAndSimulator({
         }
         setIsEditing(false);
         setActiveStep("correction");
-      } else if (ticket.status === "pending_portal_submission" || ticket.status === "submitted_to_merchant" || ticket.status === "processing" || ticket.status === "waiting_portal_result" || ticket.status === "sat_verifying" || ticket.status === "merchant_cfdi_downloaded") {
+      } else if ([
+        "queued_for_runner",
+        "runner_processing",
+        "waiting_fiscal_profile",
+        "missing_required_fields",
+        "sat_validation_pending",
+        "pending_portal_submission",
+        "submitted_to_merchant",
+        "processing",
+        "waiting_portal_result",
+        "sat_verifying",
+        "merchant_cfdi_downloaded"
+      ].includes(ticket.status || "")) {
         setActiveStep("automating");
         let progress = 10;
         if (ticket.status === "submitted_to_merchant") progress = 50;
@@ -4534,7 +4546,7 @@ return list.map(n => {
         )} 
       {/* STEP 3: REDESIGNED TIMELINE ACTIVE PROCESSING PANEL */}
       {activeStep === "automating" && (() => {
-        const currentTicket = (tickets || []).find(t => t.id === ticketId);
+        const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
 
         const getDetailedReasonMsg = (ticket: any): string => {
           if (!ticket) return "Error desconocido.";
