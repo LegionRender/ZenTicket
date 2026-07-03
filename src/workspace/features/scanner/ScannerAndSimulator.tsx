@@ -17,6 +17,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useAuth } from "@/auth/context/AuthContext";
 import logoLight from "@/assets/logos/logo-light.png";
 import logoDark from "@/assets/logos/logo-dark.png";
+import { sanitizeBillingReferenceForConnector } from "@/shared/utils/validation";
 
 export interface CorrectionError {
   reasonCode: "MISSING_FOLIO" | "MISSING_DATE" | "MISSING_TOTAL" | "MISSING_MERCHANT" | "PORTAL_REJECTED_FOLIO" | "PORTAL_REJECTED_DATE" | "PORTAL_REJECTED_TOTAL" | "PORTAL_REJECTED_RFC" | "LOW_IMAGE_QUALITY_CRITICAL";
@@ -172,17 +173,15 @@ function isInternalIdLike(value: string | undefined | null, rawOcrText?: string)
 }
 
 function sanitizePortalFieldsForConnector(
-  connectorId: string | undefined | null,
+  connector: any,
   detectedData: any,
   rawOcrText: string | undefined | null
 ): { billingReference: string; total: number; date: string; ticketNumber: string } {
   const ocrText = rawOcrText || "";
   let billingRef = detectedData.billingReference || detectedData.folio || "";
 
-  // Reject UUID or internal ID like values
-  if (isInternalIdLike(billingRef, ocrText)) {
-    billingRef = "";
-  }
+  // Call the central sanitization function
+  billingRef = sanitizeBillingReferenceForConnector(billingRef, ocrText, connector);
 
   // Attempt to extract reference from rawOcrText for Farmacias Similares if not found
   if (!billingRef && ocrText) {
@@ -725,8 +724,14 @@ export default function ScannerAndSimulator({
       };
       setExtractedData(data);
       const found = matchConnector(ticket.nombreEmisor, ticket.rfcEmisor);
-      const sanitized = sanitizePortalFieldsForConnector(found?.id, ticket.portalFields || data, ticket.rawOcrText);
-      const initialBillingRef = ticket.portalFields?.billingReference || sanitized.billingReference || "";
+      const sanitized = sanitizePortalFieldsForConnector(found, ticket.portalFields || data, ticket.rawOcrText);
+      const persistedReference = sanitizeBillingReferenceForConnector(
+        ticket.portalFields?.billingReference,
+        ticket.rawOcrText,
+        found
+      );
+      const detectedReference = sanitized.billingReference || "";
+      const initialBillingRef = persistedReference || detectedReference || "";
 
       setEditNombre(data.nombreEmisor || "");
       setEditRfc(data.rfcEmisor || "");
@@ -1068,7 +1073,7 @@ export default function ScannerAndSimulator({
         toast.warning(ocrResult.ocrError || "El OCR no pudo leer este ticket. Por favor, completa los campos manualmente.", "Captura Manual Activada");
       }
       const foundConnector = findMatchingConnector(ocrResult);
-      const sanitized = sanitizePortalFieldsForConnector(foundConnector?.id, ocrResult, ocrResult.rawOcrText);
+      const sanitized = sanitizePortalFieldsForConnector(foundConnector, ocrResult, ocrResult.rawOcrText);
 
       setExtractedData(ocrResult);
       setEditNombre(ocrResult.nombreEmisor || "");
@@ -1198,7 +1203,7 @@ export default function ScannerAndSimulator({
       if (pMapsSnap.empty) return false;
       
       const pMap = pMapsSnap.docs[0].data();
-      const pFields = sanitizePortalFieldsForConnector(foundConnector.id, ocrResult, ocrResult.rawOcrText);
+      const pFields = sanitizePortalFieldsForConnector(foundConnector, ocrResult, ocrResult.rawOcrText);
       
       const validationResult = validatePortalFieldsAgainstPortalMap(
         { ...ocrResult, portalFields: pFields },
@@ -1342,7 +1347,7 @@ export default function ScannerAndSimulator({
           updateTicketInBatch(idx, { progress: 75, step: "Buscando comercio..." });
 
           const foundConnector = findMatchingConnector(ocrResult);
-          const sanitized = sanitizePortalFieldsForConnector(foundConnector?.id, ocrResult, ocrResult.rawOcrText);
+          const sanitized = sanitizePortalFieldsForConnector(foundConnector, ocrResult, ocrResult.rawOcrText);
 
           updateTicketInBatch(idx, { progress: 90, step: "Guardando ticket..." });
           const isDataIncomplete = checkIsDataIncomplete(ocrResult);
@@ -1494,7 +1499,7 @@ export default function ScannerAndSimulator({
         toast.warning(ocrResult.ocrError || "El OCR no pudo leer este ticket. Por favor, completa los campos manualmente.", "Captura Manual Activada");
       }
       const foundConnector = findMatchingConnector(ocrResult);
-      const sanitized = sanitizePortalFieldsForConnector(foundConnector?.id, ocrResult, ocrResult.rawOcrText);
+      const sanitized = sanitizePortalFieldsForConnector(foundConnector, ocrResult, ocrResult.rawOcrText);
 
       setExtractedData(ocrResult);
       setEditNombre(ocrResult.nombreEmisor || "");
@@ -1942,7 +1947,7 @@ export default function ScannerAndSimulator({
       
       let pFields = currentTicketData.portalFields;
       if (!pFields) {
-        const sanitized = sanitizePortalFieldsForConnector(activeConn.id, {
+        const sanitized = sanitizePortalFieldsForConnector(activeConn, {
           billingReference: activeExtractedData.folio,
           total: activeExtractedData.total,
           fechaCompra: activeExtractedData.fechaCompra
@@ -1963,7 +1968,24 @@ export default function ScannerAndSimulator({
       await addLog("⚙️ Validando campos persistidos en la base de datos (Firestore)...", 400);
       const freshTicketDoc = await getDoc(ticketDocRef);
       const freshTicketData = freshTicketDoc.data()!;
-      pFields = freshTicketData.portalFields || {};
+      
+      let rawPFields = freshTicketData.portalFields || {};
+      const sanitizedFreshRef = sanitizeBillingReferenceForConnector(
+        rawPFields.billingReference,
+        freshTicketData.rawOcrText,
+        activeConn
+      );
+      
+      pFields = {
+        ...rawPFields,
+        billingReference: sanitizedFreshRef
+      };
+      
+      if (rawPFields.billingReference !== sanitizedFreshRef) {
+        await updateDoc(ticketDocRef, {
+          portalFields: pFields
+        });
+      }
 
       // First check technical configuration of the connector (Rule 11)
       const isProductionRuleMatch = activeConn.status === "production_ready" && activeConn.runnerAvailable === true && activeConn.isProductionReady === true;
@@ -2310,6 +2332,19 @@ export default function ScannerAndSimulator({
   };
 
   const handleSaveEditedData = async () => {
+    const cleanRef = sanitizeBillingReferenceForConnector(
+      editFolio,
+      extractedData?.rawOcrText,
+      matchingConnector
+    );
+
+    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(editFolio.trim());
+    const hasInternalPrefix = /^ticket_|^job_|^OFFLINE-|^worker-/i.test(editFolio.trim());
+    if (isUuid || hasInternalPrefix || (editFolio.trim() && !cleanRef)) {
+      setValidationError("Ese valor parece un identificador interno o folio fiscal, no una referencia de facturación del portal. Ingresa la referencia impresa en el ticket.");
+      return;
+    }
+
     const contract = matchingConnector?.extractionContract;
     const isContractConnector = !!contract;
 

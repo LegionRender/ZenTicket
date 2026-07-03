@@ -127,6 +127,77 @@ var import_firestore = require("firebase-admin/firestore");
 var import_auth = require("firebase-admin/auth");
 var import_axios = __toESM(require("axios"), 1);
 var import_crypto = __toESM(require("crypto"), 1);
+
+// src/shared/utils/validation.ts
+function sanitizeBillingReferenceForConnector(value, rawOcrText, connector, fieldContract) {
+  if (!value) return "";
+  let cleanValue = String(value).trim();
+  const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanValue);
+  const hasInternalPrefix = /^ticket_|^job_|^OFFLINE-|^worker-/i.test(cleanValue);
+  if (isUuid || hasInternalPrefix) {
+    console.log(`[Sanitizer] Blocked UUID or internal prefix: "${cleanValue}"`);
+    return "";
+  }
+  if (cleanValue.length > 20) {
+    let patternPassed = false;
+    let contractField2 = fieldContract;
+    if (!contractField2 && connector && connector.extractionContract) {
+      contractField2 = connector.extractionContract.requiredPortalFields?.find(
+        (f) => f.canonicalKey === "billingReference" || f.key === "portalFields.billingReference"
+      );
+    }
+    if (contractField2 && contractField2.validationPattern) {
+      try {
+        const regex = new RegExp(contractField2.validationPattern, "i");
+        patternPassed = regex.test(cleanValue);
+      } catch (e) {
+      }
+    }
+    if (!patternPassed) {
+      console.log(`[Sanitizer] Blocked too long value (>20 chars) without matching pattern: "${cleanValue}"`);
+      return "";
+    }
+  }
+  let contractField = fieldContract;
+  if (!contractField && connector && connector.extractionContract) {
+    contractField = connector.extractionContract.requiredPortalFields?.find(
+      (f) => f.canonicalKey === "billingReference" || f.key === "portalFields.billingReference"
+    );
+  }
+  if (contractField) {
+    if (contractField.validationPattern) {
+      try {
+        const regex = new RegExp(contractField.validationPattern, "i");
+        if (!regex.test(cleanValue)) {
+          console.log(`[Sanitizer] Blocked by validationPattern "${contractField.validationPattern}": "${cleanValue}"`);
+          return "";
+        }
+      } catch (e) {
+      }
+    }
+    if (contractField.forbiddenPatterns && contractField.forbiddenPatterns.length > 0) {
+      for (const pattern of contractField.forbiddenPatterns) {
+        try {
+          const regex = new RegExp(pattern, "i");
+          if (regex.test(cleanValue)) {
+            console.log(`[Sanitizer] Blocked by forbiddenPattern "${pattern}": "${cleanValue}"`);
+            return "";
+          }
+        } catch (e) {
+        }
+      }
+    }
+    if (contractField.requireLiteralMatch === true && rawOcrText) {
+      if (!rawOcrText.includes(cleanValue)) {
+        console.log(`[Sanitizer] Blocked: value "${cleanValue}" is not present in rawOcrText`);
+        return "";
+      }
+    }
+  }
+  return cleanValue;
+}
+
+// server.ts
 import_dotenv.default.config();
 var hasRealCredentials = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
 var adminDb;
@@ -903,11 +974,11 @@ app.post("/api/tickets/analyze", async (req, res) => {
         normalizedValue: qrParsed ? String(qrParsed.total) : String(extractedData.total || 0)
       },
       folio: {
-        value: qrParsed ? qrParsed.uuid : extractedData.folio || "",
-        confidence: qrParsed ? 1 : extractedData.folio ? 0.93 : 0.3,
-        source: qrParsed ? "qr" : "ocr",
+        value: extractedData.folio || "",
+        confidence: extractedData.folio ? 0.93 : 0,
+        source: "ocr",
         rawText: extractedData.folio || "",
-        normalizedValue: qrParsed ? qrParsed.uuid : extractedData.folio || ""
+        normalizedValue: extractedData.folio || ""
       },
       referenciaFacturacion: {
         value: extractedData.referenciaFacturacion || "",
@@ -981,37 +1052,11 @@ app.post("/api/tickets/analyze", async (req, res) => {
       const exchangeRate = 18.5;
       rawCost = (promptTokens * 0.075 + outputTokens * 0.3) / 1e6 * exchangeRate;
     }
-    let billingReference = extractedData.billingReference || extractedData.referenciaFacturacion || extractedData.folio || "";
-    if (matchedConnector && matchedConnector.extractionContract) {
-      const refField = matchedConnector.extractionContract.requiredPortalFields.find((f) => f.canonicalKey === "billingReference");
-      if (refField) {
-        if (billingReference && refField.validationPattern) {
-          const regex = new RegExp(refField.validationPattern, "i");
-          if (!regex.test(billingReference)) {
-            console.log(`[Validation] billingReference '${billingReference}' failed validationPattern '${refField.validationPattern}'. Clearing.`);
-            billingReference = "";
-          }
-        }
-        if (billingReference && refField.forbiddenPatterns) {
-          for (const pattern of refField.forbiddenPatterns) {
-            const regex = new RegExp(pattern, "i");
-            if (regex.test(billingReference)) {
-              console.log(`[Validation] billingReference '${billingReference}' matched forbiddenPattern '${pattern}'. Clearing.`);
-              billingReference = "";
-              break;
-            }
-          }
-        }
-      }
-    } else {
-      if (billingReference) {
-        const isUuid = /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/i.test(billingReference);
-        const hasMockPrefix = /^ticket_|^job_|^OFFLINE-/i.test(billingReference);
-        if (isUuid || hasMockPrefix) {
-          billingReference = "";
-        }
-      }
-    }
+    let billingReference = sanitizeBillingReferenceForConnector(
+      extractedData.billingReference || extractedData.referenciaFacturacion || extractedData.folio || "",
+      textResult,
+      matchedConnector
+    );
     fields.referenciaFacturacion.value = billingReference;
     fields.referenciaFacturacion.normalizedValue = billingReference;
     const portalFields = {
@@ -1030,6 +1075,7 @@ app.post("/api/tickets/analyze", async (req, res) => {
       billingReference: fields.referenciaFacturacion.value,
       codigoBarras: fields.codigoBarras.value,
       portalFields,
+      qrCfdiUuid: qrParsed ? qrParsed.uuid : null,
       ocrFailed: finalOcrFailed,
       ocrError: ocrErrorStr || extractedData.ocrError || null,
       confidenceScore: parseFloat(avgConfidence.toFixed(4)),

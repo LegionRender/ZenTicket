@@ -435,6 +435,85 @@ async function recordJobStart({ userId, mimeType }) {
   return ref;
 }
 
+function sanitizeBillingReferenceForConnector(value, rawOcrText, connector, fieldContract) {
+  if (!value) return "";
+
+  let cleanValue = String(value).trim();
+
+  // 1. General forbidden checks (UUIDs, internal IDs)
+  const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanValue);
+  const hasInternalPrefix = /^ticket_|^job_|^OFFLINE-|^worker-/i.test(cleanValue);
+  if (isUuid || hasInternalPrefix) {
+    console.log(`[Sanitizer] Blocked UUID or internal prefix: "${cleanValue}"`);
+    return "";
+  }
+
+  // 2. Length check: if value is > 20 characters and does not match the expected pattern, block it.
+  if (cleanValue.length > 20) {
+    let patternPassed = false;
+    let contractField = fieldContract;
+    if (!contractField && connector && connector.extractionContract) {
+      contractField = connector.extractionContract.requiredPortalFields?.find(
+        (f) => f.canonicalKey === "billingReference" || f.key === "portalFields.billingReference"
+      );
+    }
+    if (contractField && contractField.validationPattern) {
+      try {
+        const regex = new RegExp(contractField.validationPattern, "i");
+        patternPassed = regex.test(cleanValue);
+      } catch (e) {}
+    }
+    if (!patternPassed) {
+      console.log(`[Sanitizer] Blocked too long value (>20 chars) without matching pattern: "${cleanValue}"`);
+      return "";
+    }
+  }
+
+  // 3. Extraction contract field-specific checks
+  let contractField = fieldContract;
+  if (!contractField && connector && connector.extractionContract) {
+    contractField = connector.extractionContract.requiredPortalFields?.find(
+      (f) => f.canonicalKey === "billingReference" || f.key === "portalFields.billingReference"
+    );
+  }
+
+  if (contractField) {
+    // validationPattern check
+    if (contractField.validationPattern) {
+      try {
+        const regex = new RegExp(contractField.validationPattern, "i");
+        if (!regex.test(cleanValue)) {
+          console.log(`[Sanitizer] Blocked by validationPattern "${contractField.validationPattern}": "${cleanValue}"`);
+          return "";
+        }
+      } catch (e) {}
+    }
+
+    // forbiddenPatterns check
+    if (contractField.forbiddenPatterns && contractField.forbiddenPatterns.length > 0) {
+      for (const pattern of contractField.forbiddenPatterns) {
+        try {
+          const regex = new RegExp(pattern, "i");
+          if (regex.test(cleanValue)) {
+            console.log(`[Sanitizer] Blocked by forbiddenPattern "${pattern}": "${cleanValue}"`);
+            return "";
+          }
+        } catch (e) {}
+      }
+    }
+
+    // requireLiteralMatch check
+    if (contractField.requireLiteralMatch === true && rawOcrText) {
+      if (!rawOcrText.includes(cleanValue)) {
+        console.log(`[Sanitizer] Blocked: value "${cleanValue}" is not present in rawOcrText`);
+        return "";
+      }
+    }
+  }
+
+  return cleanValue;
+}
+
 async function processOcrRequest({ req, image, mimeType, userId, retryJobId = null }) {
   const providers = buildProviderPlan(req);
   const jobRef = retryJobId ? db.collection("ocr_jobs").doc(retryJobId) : await recordJobStart({ userId, mimeType });
@@ -649,11 +728,11 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           normalizedValue: qrParsed ? String(qrParsed.total) : String(extractedData.total || 0)
         },
         folio: {
-          value: qrParsed ? qrParsed.uuid : (extractedData.folio || ""),
-          confidence: qrParsed ? 1.0 : (extractedData.folio ? 0.93 : 0.30),
-          source: qrParsed ? "qr" : "ocr",
+          value: extractedData.folio || "",
+          confidence: extractedData.folio ? 0.93 : 0.0,
+          source: "ocr",
           rawText: extractedData.folio || "",
-          normalizedValue: qrParsed ? qrParsed.uuid : (extractedData.folio || "")
+          normalizedValue: extractedData.folio || ""
         },
         referenciaFacturacion: {
           value: extractedData.referenciaFacturacion || "",

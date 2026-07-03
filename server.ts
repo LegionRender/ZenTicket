@@ -12,6 +12,8 @@ import crypto from "crypto";
 
 dotenv.config();
 
+import { sanitizeBillingReferenceForConnector } from "./src/shared/utils/validation";
+
 const hasRealCredentials = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
 let adminDb: any;
@@ -931,11 +933,11 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         normalizedValue: qrParsed ? String(qrParsed.total) : String(extractedData.total || 0)
       },
       folio: {
-        value: qrParsed ? qrParsed.uuid : (extractedData.folio || ""),
-        confidence: qrParsed ? 1.0 : (extractedData.folio ? 0.93 : 0.30),
-        source: qrParsed ? "qr" : "ocr",
+        value: extractedData.folio || "",
+        confidence: extractedData.folio ? 0.93 : 0.0,
+        source: "ocr",
         rawText: extractedData.folio || "",
-        normalizedValue: qrParsed ? qrParsed.uuid : (extractedData.folio || "")
+        normalizedValue: extractedData.folio || ""
       },
       referenciaFacturacion: {
         value: extractedData.referenciaFacturacion || "",
@@ -1022,42 +1024,11 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       rawCost = (((promptTokens * 0.075) + (outputTokens * 0.30)) / 1000000) * exchangeRate;
     }
 
-    let billingReference = extractedData.billingReference || extractedData.referenciaFacturacion || extractedData.folio || "";
-
-    // Validate billingReference against contract if found
-    if (matchedConnector && matchedConnector.extractionContract) {
-      const refField = matchedConnector.extractionContract.requiredPortalFields.find((f: any) => f.canonicalKey === "billingReference");
-      if (refField) {
-        // Pasa validationPattern?
-        if (billingReference && refField.validationPattern) {
-          const regex = new RegExp(refField.validationPattern, "i");
-          if (!regex.test(billingReference)) {
-            console.log(`[Validation] billingReference '${billingReference}' failed validationPattern '${refField.validationPattern}'. Clearing.`);
-            billingReference = "";
-          }
-        }
-        // Coincide con forbiddenPatterns?
-        if (billingReference && refField.forbiddenPatterns) {
-          for (const pattern of refField.forbiddenPatterns) {
-            const regex = new RegExp(pattern, "i");
-            if (regex.test(billingReference)) {
-              console.log(`[Validation] billingReference '${billingReference}' matched forbiddenPattern '${pattern}'. Clearing.`);
-              billingReference = "";
-              break;
-            }
-          }
-        }
-      }
-    } else {
-      // Generic fallback forbidden checks
-      if (billingReference) {
-        const isUuid = /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/i.test(billingReference);
-        const hasMockPrefix = /^ticket_|^job_|^OFFLINE-/i.test(billingReference);
-        if (isUuid || hasMockPrefix) {
-          billingReference = "";
-        }
-      }
-    }
+    let billingReference = sanitizeBillingReferenceForConnector(
+      extractedData.billingReference || extractedData.referenciaFacturacion || extractedData.folio || "",
+      textResult,
+      matchedConnector
+    );
 
     fields.referenciaFacturacion.value = billingReference;
     fields.referenciaFacturacion.normalizedValue = billingReference;
@@ -1079,6 +1050,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       billingReference: fields.referenciaFacturacion.value,
       codigoBarras: fields.codigoBarras.value,
       portalFields,
+      qrCfdiUuid: qrParsed ? qrParsed.uuid : null,
       ocrFailed: finalOcrFailed,
       ocrError: ocrErrorStr || extractedData.ocrError || null,
       confidenceScore: parseFloat(avgConfidence.toFixed(4)),
