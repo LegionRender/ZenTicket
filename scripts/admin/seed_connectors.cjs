@@ -511,14 +511,15 @@ async function seedConnectors() {
         } else if (item.rfc === "CCO8605231N4") {
           // Oxxo real flow steps
           steps = [
-            { type: "goto", url: "{{portalMap.entryUrl}}" },
-            {
-              type: "conditional",
-              selector: "[id='form:dlgAyudaTicket']",
-              steps: [
-                { type: "click", selector: "[id='form:dlgAyudaTicket'] .ui-dialog-titlebar-close" }
-              ]
-            },
+             { type: "goto", url: "{{portalMap.entryUrl}}" },
+             { type: "waitForTimeout", delay: 3000 },
+             {
+               type: "conditional",
+               selector: "[id='form:dlgAyudaTicket']",
+               steps: [
+                 { type: "click", selector: "[id='form:dlgAyudaTicket'] .ui-dialog-titlebar-close" }
+               ]
+             },
             { type: "evaluate", selector: "[id='form:fecha_input']", value: "{{portalFields.fecha}}", transform: "ddmmyyyy" },
             { type: "fill", selector: "[id='form:folio']", value: "{{portalFields.billingReference}}" },
             { type: "fill", selector: "[id='form:venta']", value: "{{portalFields.venta}}" },
