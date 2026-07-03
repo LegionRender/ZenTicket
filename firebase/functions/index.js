@@ -237,7 +237,9 @@ async function analyzeTicketImageQuality(ai, imagePart) {
 }
 
 async function runSecondaryExtraction(ai, imagePart, rawOcrText, connector, missingFieldKey) {
+  if (!connector || !connector.extractionContract) return null;
   const contract = connector.extractionContract;
+  if (!contract.requiredPortalFields) return null;
   const field = contract.requiredPortalFields.find(f => f.canonicalKey === missingFieldKey);
   if (!field) return null;
 
@@ -891,17 +893,32 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         billingReference = sanitized;
       }
 
-      let portalFieldsConfidence = {
-        billingReference: 0.0,
-        total: 0.0
-      };
+      const contractFields = matchedConnector?.extractionContract?.requiredPortalFields || [];
+      const dynamicPortalFields = {};
+      const portalFieldsConfidence = {};
+      const forbiddenInternalValue = /^(ticket_|job_|worker-|pilot-|offline-|mock_|test_)|^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-      if (extractedData.portalFieldsConfidence) {
-        portalFieldsConfidence.billingReference = parseFloat(String(extractedData.portalFieldsConfidence.billingReference || 0.0));
-        portalFieldsConfidence.total = parseFloat(String(extractedData.portalFieldsConfidence.total || 0.0));
-      } else {
-        portalFieldsConfidence.billingReference = billingReference ? 0.90 : 0.0;
-        portalFieldsConfidence.total = extractedData.total ? 0.90 : 0.0;
+      for (const field of contractFields) {
+        const key = String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "");
+        if (!key) continue;
+        let value = key === "billingReference" ? billingReference : extractedData[key];
+        if (typeof value === "string") value = value.trim();
+        if (typeof value === "string" && forbiddenInternalValue.test(value)) {
+          rejectedValuesList.push(value);
+          value = "";
+        }
+        if (value !== "" && value !== null && value !== undefined && field.validationPattern) {
+          try {
+            if (!new RegExp(field.validationPattern).test(String(value))) {
+              rejectedValuesList.push(String(value));
+              value = "";
+            }
+          } catch {
+            value = "";
+          }
+        }
+        dynamicPortalFields[key] = value ?? "";
+        portalFieldsConfidence[key] = parseFloat(String(extractedData.portalFieldsConfidence?.[key] || (value !== "" ? 0.9 : 0)));
       }
 
       const imagePart = {
@@ -912,12 +929,16 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
       };
 
       // Phased validation checks
-      const isBillingRefRequired = matchedConnector && matchedConnector.extractionContract && matchedConnector.extractionContract.requiredPortalFields?.some((f) => f.canonicalKey === "billingReference");
-      const isBillingRefMissingOrLow = isBillingRefRequired && (!billingReference || portalFieldsConfidence.billingReference < 0.5);
+      const requiredFieldsNeedingRetry = contractFields.filter((field) => {
+        if (field.required === false) return false;
+        const key = String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "");
+        const value = dynamicPortalFields[key];
+        return value === "" || value === null || value === undefined || (portalFieldsConfidence[key] || 0) < 0.5;
+      });
       const isTextTooShort = !extractedData.rawOcrText || extractedData.rawOcrText.length < 50;
 
-      if (isBillingRefMissingOrLow || isTextTooShort) {
-        console.log("[OCR Phased Cloud] Required field missing or low confidence. Running quality check...");
+      if (requiredFieldsNeedingRetry.length > 0 || isTextTooShort) {
+        console.log("[OCR Phased Cloud] Required field is missing/low confidence or text too short. Running quality analysis...");
         qualityResult = await analyzeTicketImageQuality(ai, imagePart);
         
         const isBadQuality = qualityResult.isBlurry || qualityResult.isCropped || qualityResult.isLowLighting || !qualityResult.isLegible || qualityResult.isIncomplete;
@@ -926,21 +947,54 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           manualInputReason = "IMAGE_QUALITY_ISSUE";
           console.log(`[OCR Phased Cloud] Bad quality detected: ${qualityResult.reason}. Skipping secondary extraction.`);
         } else {
-          // Legible! Run secondary extraction pass
-          secondaryOcrExecuted = true;
-          secondaryOcrFieldsList.push("billingReference");
-          extractionAttemptsCount++;
+          // Legible ticket: retry every missing contract field, not only billingReference.
+          for (const field of requiredFieldsNeedingRetry) {
+            const key = String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "");
+            if (!key || field.fieldExtractionHints?.allowSecondaryOcr === false) continue;
+            secondaryOcrExecuted = true;
+            secondaryOcrFieldsList.push(key);
+            extractionAttemptsCount++;
 
-          const secondaryVal = await runSecondaryExtraction(ai, imagePart, extractedData.rawOcrText || "", matchedConnector, "billingReference");
-          if (secondaryVal) {
-            const sanitizedSecondary = sanitizeBillingReferenceForConnector(secondaryVal, extractedData.rawOcrText || "", matchedConnector);
-            if (secondaryVal !== sanitizedSecondary) {
-              rejectedValuesList.push(secondaryVal);
-            } else if (sanitizedSecondary) {
-              billingReference = sanitizedSecondary;
-              portalFieldsConfidence.billingReference = 0.90;
-              console.log(`[OCR Phased Cloud] Secondary extraction found reference: "${billingReference}"`);
+            const secondaryValue = await runSecondaryExtraction(
+              ai,
+              imagePart,
+              extractedData.rawOcrText || "",
+              matchedConnector,
+              key
+            );
+            if (!secondaryValue) continue;
+
+            let normalizedValue = secondaryValue.trim();
+            if (key === "billingReference") {
+              normalizedValue = sanitizeBillingReferenceForConnector(
+                normalizedValue,
+                extractedData.rawOcrText || "",
+                matchedConnector
+              );
             }
+            if (!normalizedValue || forbiddenInternalValue.test(String(normalizedValue))) {
+              rejectedValuesList.push(secondaryValue);
+              continue;
+            }
+            if (["number", "currency", "decimal"].includes(String(field.type || "").toLowerCase())) {
+              const parsedNumber = Number.parseFloat(String(normalizedValue).replace(/[$,\s]/g, ""));
+              if (!Number.isFinite(parsedNumber)) continue;
+              normalizedValue = parsedNumber;
+            }
+            if (field.validationPattern) {
+              try {
+                if (!new RegExp(field.validationPattern).test(String(normalizedValue))) {
+                  rejectedValuesList.push(secondaryValue);
+                  continue;
+                }
+              } catch {
+                continue;
+              }
+            }
+            dynamicPortalFields[key] = normalizedValue;
+            portalFieldsConfidence[key] = 0.9;
+            if (key === "billingReference") billingReference = String(normalizedValue);
+            console.log(`[OCR Phased Cloud] Secondary extraction found ${key}.`);
           }
         }
       }
@@ -950,19 +1004,17 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
       const missingFieldsList = [];
       const lowConfidenceFieldsList = [];
 
-      if (isBillingRefRequired) {
-        if (!billingReference) {
-          missingFieldsList.push("portalFields.billingReference");
-        } else if (portalFieldsConfidence.billingReference < 0.8) {
-          lowConfidenceFieldsList.push("portalFields.billingReference");
-        }
-      }
-      const isTotalRequired = matchedConnector && matchedConnector.extractionContract && matchedConnector.extractionContract.requiredPortalFields?.some((f) => f.canonicalKey === "total");
-      if (isTotalRequired) {
-        if (!extractedData.total) {
-          missingFieldsList.push("portalFields.total");
-        } else if (portalFieldsConfidence.total < 0.8) {
-          lowConfidenceFieldsList.push("portalFields.total");
+      for (const field of contractFields) {
+        if (field.required === false) continue;
+        const key = String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "");
+        if (!key) continue;
+        const value = dynamicPortalFields[key];
+        const isEmpty = value === "" || value === null || value === undefined ||
+          (typeof value === "number" && !Number.isFinite(value));
+        if (isEmpty) {
+          missingFieldsList.push(`portalFields.${key}`);
+        } else if ((portalFieldsConfidence[key] || 0) < 0.8) {
+          lowConfidenceFieldsList.push(`portalFields.${key}`);
         }
       }
 
@@ -1037,7 +1089,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         },
         referenciaFacturacion: {
           value: billingReference,
-          confidence: portalFieldsConfidence.billingReference,
+          confidence: portalFieldsConfidence.billingReference || 0.0,
           source: "ocr",
           rawText: billingReference,
           normalizedValue: billingReference
@@ -1074,11 +1126,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
 
       pipelineLogs.push("Etapa 5: Ejecutando normalización de campos (limpieza de RFC, formato de fechas y totales).");
 
-      const portalFields = {
-        billingReference: billingReference || "",
-        total: qrParsed ? qrParsed.total : (parseFloat(String(extractedData.total)) || 0),
-        date: extractedData.fechaCompra || ""
-      };
+      const portalFields = matchedConnector ? dynamicPortalFields : {};
 
       const avgConfidence = Object.values(fields).reduce((sum, f) => sum + f.confidence, 0) / Object.keys(fields).length;
 
