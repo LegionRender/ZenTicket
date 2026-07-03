@@ -14,7 +14,8 @@ const { defineSecret, defineString } = require("firebase-functions/params");
 
 admin.initializeApp();
 
-const db = admin.firestore();
+const { getFirestore } = require("firebase-admin/firestore");
+const db = getFirestore("ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee");
 const app = express();
 
 const geminiApiKey = defineSecret("GEMINI_API_KEY");

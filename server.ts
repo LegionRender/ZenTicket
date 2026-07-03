@@ -31,7 +31,7 @@ if (hasRealCredentials) {
       });
     }
     console.log("[Firebase Admin] Inicializado exitosamente.");
-    adminDb = getFirestore();
+    adminDb = getFirestore(undefined, "ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee");
   } catch (e) {
     console.warn("[Firebase Admin Warning] No se pudo inicializar con credenciales reales.", e);
   }
@@ -2056,7 +2056,7 @@ app.post("/api/admin/discover-portal", async (req: Request, res: Response): Prom
   console.log(`[Discover Portal] Starting Playwright discovery on: ${officialBillingUrl}`);
   let browser = null;
   try {
-    const { chromium } = require("playwright");
+    const { chromium } = await import("playwright");
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     await page.goto(officialBillingUrl, { waitUntil: "load", timeout: 20000 });
@@ -2285,12 +2285,12 @@ app.post("/api/admin/analyze-html", async (req: Request, res: Response): Promise
   }
 });
 
-const {
+import {
   parseSatQrUrl,
   validateXmlStructure,
   parseCfdiInfo,
   verifyCfdiWithSat
-} = require("./firebase/functions/fiscalUtils.js");
+} from "./firebase/functions/fiscalUtils.js";
 
 app.post("/api/cfdi/verify-sat", async (req: Request, res: Response): Promise<void> => {
   const { xmlContent } = req.body;
