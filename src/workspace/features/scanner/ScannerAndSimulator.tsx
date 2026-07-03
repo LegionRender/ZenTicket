@@ -4981,6 +4981,31 @@ return list.map(n => {
           return "Estamos solicitando la factura en el portal oficial";
         };
 
+        const s1 = getStepStatus(1);
+        const s2 = getStepStatus(2);
+        const s3 = getStepStatus(3);
+        const s4 = getStepStatus(4);
+
+        let dynamicProgress = 0;
+        if (s1 === "completed") {
+          dynamicProgress = 0;
+          if (s2 === "completed") {
+            dynamicProgress = 33.3;
+            if (s3 === "completed") {
+              dynamicProgress = 66.6;
+              if (s4 === "completed") {
+                dynamicProgress = 100;
+              } else if (s4 === "active") {
+                dynamicProgress = 83.3;
+              }
+            } else if (s3 === "active") {
+              dynamicProgress = 50;
+            }
+          } else if (s2 === "active") {
+            dynamicProgress = 16.6;
+          }
+        }
+
         return (
           <div id="automating-panel" className="flex-1 flex flex-col justify-between relative z-10 animate-fade-in_50 font-sans text-left bg-white border border-slate-200/80 rounded-3xl p-4 sm:p-8 shadow-[0_15px_35px_-10px_rgba(37,99,235,0.03)] my-4">
             {/* Header section fitting ZenTicket graphic language */}
@@ -5015,7 +5040,7 @@ return list.map(n => {
               {/* Active track overlay */}
               <div 
                 className="absolute top-1/2 left-0 h-[5px] bg-gradient-to-r from-blue-500 to-[#0B53F4] -translate-y-1/2 rounded-full transition-all duration-500 shadow-[0_1px_4px_rgba(11,83,244,0.15)]"
-                style={{ width: `${Math.min(100, Math.max(0, simulationProgress))}%` }}
+                style={{ width: `${dynamicProgress}%` }}
               />
 
               {/* Step Nodes Container */}
