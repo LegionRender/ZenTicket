@@ -974,6 +974,25 @@ export default function ProfileForm({
     }
   }, [initialProfile?.tempPassword]);
 
+  // Synchronize all local state registers with initialProfile when it updates
+  React.useEffect(() => {
+    if (initialProfile) {
+      if (initialProfile.rfc) setRfc(initialProfile.rfc);
+      if (initialProfile.razonSocial) setRazonSocial(initialProfile.razonSocial);
+      if (initialProfile.regimenFiscal) setRegimenFiscal(initialProfile.regimenFiscal);
+      if (initialProfile.codigoPostal) setCodigoPostal(initialProfile.codigoPostal);
+      if (initialProfile.usoCFDI) setUsoCFDI(initialProfile.usoCFDI);
+      if (initialProfile.personalGeminiKey) setPersonalGeminiKey(initialProfile.personalGeminiKey);
+      if (initialProfile.nombreCompleto) setNombreCompleto(initialProfile.nombreCompleto);
+      if (initialProfile.correoElectronico) setCorreoElectronico(initialProfile.correoElectronico);
+      if (initialProfile.telefono) setTelefono(initialProfile.telefono);
+      if (initialProfile.correoRecepcion) setCorreoRecepcion(initialProfile.correoRecepcion);
+      if (initialProfile.correoPago) setCorreoPago(initialProfile.correoPago);
+      if (initialProfile.facturacionAutomatica !== undefined) setFacturacionAutomatica(initialProfile.facturacionAutomatica);
+      if (initialProfile.metodoRecepcion) setMetodoRecepcion(initialProfile.metodoRecepcion);
+    }
+  }, [initialProfile]);
+
   // Generate and set a unique, complex default password for Google users who don't have one yet
   React.useEffect(() => {
     const generateAndSetDefaultPassword = async () => {
@@ -1486,6 +1505,7 @@ export default function ProfileForm({
                 // Instantly save to Firebase for real tests
                 try {
                   await onSave({
+                    ...initialProfile,
                     userId: resolvedUserId || "guest",
                     rfc: rfc || initialProfile?.rfc || "",
                     razonSocial: razonSocial || initialProfile?.razonSocial || "",
@@ -1495,7 +1515,9 @@ export default function ProfileForm({
                     createdAt: initialProfile?.createdAt || new Date().toISOString(),
                     personalGeminiKey: personalGeminiKey || initialProfile?.personalGeminiKey || "",
                     plan: initialProfile?.plan || "gratuito",
-                    paymentCards: []
+                    nombreCompleto: nombreCompleto.trim(),
+                    correoElectronico: correoElectronico.trim(),
+                    telefono: telefono.trim()
                   });
                   toast.success("Tarjeta vinculada con exito en tu cuenta.", "Metodo actualizado");
                 } catch (e) {
@@ -1562,6 +1584,7 @@ export default function ProfileForm({
             setIsProcessingPayment(true);
             try {
               await onSave({
+                ...initialProfile,
                 userId: resolvedUserId || "guest",
                 rfc: rfc || "CABE850101ABC",
                 razonSocial: razonSocial.trim().toUpperCase(),
@@ -1573,7 +1596,9 @@ export default function ProfileForm({
                 plan: "gratuito",
                 planStartDate: new Date().toISOString(),
                 autoRenew: false,
-                paymentCards: []
+                nombreCompleto: nombreCompleto.trim(),
+                correoElectronico: correoElectronico.trim(),
+                telefono: telefono.trim()
               });
               setIsProcessingPayment(false);
               setCheckoutPlanType(null);
@@ -2188,6 +2213,7 @@ export default function ProfileForm({
 
     try {
       await onSave({
+        ...initialProfile,
         userId: resolvedUserId || "guest",
         rfc: cleanedRFC,
         razonSocial: razonSocial.trim().toUpperCase(),
@@ -2197,11 +2223,13 @@ export default function ProfileForm({
         createdAt: initialProfile?.createdAt || new Date().toISOString(),
         personalGeminiKey: personalGeminiKey.trim(),
         plan: initialProfile?.plan || "gratuito",
-        paymentCards: [],
         correoRecepcion: correoRecepcion.trim(),
         correoPago: correoPago.trim(),
         facturacionAutomatica,
         metodoRecepcion,
+        nombreCompleto: nombreCompleto.trim(),
+        correoElectronico: correoElectronico.trim(),
+        telefono: telefono.trim(),
         navigationDisabled: false // Deactivate navigation restriction automatically so user can navigate!
       });
       setHasSavedFiscalData(true);
@@ -2242,6 +2270,7 @@ export default function ProfileForm({
 
     try {
       await onSave({
+        ...initialProfile,
         userId: resolvedUserId || "guest",
         rfc: cleanedRFC,
         razonSocial: razonSocial.trim().toUpperCase(),
@@ -2251,11 +2280,13 @@ export default function ProfileForm({
         createdAt: initialProfile?.createdAt || new Date().toISOString(),
         personalGeminiKey: personalGeminiKey.trim(),
         plan: initialProfile?.plan || "gratuito",
-        paymentCards: [],
         correoRecepcion: correoRecepcion.trim(),
         correoPago: correoPago.trim(),
         facturacionAutomatica,
-        metodoRecepcion
+        metodoRecepcion,
+        nombreCompleto: nombreCompleto.trim(),
+        correoElectronico: correoElectronico.trim(),
+        telefono: telefono.trim()
       });
       toast.success("¡Perfil y preferencias guardadas exitosamente!", "Cambios Guardados");
       
