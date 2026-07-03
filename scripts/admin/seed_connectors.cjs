@@ -391,7 +391,7 @@ async function seedConnectors() {
               likelyZones: ["bottom", "summary"],
               nearbyWords: ["total", "neto", "importe", "pago", "monto"],
               rejectIfLooksLike: ["uuid", "internal_id"],
-              allowSecondaryOcr: false
+              allowSecondaryOcr: true
             };
           } else if (f.canonicalKey === "branch") {
             f.fieldExtractionHints = {
@@ -451,10 +451,10 @@ async function seedConnectors() {
           // Farmacias Similares real flow steps
           steps = [
             { type: "goto", url: "{{portalMap.entryUrl}}" },
-            { type: "fill", selector: "input#Referencia", value: "{{ticket.billingReference}}", transform: "trim" },
-            { type: "fill", selector: "input#Sucursal", value: "{{ticket.branch}}", transform: "trim" },
-            { type: "fill", selector: "input#CodigoBarras", value: "{{ticket.barcode}}", transform: "trim" },
-            { type: "fill", selector: "input#total_simi", value: "{{ticket.total}}", transform: "fixed2" },
+            { type: "fill", selector: "input#Referencia", value: "{{portalFields.billingReference}}", transform: "trim" },
+            { type: "fill", selector: "input#Sucursal", value: "{{portalFields.branch}}", transform: "trim" },
+            { type: "fill", selector: "input#CodigoBarras", value: "{{portalFields.barcode}}", transform: "trim" },
+            { type: "fill", selector: "input#total_simi", value: "{{portalFields.total}}", transform: "fixed2" },
             { type: "click", selector: "button#btnBuscar" },
             { type: "waitForSelector", selector: "input#rfc_simi" },
             { type: "fill", selector: "input#rfc_simi", value: "{{fiscalProfile.rfc}}", transform: "uppercase" },

@@ -378,6 +378,9 @@ export default function ScannerAndSimulator({
   const checkIsDataIncomplete = (data: ExtractedTicketData): boolean => {
     const found = matchConnector(data.nombreEmisor, data.rfcEmisor);
     if (found) {
+      if (hasUsableExtractionContract(found.extractionContract)) {
+        return !validatePortalFields(found.extractionContract, (data as any).portalFields || {}).isValid;
+      }
       try {
         const fields = JSON.parse(found.fieldsJson || "[]");
         if (fields.length > 0) {
@@ -1128,6 +1131,10 @@ export default function ScannerAndSimulator({
         confidenceScore: ocrResult.confidenceScore,
         extractedFields: ocrResult.extractedFields ? JSON.stringify(ocrResult.extractedFields) : "",
         rawOcrText: ocrResult.rawOcrText || "",
+        portalFields: ocrResult.portalFields || {},
+        portalFieldsConfidence: ocrResult.portalFieldsConfidence || {},
+        extractionState: ocrResult.extractionState || "extraction_found",
+        extractionDiagnostics: ocrResult.extractionDiagnostics || null,
       } as any);
       setTicketId(tId);
       await ensureTrainingRequest(ocrResult, foundConnector, tId);
@@ -1360,6 +1367,7 @@ export default function ScannerAndSimulator({
           cost: ocrResult.cost !== undefined ? ocrResult.cost : 0.50,
           rawCost: ocrResult.rawCost || 0.0,
           extractionState: ocrResult.extractionState || "extraction_found",
+          portalFields: ocrResult.portalFields || {},
           portalFieldsConfidence: ocrResult.portalFieldsConfidence || { billingReference: 1.0, total: 1.0 },
           extractionDiagnostics: ocrResult.extractionDiagnostics || null
         });
@@ -1468,6 +1476,10 @@ export default function ScannerAndSimulator({
             confidenceScore: ocrResult.confidenceScore,
             extractedFields: ocrResult.extractedFields ? JSON.stringify(ocrResult.extractedFields) : "",
             rawOcrText: ocrResult.rawOcrText || "",
+            portalFields: ocrResult.portalFields || {},
+            portalFieldsConfidence: ocrResult.portalFieldsConfidence || {},
+            extractionState: ocrResult.extractionState || "extraction_found",
+            extractionDiagnostics: ocrResult.extractionDiagnostics || null,
           } as any);
 
           let isEnqueued = false;
@@ -1659,6 +1671,10 @@ export default function ScannerAndSimulator({
         confidenceScore: ocrResult.confidenceScore,
         extractedFields: ocrResult.extractedFields ? JSON.stringify(ocrResult.extractedFields) : "",
         rawOcrText: ocrResult.rawOcrText || "",
+        portalFields: ocrResult.portalFields || {},
+        portalFieldsConfidence: ocrResult.portalFieldsConfidence || {},
+        extractionState: ocrResult.extractionState || "extraction_found",
+        extractionDiagnostics: ocrResult.extractionDiagnostics || null,
       } as any);
       setTicketId(tId);
       await ensureTrainingRequest(ocrResult, foundConnector, tId);

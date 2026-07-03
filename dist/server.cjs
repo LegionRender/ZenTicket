@@ -1061,10 +1061,14 @@ INSTRUCCI\xD3N CR\xCDTICA DE SEGURIDAD: Queda estrictamente prohibido extraer, i
       dynamicPortalFields[key] = value ?? "";
       portalFieldsConfidence[key] = parseFloat(String(extractedData.portalFieldsConfidence?.[key] || (value !== "" ? 0.9 : 0)));
     }
-    const isBillingRefRequired = contractFields.some((f) => String(f.canonicalKey || f.key).replace(/^portalFields\./, "") === "billingReference" && f.required !== false);
-    const isBillingRefMissingOrLow = isBillingRefRequired && (!billingReference || portalFieldsConfidence.billingReference < 0.5);
+    const requiredFieldsNeedingRetry = contractFields.filter((field) => {
+      if (field.required === false) return false;
+      const key = String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "");
+      const value = dynamicPortalFields[key];
+      return value === "" || value === null || value === void 0 || (portalFieldsConfidence[key] || 0) < 0.5;
+    });
     const isTextTooShort = !extractedData.rawOcrText || extractedData.rawOcrText.length < 50;
-    if (isBillingRefMissingOrLow || isTextTooShort) {
+    if (requiredFieldsNeedingRetry.length > 0 || isTextTooShort) {
       console.log("[OCR Phased] Required field is missing/low confidence or text too short. Running quality analysis...");
       qualityResult = await analyzeTicketImageQuality(ai, imagePart);
       const isBadQuality = qualityResult.isBlurry || qualityResult.isCropped || qualityResult.isLowLighting || !qualityResult.isLegible || qualityResult.isIncomplete;
@@ -1072,20 +1076,51 @@ INSTRUCCI\xD3N CR\xCDTICA DE SEGURIDAD: Queda estrictamente prohibido extraer, i
         manualInputReason = "IMAGE_QUALITY_ISSUE";
         console.log(`[OCR Phased] Bad quality detected: ${qualityResult.reason}. Skipping secondary extraction.`);
       } else {
-        secondaryOcrExecuted = true;
-        secondaryOcrFieldsList.push("billingReference");
-        extractionAttemptsCount++;
-        const secondaryVal = await runSecondaryExtraction(ai, imagePart, extractedData.rawOcrText || "", matchedConnector, "billingReference");
-        if (secondaryVal) {
-          const sanitizedSecondary = sanitizeBillingReferenceForConnector(secondaryVal, extractedData.rawOcrText || "", matchedConnector);
-          if (secondaryVal !== sanitizedSecondary) {
-            rejectedValuesList.push(secondaryVal);
-          } else if (sanitizedSecondary) {
-            billingReference = sanitizedSecondary;
-            dynamicPortalFields.billingReference = sanitizedSecondary;
-            portalFieldsConfidence.billingReference = 0.9;
-            console.log(`[OCR Phased] Secondary extraction found reference: "${billingReference}"`);
+        for (const field of requiredFieldsNeedingRetry) {
+          const key = String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "");
+          if (!key || field.fieldExtractionHints?.allowSecondaryOcr === false) continue;
+          secondaryOcrExecuted = true;
+          secondaryOcrFieldsList.push(key);
+          extractionAttemptsCount++;
+          const secondaryValue = await runSecondaryExtraction(
+            ai,
+            imagePart,
+            extractedData.rawOcrText || "",
+            matchedConnector,
+            key
+          );
+          if (!secondaryValue) continue;
+          let normalizedValue = secondaryValue.trim();
+          if (key === "billingReference") {
+            normalizedValue = sanitizeBillingReferenceForConnector(
+              normalizedValue,
+              extractedData.rawOcrText || "",
+              matchedConnector
+            );
           }
+          if (!normalizedValue || forbiddenInternalValue.test(String(normalizedValue))) {
+            rejectedValuesList.push(secondaryValue);
+            continue;
+          }
+          if (["number", "currency", "decimal"].includes(String(field.type || "").toLowerCase())) {
+            const parsedNumber = Number.parseFloat(String(normalizedValue).replace(/[$,\s]/g, ""));
+            if (!Number.isFinite(parsedNumber)) continue;
+            normalizedValue = parsedNumber;
+          }
+          if (field.validationPattern) {
+            try {
+              if (!new RegExp(field.validationPattern).test(String(normalizedValue))) {
+                rejectedValuesList.push(secondaryValue);
+                continue;
+              }
+            } catch {
+              continue;
+            }
+          }
+          dynamicPortalFields[key] = normalizedValue;
+          portalFieldsConfidence[key] = 0.9;
+          if (key === "billingReference") billingReference = String(normalizedValue);
+          console.log(`[OCR Phased] Secondary extraction found ${key}.`);
         }
       }
     }
