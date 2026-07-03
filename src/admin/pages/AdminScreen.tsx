@@ -2555,7 +2555,7 @@ export default function AdminScreen({
       {(() => {
         const realProcessedTickets = tickets.filter(t => {
           const hasJob = invoiceJobs.some(j => j.ticketId === t.id);
-          const hasRunnerStatus = ["queued_for_runner", "runner_processing", "sat_validation_pending", "cfdi_validated", "requires_manual_review", "failed", "waiting_fiscal_profile", "missing_required_fields"].includes(t.status || "");
+          const hasRunnerStatus = ["queued_for_runner", "runner_processing", "sat_validation_pending", "cfdi_validated", "invoice_obtained", "requires_manual_review", "failed", "waiting_fiscal_profile", "missing_required_fields"].includes(t.status || "");
           return hasJob || hasRunnerStatus;
         });
 
@@ -2568,13 +2568,10 @@ export default function AdminScreen({
             return t.status === "requires_manual_review";
           }
           if (realTicketsFilter === "cfdi_validated") {
-            return t.status === "cfdi_validated";
+            return t.status === "cfdi_validated" || t.status === "invoice_obtained";
           }
           if (realTicketsFilter === "error_portal") {
-            return t.status === "requires_manual_review" && ["PORTAL_REJECTED_TICKET_DATA", "PORTAL_RETURNED_ERROR", "PORTAL_TIMEOUT", "CAPTCHA_DETECTED", "PORTAL_CHANGED"].includes(t.reviewReasonCode || "");
-          }
-          if (realTicketsFilter === "error_sat") {
-            return t.status === "requires_manual_review" && ["SAT_STATUS_NOT_FOUND", "SAT_STATUS_CANCELLED", "SAT_VALIDATION_UNAVAILABLE", "SAT_TIMEOUT"].includes(t.reviewReasonCode || "");
+            return t.status === "requires_manual_review" && ["PORTAL_REJECTED_TICKET_DATA", "PORTAL_RETURNED_ERROR", "PORTAL_TIMEOUT", "CAPTCHA_DETECTED", "PORTAL_CHANGED", "RUNNER_TIMEOUT"].includes(t.reviewReasonCode || "");
           }
           if (realTicketsFilter === "error_xml") {
             return t.status === "requires_manual_review" && ["XML_NOT_DOWNLOADED", "XML_STRUCTURE_INVALID", "XML_RFC_MISMATCH", "XML_TOTAL_MISMATCH", "XML_UUID_MISSING"].includes(t.reviewReasonCode || "");
@@ -2609,9 +2606,8 @@ export default function AdminScreen({
                 { key: "all", label: "Todos" },
                 { key: "processing", label: "En proceso" },
                 { key: "manual_review", label: "Revisión requerida" },
-                { key: "cfdi_validated", label: "CFDI validado" },
+                { key: "cfdi_validated", label: "Facturas obtenidas" },
                 { key: "error_portal", label: "Error portal" },
-                { key: "error_sat", label: "Error SAT" },
                 { key: "error_xml", label: "Error XML" }
               ].map((btn) => (
                 <button
@@ -2631,7 +2627,7 @@ export default function AdminScreen({
 
             {/* List / Table */}
             {filteredRealTickets.length === 0 ? (
-              <div className="text-center py-10 border border-dashed border-slate-250 rounded-2xl text-xs text-slate-400 font-bold font-sans">
+              <div className="py-8 text-center text-slate-400 font-medium">
                 No hay tickets en esta categoría.
               </div>
             ) : (
@@ -2644,19 +2640,20 @@ export default function AdminScreen({
                       <th className="py-3 px-4 text-left">Comercio</th>
                       <th className="py-3 px-4 text-left">Estatus Ticket</th>
                       <th className="py-3 px-4 text-left">Detalle / Diagnóstico</th>
-                      <th className="py-3 px-4 text-left">Job / SAT / XML</th>
+                      <th className="py-3 px-4 text-left">Job / XML / PDF / UUID</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredRealTickets.map((t) => {
                       const matchingJob = invoiceJobs.find(j => j.ticketId === t.id);
                       const hasXml = matchingJob?.result?.xmlStoragePath ? "Sí" : "No";
-                      const satStatus = matchingJob?.result?.satStatus || "N/A";
+                      const hasPdf = matchingJob?.result?.pdfStoragePath ? "Sí" : "No";
+                      const uuidVal = matchingJob?.result?.uuid || "N/A";
                       const dateStr = t.createdAt ? new Date(t.createdAt).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" }) : "N/A";
-                      const runTimeStr = matchingJob?.createdAt ? new Date(matchingJob.createdAt).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" }) : "N/A";
+                      const updatedTimeStr = matchingJob?.updatedAt ? new Date(matchingJob.updatedAt).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" }) : "N/A";
 
                       let statusBadge = "bg-slate-150 text-slate-650";
-                      if (t.status === "cfdi_validated") {
+                      if (t.status === "cfdi_validated" || t.status === "invoice_obtained") {
                         statusBadge = "bg-emerald-50 text-emerald-700 border border-emerald-150";
                       } else if (["queued_for_runner", "runner_processing", "sat_validation_pending"].includes(t.status || "")) {
                         statusBadge = "bg-blue-50 text-[#0B53F4] border border-blue-150";
@@ -2680,7 +2677,7 @@ export default function AdminScreen({
                           </td>
                           <td className="py-3.5 px-4">
                             <span className={`inline-block px-2.5 py-1 text-[9.5px] font-black rounded-lg leading-none font-sans uppercase ${statusBadge}`}>
-                              {t.status === "cfdi_validated" ? "Validado SAT" : t.status === "requires_manual_review" ? "Revisión Req." : t.status}
+                              {t.status === "cfdi_validated" || t.status === "invoice_obtained" ? "Factura Obtenida" : t.status === "requires_manual_review" ? "Revisión Req." : t.status}
                             </span>
                           </td>
                           <td className="py-3.5 px-4">
@@ -2712,9 +2709,10 @@ export default function AdminScreen({
                             {matchingJob ? (
                               <div className="space-y-1 font-mono text-[10px] leading-tight">
                                 <div><span className="text-slate-400">Job:</span> <span className="font-semibold text-slate-700">#{matchingJob.id?.slice(-6).toUpperCase()} ({matchingJob.status})</span></div>
-                                <div><span className="text-slate-400">Última Corrida:</span> <span className="text-slate-600">{runTimeStr}</span></div>
                                 <div><span className="text-slate-400">XML Descargado:</span> <span className={`font-bold ${hasXml === "Sí" ? "text-emerald-600" : "text-rose-600"}`}>{hasXml}</span></div>
-                                <div><span className="text-slate-400">Estatus SAT:</span> <span className={`font-bold uppercase ${satStatus === "valid" ? "text-emerald-600" : satStatus === "cancelled" ? "text-rose-600" : "text-slate-500"}`}>{satStatus}</span></div>
+                                <div><span className="text-slate-400">PDF Descargado:</span> <span className={`font-bold ${hasPdf === "Sí" ? "text-emerald-600" : "text-slate-450"}`}>{hasPdf}</span></div>
+                                <div><span className="text-slate-400">UUID:</span> <span className="text-slate-600 truncate max-w-[120px] inline-block">{uuidVal}</span></div>
+                                <div><span className="text-slate-400">Último Update:</span> <span className="text-slate-500">{updatedTimeStr}</span></div>
                               </div>
                             ) : (
                               <span className="text-slate-400 font-mono text-[10px]">Sin Job Asignado</span>

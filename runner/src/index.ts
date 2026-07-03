@@ -7,7 +7,6 @@ import { pollJobs } from "./jobs/pollJobs";
 import { lockJob } from "./jobs/lockJob";
 import { executePortalMap } from "./executor/executePortalMap";
 import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiXml";
-import { validateSatStatus } from "./validators/validateSatStatus";
 import { createRunnerLog, setActiveJobContext } from "./logging/createRunnerLog";
 
 const workerId = `worker-node-${process.pid}`;
@@ -53,20 +52,20 @@ async function processJob(jobId: string) {
     }
 
     // ----------------------------------------------------
-    // FLOW A: Retrying SAT check for an already-downloaded XML
+    // FLOW A: Safe migration / retry for validating_sat
     // ----------------------------------------------------
     if (lockedJob.status === "validating_sat") {
       await jobRef.update({
         status: "running",
         updatedAt: new Date().toISOString()
       });
-      await createRunnerLog(jobId, ticketId, "INFO", "Reintentando validación ante el SAT para XML ya descargado.");
+      await createRunnerLog(jobId, ticketId, "INFO", "Reintentando validación local para XML ya descargado (migración de estado SAT).");
 
       const xmlDest = `users/${lockedJob.userId}/tickets/${ticketId}/cfdi.xml`;
       const xmlFileRef = bucket.file(xmlDest);
       const exists = await xmlFileRef.exists().then(r => r[0]);
       if (!exists) {
-        throw { message: "El XML de la factura no se localizó en Storage para reintentar la validación SAT.", code: "XML_NOT_DOWNLOADED" };
+        throw { message: "El XML de la factura no se localizó en Storage para reintentar la validación.", code: "XML_NOT_DOWNLOADED" };
       }
 
       const [xmlBuffer] = await xmlFileRef.download();
@@ -80,49 +79,10 @@ async function processJob(jobId: string) {
       );
 
       if (!xmlResult.isValid) {
-        throw { message: "El XML almacenado en Storage no pasó las pruebas estructurales.", code: xmlResult.error || "XML_STRUCTURE_INVALID" };
+        throw { message: "El XML almacenado en Storage no pasó las pruebas estructurales locales.", code: xmlResult.error || "XML_STRUCTURE_INVALID" };
       }
 
-      await createRunnerLog(jobId, ticketId, "INFO", `Consultando estatus SAT (Intento: ${(lockedJob.satValidationAttempts || 0) + 1}).`);
-      const satResult = await validateSatStatus(
-        xmlResult.rfcEmisor || "",
-        xmlResult.rfcReceptor || "",
-        xmlResult.total || 0,
-        xmlResult.uuid || ""
-      );
-
-      if (satResult.status === "unavailable") {
-        const attempts = (lockedJob.satValidationAttempts || 0) + 1;
-        if (attempts >= 3) {
-          throw { message: "Se superó el límite de 3 reintentos de validación ante el SAT. El servicio del SAT no está disponible.", code: "SAT_VALIDATION_UNAVAILABLE" };
-        }
-
-        await jobRef.update({
-          status: "validating_sat",
-          satValidationAttempts: attempts,
-          lockedBy: null,
-          lockedAt: null,
-          updatedAt: new Date().toISOString()
-        });
-
-        await ticketRef.update({
-          status: "sat_validation_pending",
-          updatedAt: new Date().toISOString()
-        });
-
-        await createRunnerLog(jobId, ticketId, "WARNING", `Validación SAT indisponible en reintento ${attempts}/3. Reencolando para posterior consulta.`);
-        setActiveJobContext(null, null, null, null);
-        return;
-      }
-
-      if (satResult.status !== "valid") {
-        throw {
-          message: `El comprobante no es válido ante el SAT. Estatus: ${satResult.status}`,
-          code: satResult.status === "cancelled" ? "SAT_STATUS_CANCELLED" : "SAT_STATUS_NOT_FOUND"
-        };
-      }
-
-      // Succeeded on SAT retry!
+      // Succeeded!
       const invoiceId = xmlResult.uuid || db.collection("users").doc(lockedJob.userId).collection("invoices").doc().id;
       const invRef = db.collection("users").doc(lockedJob.userId).collection("invoices").doc(invoiceId);
       await invRef.set({
@@ -144,20 +104,19 @@ async function processJob(jobId: string) {
         result: {
           xmlStoragePath: xmlDest,
           pdfStoragePath: lockedJob.pdfHtml ? `users/${lockedJob.userId}/tickets/${ticketId}/cfdi.pdf` : null,
-          uuid: xmlResult.uuid,
-          satStatus: "valid"
+          uuid: xmlResult.uuid
         },
         finishedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
 
       await ticketRef.update({
-        status: "cfdi_validated",
+        status: "invoice_obtained",
         invoiceId,
         updatedAt: new Date().toISOString()
       });
 
-      await createRunnerLog(jobId, ticketId, "INFO", "Validación SAT tardía completada con éxito. Factura activada.");
+      await createRunnerLog(jobId, ticketId, "INFO", "Validación local y migración completada con éxito. Factura obtenida.");
       setActiveJobContext(null, null, null, null);
       return;
     }
@@ -233,7 +192,7 @@ async function processJob(jobId: string) {
     }
 
     // 5. XML Structural validation
-    await createRunnerLog(jobId, ticketId, "INFO", "Validando estructura del XML descargado.");
+    await createRunnerLog(jobId, ticketId, "INFO", "Revisión estructural del XML descargado.");
     const xmlResult = validateCfdiXml(
       result.xmlContent || "",
       connector.rfc,
@@ -242,7 +201,7 @@ async function processJob(jobId: string) {
     );
 
     if (!xmlResult.isValid) {
-      throw { message: "El XML descargado no pasó las pruebas de integridad o no pertenece a esta transacción.", code: xmlResult.error || "XML_STRUCTURE_INVALID" };
+      throw { message: "El XML descargado no pasó las pruebas estructurales locales.", code: xmlResult.error || "XML_STRUCTURE_INVALID" };
     }
 
     // 6. Upload XML/PDF to Storage
@@ -270,43 +229,6 @@ async function processJob(jobId: string) {
       const tmpDir = path.join(__dirname, `../../tmp/${jobId}`);
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch (e) {}
-
-    // 7. SAT status check
-    await createRunnerLog(jobId, ticketId, "INFO", `Consultando estatus fiscal en el webservice del SAT.`);
-    const satResult = await validateSatStatus(
-      xmlResult.rfcEmisor || "",
-      xmlResult.rfcReceptor || "",
-      xmlResult.total || 0,
-      xmlResult.uuid || ""
-    );
-
-    if (satResult.status === "unavailable") {
-      // Transition to validation pending
-      await jobRef.update({
-        status: "validating_sat",
-        satValidationAttempts: 0,
-        pdfHtml: result.pdfHtml || null,
-        lockedBy: null,
-        lockedAt: null,
-        updatedAt: new Date().toISOString()
-      });
-
-      await ticketRef.update({
-        status: "sat_validation_pending",
-        updatedAt: new Date().toISOString()
-      });
-
-      await createRunnerLog(jobId, ticketId, "WARNING", "Servicio del SAT no disponible. Job en espera de reintento.");
-      setActiveJobContext(null, null, null, null);
-      return;
-    }
-
-    if (satResult.status !== "valid") {
-      throw {
-        message: `El comprobante no es válido ante el SAT. Estatus: ${satResult.status}`,
-        code: satResult.status === "cancelled" ? "SAT_STATUS_CANCELLED" : "SAT_STATUS_NOT_FOUND"
-      };
-    }
 
     // Succeeded!
     const invoiceId = xmlResult.uuid || db.collection("users").doc(lockedJob.userId).collection("invoices").doc().id;
@@ -336,20 +258,19 @@ async function processJob(jobId: string) {
       result: {
         xmlStoragePath: xmlDest,
         pdfStoragePath: pdfDest,
-        uuid: xmlResult.uuid,
-        satStatus: "valid"
+        uuid: xmlResult.uuid
       },
       finishedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
 
     await ticketRef.update({
-      status: "cfdi_validated",
+      status: "invoice_obtained",
       invoiceId,
       updatedAt: new Date().toISOString()
     });
 
-    await createRunnerLog(jobId, ticketId, "INFO", "Procesamiento y timbrado finalizado exitosamente.");
+    await createRunnerLog(jobId, ticketId, "INFO", "Procesamiento finalizado exitosamente. Factura obtenida.");
     setActiveJobContext(null, null, null, null);
   } catch (err: any) {
     const errorCode = err.code || "UNKNOWN_RUNNER_ERROR";
@@ -383,7 +304,6 @@ async function processJob(jobId: string) {
         lastAutomationStep: "runner_processing",
         connectorAttempted: true,
         connectorId: lockedJob.connectorId,
-        connectorName: connector?.nombre || null,
         portalErrorMessage: errorMessage,
         ...(err.screenshotPath && { screenshotPath: err.screenshotPath }),
         ...(err.stepIndex !== undefined && { stepIndex: err.stepIndex }),
@@ -397,6 +317,47 @@ async function processJob(jobId: string) {
 async function runWorkerLoop() {
   console.log(`[Worker: ${workerId}] Iniciando ciclo del runner...`);
   try {
+    // Stale jobs timeout check (more than 5 minutes)
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const staleJobsSnap = await db.collection("invoice_jobs")
+      .where("status", "in", ["locked", "running"])
+      .get();
+
+    for (const jobDoc of staleJobsSnap.docs) {
+      const jd = jobDoc.data();
+      const timeField = jd.lockedAt || jd.updatedAt || jd.createdAt;
+      if (timeField && timeField < fiveMinutesAgo) {
+        console.log(`[Worker: ${workerId}] Encontrado job estancado: ${jobDoc.id}. Aplicando timeout...`);
+        const ticketId = jd.ticketId;
+        
+        await jobDoc.ref.update({
+          status: "failed",
+          lastErrorCode: "RUNNER_TIMEOUT",
+          lastError: "El proceso automático tardó más de lo esperado.",
+          lockedBy: null,
+          lockedAt: null,
+          updatedAt: new Date().toISOString()
+        });
+        
+        await db.collection("tickets").doc(ticketId).update({
+          status: "requires_manual_review",
+          reviewReasonCode: "RUNNER_TIMEOUT",
+          errorMsg: "El proceso automático tardó más de lo esperado.",
+          reviewError: {
+            reviewReasonCode: "RUNNER_TIMEOUT",
+            reviewReasonMessage: "El proceso automático tardó más de lo esperado.",
+            lastAutomationStep: "runner_processing",
+            connectorAttempted: true,
+            connectorId: jd.connectorId,
+            portalErrorMessage: "El proceso automático tardó más de lo esperado."
+          },
+          updatedAt: new Date().toISOString()
+        });
+        
+        await createRunnerLog(jobDoc.id, ticketId, "ERROR", "Timeout anti-bloqueo disparado (más de 5 minutos en estado activo).");
+      }
+    }
+
     const pendingJobIds = await pollJobs();
     if (pendingJobIds.length > 0) {
       console.log(`[Worker: ${workerId}] Encontrados ${pendingJobIds.length} jobs pendientes.`);

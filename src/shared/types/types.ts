@@ -96,6 +96,7 @@ export type TicketStatus =
   | "xml_structure_validated"
   | "sat_validation_pending"
   | "cfdi_validated"
+  | "invoice_obtained"
   | "requires_manual_review"
   | "failed"
   // Backwards compatibility
@@ -141,6 +142,7 @@ export type ReviewReasonCode =
   | "SAT_STATUS_CANCELLED"
   | "SAT_VALIDATION_UNAVAILABLE"
   | "UNKNOWN_RUNNER_ERROR"
+  | "RUNNER_TIMEOUT"
   // Backwards compatibility
   | "CONNECTOR_SCHEMA_INVALID"
   | "USER_REQUESTED_REVIEW";

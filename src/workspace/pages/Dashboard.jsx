@@ -63,7 +63,7 @@ export const Dashboard = () => {
     const invoiceUuids = new Set(invoices.map(inv => inv.folioFiscal));
     
     tickets.forEach(t => {
-      if (t.status === "completed" || t.status === "cfdi_validated" || t.status === "merchant_cfdi_downloaded") {
+      if (t.status === "completed" || t.status === "invoice_obtained" || t.status === "cfdi_validated" || t.status === "merchant_cfdi_downloaded") {
         const uuid = t.invoiceId;
         if (uuid && !invoiceUuids.has(uuid)) {
           list.push({
@@ -176,7 +176,7 @@ export const Dashboard = () => {
           return true;
         } else if ((t.status === "review" || t.status === "requires_manual_review") && !readNotifIds.includes(`review-${ticketId}`)) {
           return true;
-        } else if ((t.status === "completed" || t.status === "cfdi_validated" || t.status === "merchant_cfdi_downloaded") && !readNotifIds.includes(`completed-${ticketId}`)) {
+        } else if ((t.status === "completed" || t.status === "invoice_obtained" || t.status === "cfdi_validated" || t.status === "merchant_cfdi_downloaded") && !readNotifIds.includes(`completed-${ticketId}`)) {
           return true;
         }
       }

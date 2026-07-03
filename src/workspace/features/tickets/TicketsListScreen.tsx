@@ -301,21 +301,21 @@ export default function TicketsListScreen({
   const inProgressList = tickets.filter(
     (t) =>
       t.status !== "completed" &&
-      t.status !== "cfdi_validated"
+      t.status !== "cfdi_validated" &&
+      t.status !== "invoice_obtained"
   );
   const emittedInvoicesList = invoices.filter(inv => {
     const hasXml = !!inv.xmlContent && inv.xmlContent.trim().length > 0;
     const hasStructure = hasXml && inv.xmlContent.includes("UUID=") && inv.xmlContent.includes("TimbreFiscalDigital");
-    const satStatusValid = inv.satStatus === "valid";
 
     const ticket = tickets.find(t => t.id === inv.ticketId);
     const ticketStatus = ticket?.status || inv.status;
 
-    if (ticketStatus === "completed") {
-      return hasXml && hasStructure && satStatusValid;
+    if (ticketStatus === "completed" || ticketStatus === "invoice_obtained" || ticketStatus === "cfdi_validated") {
+      return hasXml && hasStructure;
     }
 
-    return ticketStatus === "cfdi_validated" || (hasXml && hasStructure && satStatusValid);
+    return hasXml && hasStructure;
   });
 
   // Handle opening the details view
@@ -331,8 +331,8 @@ export default function TicketsListScreen({
     const associatedTicket = tickets.find(t => t.invoiceId === activeInvoiceData.folioFiscal || t.id === activeInvoiceData.ticketId);
     if (!associatedTicket) return;
 
-    // Only run if it's in merchant_cfdi_downloaded or cfdi_validated
-    const needsSatCheck = associatedTicket.status === "merchant_cfdi_downloaded" || associatedTicket.status === "cfdi_validated";
+    // SAT is disabled. We only perform local structural check.
+    const needsSatCheck = false;
     if (!needsSatCheck) return;
 
     const runSatVerification = async () => {
@@ -521,10 +521,10 @@ export default function TicketsListScreen({
     const associatedTicket = tickets.find(t => t.invoiceId === activeInvoiceData.folioFiscal || t.id === activeInvoiceData.ticketId);
     const isXmlValid = validateXmlStructure(activeInvoiceData.xmlContent);
 
-    const ticketStatus = associatedTicket ? associatedTicket.status : "cfdi_validated";
+    const ticketStatus = associatedTicket ? associatedTicket.status : "invoice_obtained";
     const isFailed = ticketStatus === "failed";
     const isManualReview = ticketStatus === "requires_manual_review";
-    const canRenderPdf = ticketStatus === "cfdi_validated" && isXmlValid && !verificationError && !isFailed && !isManualReview && !isValidatingSat;
+    const canRenderPdf = (ticketStatus === "invoice_obtained" || ticketStatus === "cfdi_validated" || ticketStatus === "completed") && isXmlValid && !verificationError && !isFailed && !isManualReview;
 
     if (isValidatingSat) {
       return (
@@ -887,7 +887,7 @@ export default function TicketsListScreen({
             type="button"
             onClick={() => {
               const ticketStatus = associatedTicket ? associatedTicket.status : "";
-              if (ticketStatus !== "cfdi_validated" || !activeInvoiceData.xmlContent) {
+              if (ticketStatus !== "invoice_obtained" && ticketStatus !== "cfdi_validated" && ticketStatus !== "completed" || !activeInvoiceData.xmlContent) {
                 toast.error(
                   "El PDF de la factura solo está disponible después de obtener el comprobante desde el portal del comercio. El XML es obligatorio.",
                   "Descarga no disponible"
@@ -1456,8 +1456,8 @@ export default function TicketsListScreen({
           <button
             type="button"
             onClick={() => {
-              const ticketStatus = associatedTicket ? associatedTicket.status : "cfdi_validated";
-              const isAllowed = ticketStatus === "cfdi_validated";
+              const ticketStatus = associatedTicket ? associatedTicket.status : "invoice_obtained";
+              const isAllowed = ticketStatus === "cfdi_validated" || ticketStatus === "invoice_obtained" || ticketStatus === "completed";
               
               if (!isAllowed || !activeInvoiceData.xmlContent) {
                 toast.error(
@@ -2052,7 +2052,8 @@ export default function TicketsListScreen({
                           type="button"
                           onClick={() => {
                             onTriggerSimulationInline(t);
-                            toast.success(`Iniciando conexión con el SAT para facturar ticket #${t.folio || "88219"}.`, "Sincronizador SAT");
+                            const displayCode = t.shortCode || (t.id ? t.id.replace("ticket_i", "").toUpperCase() : "");
+                            toast.success(`ZenTicket está solicitando la factura en el portal oficial del comercio para el ticket #${displayCode}.`, "AUTOMATIZACIÓN DEL PORTAL");
                           }}
                           className="group flex items-center justify-between gap-1.5 py-1.5 px-3 zt-btn-secondary-blue font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none shrink-0"
                         >
@@ -2153,8 +2154,8 @@ export default function TicketsListScreen({
                           type="button"
                           onClick={() => {
                             const associatedT = tickets.find(t => t.id === inv.ticketId || t.invoiceId === inv.folioFiscal);
-                            const ticketStatus = associatedT ? associatedT.status : "cfdi_validated";
-                            const isAllowed = ticketStatus === "cfdi_validated";
+                            const ticketStatus = associatedT ? associatedT.status : "invoice_obtained";
+                            const isAllowed = ticketStatus === "cfdi_validated" || ticketStatus === "invoice_obtained" || ticketStatus === "completed";
                             
                             if (!isAllowed || !inv.xmlContent) {
                               toast.error(
@@ -2195,8 +2196,8 @@ export default function TicketsListScreen({
                         type="button"
                         onClick={() => {
                           const associatedT = tickets.find(t => t.id === inv.ticketId || t.invoiceId === inv.folioFiscal);
-                          const ticketStatus = associatedT ? associatedT.status : "cfdi_validated";
-                          const isAllowed = ticketStatus === "cfdi_validated";
+                          const ticketStatus = associatedT ? associatedT.status : "invoice_obtained";
+                          const isAllowed = ticketStatus === "cfdi_validated" || ticketStatus === "invoice_obtained" || ticketStatus === "completed";
                           
                           if (!isAllowed || !inv.xmlContent) {
                             toast.error(

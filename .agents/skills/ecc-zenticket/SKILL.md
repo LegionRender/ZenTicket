@@ -35,13 +35,10 @@ Para evitar errores y asegurar validez legal, el flujo de procesamiento debe seg
  [XML/PDF Real] ──► Descarga y persistencia en Cloud Storage
        │
        ▼
-[Validación XML] ──► Verificación de estructura y firma digital
+[Revisión XML Local] ──► Verificación estructural del XML descargado
        │
        ▼
- [Consulta SAT] ──► Consulta HTTP en el WS de Verificación del SAT
-       │
-       ▼
-[cfdi_validated] ──► Estado final del ticket (SOLO si el SAT reporta estado "Vigente")
+[invoice_obtained] ──► Estado final del ticket (Factura obtenida y validada localmente)
 ```
 
 ### Reglas de Oro de Integridad de Datos:
@@ -49,8 +46,9 @@ Para evitar errores y asegurar validez legal, el flujo de procesamiento debe seg
    * **NUNCA** utilices el `ticketId` de Firestore, un UUID autogenerado en frontend, o el `doc.id` interno como la referencia de facturación o el folio del ticket que se ingresa en el portal del comercio.
    * La referencia de facturación debe provenir exclusivamente de los datos extraídos del ticket físico (`portalFields.billingReference`) o de la captura manual explícita del usuario.
 2. **Validación y Certificación:**
-   * **NUNCA** marques un ticket con el estado `cfdi_validated` de forma ficticia o simulada.
-   * El estado `cfdi_validated` es un estado final que **requiere obligatoriamente** la presencia del archivo XML real descargado del portal del comercio y una respuesta exitosa con estatus "Vigente" del WS de validación del SAT.
+   * **NUNCA** marques un ticket con el estado `invoice_obtained` de forma ficticia o simulada.
+   * El estado `invoice_obtained` es un estado final que **requiere obligatoriamente** la presencia del archivo XML real descargado del portal del comercio y una revisión estructural local del XML exitosa.
+   * **REGLA PRINCIPAL:** ZenTicket no se conecta al SAT, no timbra CFDI, no valida vigencia ante el SAT. Automatiza la solicitud y descarga de facturas en portales oficiales de comercios a partir de tickets.
 
 ### Glosario del Modelo de Datos:
 * **`ticketData`:** Los metadatos generales del ticket subido (fecha de compra, total, RFC del emisor, nombre del emisor).
@@ -68,7 +66,7 @@ Para evitar errores y asegurar validez legal, el flujo de procesamiento debe seg
 ZenTicket posee una consola de administración para monitorear la salud y precisión de los conectores de los comercios.
 
 ### Estados de los Conectores:
-* **`production_ready`:** El conector funciona al 100% de manera automatizada, las descargas y el SAT validan limpiamente.
+* **`production_ready`:** El conector funciona al 100% de manera automatizada, las descargas y la validación estructural local pasan limpiamente.
 * **`real_validation`:** Conector activo en producción pero bajo supervisión estrecha y validación en tiempo real.
 * **`trained_needs_validation`:** El conector fue entrenado mediante el sandbox/IA pero requiere verificar que sus selectores funcionen con tickets reales antes de habilitarlo al público.
 * **`runner_not_available`:** El portal del comercio está caído o el runner tiene un problema técnico temporal con sus selectores CSS.
@@ -79,7 +77,7 @@ ZenTicket posee una consola de administración para monitorear la salud y precis
 * **Logs del Runner y Capturas:** Historial detallado de Playwright con screenshots automáticos cuando ocurre un error en el portal (ej. CAPTCHA, datos inválidos).
 * **Reglas para promover un conector a producción (`production_ready`):**
   1. Debe haber procesado al menos 5 tickets reales de forma exitosa de manera consecutiva.
-  2. Los archivos XML y PDF correspondientes deben estar descargados y con validación del SAT exitosa ("Vigente").
+  2. Los archivos XML y PDF correspondientes deben estar descargados y con revisión estructural local exitosa.
   3. No debe reportar errores de selectores CSS (timeouts o fallas de navegación) en los últimos 7 días.
 
 ---

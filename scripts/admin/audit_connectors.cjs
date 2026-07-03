@@ -96,8 +96,8 @@ async function auditConnectors() {
         latestRealJob = jobs[0];
       }
 
-      // Calculate Eligibility
-      const eligibleForProd = portalMapApproved && latestRealJob && latestRealJob.status === "succeeded" && latestRealJob.result && latestRealJob.result.satStatus === "valid" ? "Sí" : "No";
+      // Calculate Eligibility based on navigation success and local structural validation
+      const eligibleForProd = portalMapApproved && latestRealJob && latestRealJob.status === "succeeded" && latestRealJob.result && latestRealJob.result.xmlStoragePath ? "Sí" : "No";
 
       console.log(`| ${doc.id} | ${data.nombre || "S/N"} | ${data.rfc || "S/D"} | ${hasContract} | ${reqPortalFields} | ${fiscalFieldsStr} | ${hasPortalMap} | ${hasSteps} | ${data.status || "mock_only"} | ${data.runnerAvailable || false} | ${data.isProductionReady || false} | ${eligibleForProd} |`);
     }

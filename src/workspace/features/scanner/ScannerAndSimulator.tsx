@@ -4593,7 +4593,7 @@ return list.map(n => {
 
         const getStepStatus = (stepIndex: number) => {
           const tStatus = currentTicket?.status || "";
-          const isFinished = ["cfdi_validated", "completed"].includes(tStatus);
+          const isFinished = ["cfdi_validated", "completed", "invoice_obtained"].includes(tStatus);
 
           if (stepIndex === 1) { // Lectura
             if (["ticket_uploaded", "extracting_data"].includes(tStatus)) return "active";
@@ -4607,7 +4607,7 @@ return list.map(n => {
             return "pending";
           }
           if (stepIndex === 3) { // Validación
-            if (["submitting_to_portal", "waiting_portal_result", "merchant_cfdi_downloaded", "sat_verifying", "pending_portal_submission", "submitted_to_merchant"].includes(tStatus)) return "active";
+            if (["submitting_to_portal", "waiting_portal_result", "merchant_cfdi_downloaded", "sat_verifying", "pending_portal_submission", "submitted_to_merchant", "queued_for_runner", "runner_processing"].includes(tStatus)) return "active";
             if (isFinished) return "completed";
             return "pending";
           }
@@ -4620,6 +4620,7 @@ return list.map(n => {
 
         const getDynamicStatusMsg = () => {
           const tStatus = currentTicket?.status || "";
+          const jStatus = liveJob?.status || "";
           
           if (tStatus === "ticket_uploaded" || tStatus === "extracting_data" || tStatus === "uploaded" || tStatus === "ocr_processing") {
             return "Leyendo ticket";
@@ -4627,31 +4628,28 @@ return list.map(n => {
           if (tStatus === "connector_resolving" || tStatus === "extracted" || tStatus === "connector_detected") {
             return "Revisa los datos";
           }
-          if (tStatus === "missing_required_fields") {
-            return "Necesitamos completar algunos datos del ticket para solicitar la factura en el portal oficial.";
+          if (tStatus === "missing_required_fields" || jStatus === "waiting_user_input") {
+            return "Necesitamos completar datos para continuar";
           }
           if (tStatus === "waiting_fiscal_profile") {
-            return "El portal necesita tus datos fiscales para continuar con la factura.";
+            return "Necesitamos completar datos para continuar";
           }
-          if (tStatus === "queued_for_runner" || tStatus === "runner_processing" || tStatus === "pending_portal_submission" || tStatus === "submitting_to_portal" || tStatus === "submitted_to_merchant" || tStatus === "waiting_portal_result") {
-            return "Estamos solicitando la factura en el portal oficial.";
+          if (tStatus === "queued_for_runner" && (jStatus === "pending" || !jStatus)) {
+            return "Esperando robot de facturación";
+          }
+          if (jStatus === "locked" || jStatus === "running" || tStatus === "runner_processing") {
+            return "Estamos solicitando la factura en el portal oficial";
           }
           if (tStatus === "merchant_cfdi_downloaded") {
-            return "Validando CFDI";
+            return "Descargando archivos de factura";
           }
-          if (tStatus === "xml_structure_validated") {
-            return "Consultando SAT";
-          }
-          if (tStatus === "sat_validation_pending" || tStatus === "sat_verifying") {
-            return "Esperando respuesta del SAT";
-          }
-          if (tStatus === "cfdi_validated" || tStatus === "completed") {
+          if (tStatus === "invoice_obtained" || tStatus === "cfdi_validated" || tStatus === "completed" || jStatus === "succeeded") {
             return "Factura lista";
           }
-          if (tStatus === "requires_manual_review" || tStatus === "failed") {
-            return "Revisión requerida";
+          if (tStatus === "requires_manual_review" || tStatus === "failed" || jStatus === "manual_review" || jStatus === "failed") {
+            return "No pudimos completar la solicitud automática";
           }
-          return "Leyendo ticket";
+          return "Estamos solicitando la factura en el portal oficial";
         };
 
         return (
