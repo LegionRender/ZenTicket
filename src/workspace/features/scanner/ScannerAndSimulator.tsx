@@ -353,6 +353,7 @@ export default function ScannerAndSimulator({
   const [editFolio, setEditFolio] = useState("");
   const [editSucursal, setEditSucursal] = useState("");
   const [editTotal, setEditTotal] = useState(0);
+  const [editPortalFields, setEditPortalFields] = useState<Record<string, any>>({});
   const [validationError, setValidationError] = useState<string | null>(null);
   const [customProfileFields, setCustomProfileFields] = useState<Record<string, string>>({
     rfcReceptor: "",
@@ -746,6 +747,7 @@ export default function ScannerAndSimulator({
         referenciaFacturacion: ticket.billingReference || ticket.referenciaFacturacion || "",
       } as any;
       setExtractedData(data);
+      setEditPortalFields(ticket.portalFields || {});
       const sanitized = sanitizePortalFieldsForConnector(found, ticket.portalFields || data, ticket.rawOcrText);
       const persistedReference = sanitizeBillingReferenceForConnector(
         ticket.portalFields?.billingReference,
@@ -1098,6 +1100,7 @@ export default function ScannerAndSimulator({
       const sanitized = sanitizePortalFieldsForConnector(foundConnector, ocrResult, ocrResult.rawOcrText);
 
       setExtractedData(ocrResult);
+      setEditPortalFields(ocrResult.portalFields || {});
       setEditNombre(ocrResult.nombreEmisor || "");
       setEditRfc(ocrResult.rfcEmisor || "");
       setEditFecha(ocrResult.fechaCompra || "");
@@ -1335,6 +1338,7 @@ export default function ScannerAndSimulator({
       const sanitized = sanitizePortalFieldsForConnector(matchingConnector, ocrResult, ocrResult.rawOcrText);
 
       setExtractedData(ocrResult);
+      setEditPortalFields(ocrResult.portalFields || {});
       setEditNombre(ocrResult.nombreEmisor || "");
       setEditRfc(ocrResult.rfcEmisor || "");
       setEditFecha(ocrResult.fechaCompra || "");
@@ -1619,6 +1623,7 @@ export default function ScannerAndSimulator({
       const sanitized = sanitizePortalFieldsForConnector(foundConnector, ocrResult, ocrResult.rawOcrText);
 
       setExtractedData(ocrResult);
+      setEditPortalFields(ocrResult.portalFields || {});
       setEditNombre(ocrResult.nombreEmisor || "");
       setEditRfc(ocrResult.rfcEmisor || "");
       setEditFecha(ocrResult.fechaCompra || "");
@@ -1994,7 +1999,7 @@ export default function ScannerAndSimulator({
       }
 
       // Check connector status
-      if (activeConn.status !== "production_ready" && activeConn.status !== "automation_available") {
+      if (!["production_ready", "automation_available", "real_validation"].includes(activeConn.status)) {
         let code: "CONNECTOR_NOT_PRODUCTION_READY" | "CONNECTOR_RESTRICTED" | "CONNECTOR_BROKEN" = "CONNECTOR_NOT_PRODUCTION_READY";
         let msg = "Detectamos este comercio, pero su automatización todavía se está configurando. Guardamos tu ticket para revisión.";
         if (activeConn.status === "restricted") {
@@ -2108,9 +2113,13 @@ export default function ScannerAndSimulator({
       }
 
       // First check technical configuration of the connector (Rule 11)
-      const isProductionRuleMatch = activeConn.status === "production_ready" && activeConn.runnerAvailable === true && activeConn.isProductionReady === true;
-      const isRealValidationRuleMatch = activeConn.status === "real_validation" && activeConn.runnerAvailable === true && activeConn.isProductionReady === false && pMap && (pMap.isApproved === true || pMap.status === "approved");
-      const isTechnicalConfigIncomplete = !activeConn.id || !pMap || (!pMap.isApproved && pMap.status !== "approved") || !pMap.stepsJson || (!isProductionRuleMatch && !isRealValidationRuleMatch);
+      const hasOperationalStatus = ["production_ready", "automation_available", "real_validation"].includes(activeConn.status);
+      const isTechnicalConfigIncomplete = !activeConn.id ||
+        !pMap ||
+        (!pMap.isApproved && pMap.status !== "approved") ||
+        !pMap.stepsJson ||
+        activeConn.runnerAvailable !== true ||
+        !hasOperationalStatus;
 
       if (isTechnicalConfigIncomplete) {
         const configErr: ReviewError = {
@@ -2495,6 +2504,21 @@ export default function ScannerAndSimulator({
         }
       }
 
+      const correctedPortalFields = {
+        ...editPortalFields,
+        ...(refField ? { billingReference: editFolio.trim() } : {}),
+        ...(totalField ? { total: !isNaN(totalNum) ? totalNum : "" } : {})
+      };
+      const contractValidation = validatePortalFields(contract, correctedPortalFields);
+      if (!contractValidation.isValid) {
+        const invalidKey = [...contractValidation.missingFields, ...contractValidation.invalidFields][0];
+        const invalidField = contract.requiredPortalFields.find((field: any) =>
+          `portalFields.${String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "")}` === invalidKey
+        );
+        setValidationError(`Revisa el campo '${invalidField?.label || invalidKey}'. Debe coincidir con el dato impreso que solicita el portal.`);
+        return;
+      }
+
       setValidationError(null);
 
       // Construct dynamic updated data
@@ -2504,11 +2528,7 @@ export default function ScannerAndSimulator({
         total: !isNaN(totalNum) ? totalNum : (extractedData?.total || 0),
         fechaCompra: editFecha.trim() || (extractedData?.fechaCompra || ""),
         sucursal: editSucursal.trim(),
-        portalFields: {
-          billingReference: editFolio.trim(),
-          total: !isNaN(totalNum) ? totalNum : (extractedData?.total || 0),
-          date: editFecha.trim() || (extractedData?.fechaCompra || "")
-        }
+        portalFields: correctedPortalFields
       };
 
       // Save/update user's fiscal profile if fields were edited
@@ -4160,7 +4180,31 @@ return list.map(n => {
                                         </div>
                                       );
                                     }
-                                    return null;
+                                    const fieldKey = String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "");
+                                    if (!fieldKey) return null;
+                                    const currentValue = editPortalFields[fieldKey] ?? "";
+                                    const numeric = ["number", "currency", "decimal"].includes(String(field.type || "").toLowerCase());
+                                    return (
+                                      <div key={field.key || fieldKey} className="space-y-1">
+                                        <label className="text-[9px] text-slate-455 font-black uppercase tracking-wider block font-mono">
+                                          {field.label || fieldKey}{field.required !== false ? " *" : ""}
+                                        </label>
+                                        <input
+                                          type={numeric ? "number" : "text"}
+                                          step={numeric ? "0.01" : undefined}
+                                          value={currentValue}
+                                          onChange={(e) => setEditPortalFields({
+                                            ...editPortalFields,
+                                            [fieldKey]: numeric ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value
+                                          })}
+                                          placeholder={`Completa ${field.label || fieldKey}`}
+                                          className={getInputClass(field.required !== false && String(currentValue).trim() === "", false)}
+                                        />
+                                        {field.hints?.length > 0 && (
+                                          <span className="text-[9px] text-slate-500 block leading-normal">{field.hints.join(" ")}</span>
+                                        )}
+                                      </div>
+                                    );
                                   })}
                                 </div>
                               </div>

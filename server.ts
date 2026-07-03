@@ -577,7 +577,7 @@ async function runSecondaryExtraction(
   };
 
   let prompt = `Este ticket pertenece a ${connector.nombre}.\n`;
-  prompt += `Busca en la imagen y el texto OCR la referencia de facturación: ${field.label}.\n`;
+  prompt += `Busca en la imagen y el texto OCR únicamente este campo requerido por el portal: ${field.label}.\n`;
   prompt += `Pistas de la zona: ${hints.likelyZones ? hints.likelyZones.join(", ") : "Cualquier parte del ticket"}.\n`;
   prompt += `Palabras cercanas asociadas: ${hints.nearbyWords ? hints.nearbyWords.join(", ") : ""}.\n`;
   prompt += `Reglas de filtrado: No debe ser un UUID, folio fiscal, ticketId, doc.id ni ningún identificador interno del sistema.\n`;
@@ -806,14 +806,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
           fechaCompra: { type: "STRING", description: "Fecha de compra en formato YYYY-MM-DD. Si no la encuentras, devuelve null." },
           sucursal: { type: "STRING" },
           rawOcrText: { type: "STRING", description: "El texto completo e íntegro extraído del ticket de forma literal, línea por línea." },
-          portalFieldsConfidence: {
-            type: "OBJECT",
-            properties: {
-              billingReference: { type: "NUMBER", description: "Confianza estimada de 0.0 a 1.0 para la referencia de facturación. Si no se extrae, devuelve 0.0." },
-              total: { type: "NUMBER", description: "Confianza estimada de 0.0 a 1.0 para el total. Si no se extrae, devuelve 0.0." }
-            },
-            required: ["billingReference", "total"]
-          },
+          portalFieldsConfidence: { type: "OBJECT", properties: {} },
           items: {
             type: "ARRAY",
             description: "Lista de conceptos comprados descritos en el ticket",
@@ -828,19 +821,21 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
           }
         };
 
-        // Add targeted fields as nullable string/number
+        // Add every portal field declared by the connector contract.
         for (const f of contract.requiredPortalFields) {
-          if (f.canonicalKey === "billingReference") {
-            customProperties.billingReference = {
-              type: "STRING",
-              description: `${f.label}. Si no se encuentra literal en el ticket, devuelve null.`
-            };
-          } else if (f.canonicalKey === "total") {
-            customProperties.total = {
-              type: "NUMBER",
-              description: `${f.label}. Si no se encuentra literal en el ticket, devuelve null.`
-            };
-          }
+          const fieldKey = String(f.canonicalKey || f.key || "").replace(/^portalFields\./, "");
+          if (!fieldKey) continue;
+          const fieldType = ["number", "currency", "decimal"].includes(String(f.type || "").toLowerCase())
+            ? "NUMBER"
+            : "STRING";
+          customProperties[fieldKey] = {
+            type: fieldType,
+            description: `${f.label || fieldKey}. Devuelve solamente el valor literal del ticket; si no aparece, devuelve ${fieldType === "NUMBER" ? "0" : "una cadena vacía"}.`
+          };
+          customProperties.portalFieldsConfidence.properties[fieldKey] = {
+            type: "NUMBER",
+            description: `Confianza de 0.0 a 1.0 para ${f.label || fieldKey}; devuelve 0.0 si no aparece.`
+          };
         }
 
         targetedSchema = {
@@ -1015,21 +1010,36 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       billingReference = sanitized;
     }
 
-    let portalFieldsConfidence = {
-      billingReference: 0.0,
-      total: 0.0
-    };
+    const contractFields: any[] = matchedConnector?.extractionContract?.requiredPortalFields || [];
+    const dynamicPortalFields: Record<string, any> = {};
+    const portalFieldsConfidence: Record<string, number> = {};
+    const forbiddenInternalValue = /^(ticket_|job_|worker-|pilot-|offline-|mock_|test_)|^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-    if (extractedData.portalFieldsConfidence) {
-      portalFieldsConfidence.billingReference = parseFloat(String(extractedData.portalFieldsConfidence.billingReference || 0.0));
-      portalFieldsConfidence.total = parseFloat(String(extractedData.portalFieldsConfidence.total || 0.0));
-    } else {
-      portalFieldsConfidence.billingReference = billingReference ? 0.90 : 0.0;
-      portalFieldsConfidence.total = extractedData.total ? 0.90 : 0.0;
+    for (const field of contractFields) {
+      const key = String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "");
+      if (!key) continue;
+      let value = key === "billingReference" ? billingReference : extractedData[key];
+      if (typeof value === "string") value = value.trim();
+      if (typeof value === "string" && forbiddenInternalValue.test(value)) {
+        rejectedValuesList.push(value);
+        value = "";
+      }
+      if (value !== "" && value !== null && value !== undefined && field.validationPattern) {
+        try {
+          if (!new RegExp(field.validationPattern).test(String(value))) {
+            rejectedValuesList.push(String(value));
+            value = "";
+          }
+        } catch {
+          value = "";
+        }
+      }
+      dynamicPortalFields[key] = value ?? "";
+      portalFieldsConfidence[key] = parseFloat(String(extractedData.portalFieldsConfidence?.[key] || (value !== "" ? 0.9 : 0)));
     }
 
     // Phased validation checks
-    const isBillingRefRequired = matchedConnector && matchedConnector.extractionContract && matchedConnector.extractionContract.requiredPortalFields?.some((f: any) => f.canonicalKey === "billingReference");
+    const isBillingRefRequired = contractFields.some((f: any) => String(f.canonicalKey || f.key).replace(/^portalFields\./, "") === "billingReference" && f.required !== false);
     const isBillingRefMissingOrLow = isBillingRefRequired && (!billingReference || portalFieldsConfidence.billingReference < 0.5);
     const isTextTooShort = !extractedData.rawOcrText || extractedData.rawOcrText.length < 50;
 
@@ -1055,6 +1065,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
             rejectedValuesList.push(secondaryVal);
           } else if (sanitizedSecondary) {
             billingReference = sanitizedSecondary;
+            dynamicPortalFields.billingReference = sanitizedSecondary;
             portalFieldsConfidence.billingReference = 0.90;
             console.log(`[OCR Phased] Secondary extraction found reference: "${billingReference}"`);
           }
@@ -1067,19 +1078,17 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
     const missingFieldsList: string[] = [];
     const lowConfidenceFieldsList: string[] = [];
 
-    if (isBillingRefRequired) {
-      if (!billingReference) {
-        missingFieldsList.push("portalFields.billingReference");
-      } else if (portalFieldsConfidence.billingReference < 0.8) {
-        lowConfidenceFieldsList.push("portalFields.billingReference");
-      }
-    }
-    const isTotalRequired = matchedConnector && matchedConnector.extractionContract && matchedConnector.extractionContract.requiredPortalFields?.some((f: any) => f.canonicalKey === "total");
-    if (isTotalRequired) {
-      if (!extractedData.total) {
-        missingFieldsList.push("portalFields.total");
-      } else if (portalFieldsConfidence.total < 0.8) {
-        lowConfidenceFieldsList.push("portalFields.total");
+    for (const field of contractFields) {
+      if (field.required === false) continue;
+      const key = String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "");
+      if (!key) continue;
+      const value = dynamicPortalFields[key];
+      const isEmpty = value === "" || value === null || value === undefined ||
+        (typeof value === "number" && !Number.isFinite(value));
+      if (isEmpty) {
+        missingFieldsList.push(`portalFields.${key}`);
+      } else if ((portalFieldsConfidence[key] || 0) < 0.8) {
+        lowConfidenceFieldsList.push(`portalFields.${key}`);
       }
     }
 
@@ -1192,11 +1201,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
 
     pipelineLogs.push("Etapa 5: Ejecutando normalización de campos (limpieza de RFC, formato de fechas y totales).");
 
-    const portalFields = {
-      billingReference: billingReference || "",
-      total: qrParsed ? qrParsed.total : (parseFloat(String(extractedData.total)) || 0),
-      date: extractedData.fechaCompra || ""
-    };
+    const portalFields = matchedConnector ? dynamicPortalFields : {};
 
     const avgConfidence = Object.values(fields).reduce((sum, f) => sum + f.confidence, 0) / Object.keys(fields).length;
 
