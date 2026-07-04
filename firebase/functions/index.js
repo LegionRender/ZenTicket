@@ -306,7 +306,9 @@ async function runGeminiOcr(provider, image, mimeType, matchedConnector = null) 
     for (const f of contract.requiredPortalFields) {
       const hints = f.fieldExtractionHints || {};
       targetedPromptText += `- Campo: ${f.label} (clave: ${f.canonicalKey})\n`;
-      targetedPromptText += `  * Pistas: ${f.hints.join(". ")}\n`;
+      if (f.hints && Array.isArray(f.hints)) {
+        targetedPromptText += `  * Pistas: ${f.hints.join(". ")}\n`;
+      }
       if (hints.likelyZones) targetedPromptText += `  * Zonas probables: ${hints.likelyZones.join(", ")}\n`;
       if (hints.nearbyWords) targetedPromptText += `  * Palabras clave cercanas: ${hints.nearbyWords.join(", ")}\n`;
       if (f.validationPattern) targetedPromptText += `  * Formato esperado (Regex): ${f.validationPattern}\n`;
