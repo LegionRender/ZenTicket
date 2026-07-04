@@ -988,13 +988,25 @@ export const Dashboard = () => {
     }
   };
 
+  const cleanUndefined = (obj) => {
+    if (!obj || typeof obj !== "object") return obj;
+    const clean = {};
+    Object.keys(obj).forEach(key => {
+      if (obj[key] !== undefined) {
+        clean[key] = obj[key];
+      }
+    });
+    return clean;
+  };
+
   const onSaveTicketToDb = async (ticketData) => {
     if (!user) return "";
     try {
       const gId = "ticket_" + Math.random().toString(36).substring(2, 11);
+      const cleanedTicketData = cleanUndefined(ticketData);
       const tkt = {
         id: gId,
-        ...ticketData,
+        ...cleanedTicketData,
         userId: user.uid,
         createdAt: ticketData.createdAt || new Date().toISOString()
       };
@@ -1003,7 +1015,7 @@ export const Dashboard = () => {
         const docRef = doc(db, "tickets", gId);
         await setDoc(docRef, tkt);
       } catch (dbErr) {
-        console.warn("Ticket DB save failed due to quota, saving locally:", dbErr);
+        console.warn("Ticket DB save failed due to quota or validation, saving locally:", dbErr);
         if (dbErr?.message?.includes("Quota") || dbErr?.message?.includes("quota") || dbErr?.code?.includes("resource-exhausted")) {
           setIsQuotaExceeded(true);
         }
@@ -1028,10 +1040,11 @@ export const Dashboard = () => {
   const onUpdateTicketInDb = async (ticketId, updates) => {
     try {
       try {
+        const cleanedUpdates = cleanUndefined(updates);
         const docRef = doc(db, "tickets", ticketId);
-        await setDoc(docRef, updates, { merge: true });
+        await setDoc(docRef, cleanedUpdates, { merge: true });
       } catch (dbErr) {
-        console.warn("Ticket DB update failed due to quota, updating locally:", dbErr);
+        console.warn("Ticket DB update failed due to quota or validation, updating locally:", dbErr);
         if (dbErr?.message?.includes("Quota") || dbErr?.message?.includes("quota") || dbErr?.code?.includes("resource-exhausted")) {
           setIsQuotaExceeded(true);
         }
