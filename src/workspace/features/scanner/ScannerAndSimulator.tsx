@@ -371,6 +371,25 @@ export default function ScannerAndSimulator({
     email: ""
   });
 
+  // Sync customProfileFields state with fiscalProfile prop when it loads or updates
+  useEffect(() => {
+    if (fiscalProfile) {
+      setCustomProfileFields(prev => {
+        // If we already populated the RFC, keep current state to preserve user edits
+        if (prev.rfcReceptor) return prev;
+
+        return {
+          rfcReceptor: fiscalProfile.rfc || "",
+          razonSocial: fiscalProfile.razonSocial || "",
+          codigoPostal: fiscalProfile.codigoPostal || "",
+          regimenFiscal: fiscalProfile.regimenFiscal || "",
+          usoCFDI: fiscalProfile.usoCFDI || "",
+          email: fiscalProfile.correoElectronico || fiscalProfile.email || ""
+        };
+      });
+    }
+  }, [fiscalProfile]);
+
   const [liveTicket, setLiveTicket] = useState<any>(null);
   const [liveJob, setLiveJob] = useState<any>(null);
   const [inlineInputs, setInlineInputs] = useState<Record<string, string>>({});
@@ -783,7 +802,7 @@ export default function ScannerAndSimulator({
         codigoPostal: fiscalProfile?.codigoPostal || "",
         regimenFiscal: fiscalProfile?.regimenFiscal || "",
         usoCFDI: fiscalProfile?.usoCFDI || "",
-        email: fiscalProfile?.correoElectronico || ""
+        email: fiscalProfile?.correoRecepcion || fiscalProfile?.correoElectronico || fiscalProfile?.email || ""
       });
       setMatchingConnector(found);
 
@@ -1674,7 +1693,7 @@ export default function ScannerAndSimulator({
         codigoPostal: fiscalProfile?.codigoPostal || "",
         regimenFiscal: fiscalProfile?.regimenFiscal || "",
         usoCFDI: fiscalProfile?.usoCFDI || "",
-        email: fiscalProfile?.correoElectronico || ""
+        email: fiscalProfile?.correoRecepcion || fiscalProfile?.correoElectronico || fiscalProfile?.email || ""
       });
       setIsEditing(ocrResult.status !== "training_required" && ocrResult.status !== "connector_not_ready" && checkIsDataIncomplete(ocrResult));
 
@@ -2616,7 +2635,14 @@ export default function ScannerAndSimulator({
         if (customProfileFields[k]?.trim()) {
           let mappedKey = k;
           if (k === "rfcReceptor") mappedKey = "rfc";
-          if (k === "email") mappedKey = "correoElectronico";
+          if (k === "email") {
+            if (updatedProfile["correoElectronico"] !== customProfileFields[k] || updatedProfile["correoRecepcion"] !== customProfileFields[k]) {
+              updatedProfile["correoElectronico"] = customProfileFields[k];
+              updatedProfile["correoRecepcion"] = customProfileFields[k];
+              profileChanged = true;
+            }
+            continue;
+          }
           
           if (updatedProfile[mappedKey] !== customProfileFields[k]) {
             updatedProfile[mappedKey] = customProfileFields[k];

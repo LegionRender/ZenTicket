@@ -17,6 +17,20 @@ export function setActiveJobContext(
   activeEnvironment = environment;
 }
 
+function cleanUndefined(obj: any): any {
+  if (!obj || typeof obj !== "object") return obj;
+  if (obj instanceof Date) return obj;
+  if (Array.isArray(obj)) return obj.map(cleanUndefined).filter(item => item !== undefined);
+  const clean: any = {};
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+    if (val !== undefined) {
+      clean[key] = typeof val === "object" && val !== null ? cleanUndefined(val) : val;
+    }
+  }
+  return clean;
+}
+
 export async function createRunnerLog(
   jobId: string,
   ticketId: string,
@@ -33,7 +47,7 @@ export async function createRunnerLog(
     ticketId,
     level,
     message,
-    metadata: metadata || null,
+    metadata: metadata ? cleanUndefined(metadata) : null,
     timestamp,
     createdAt: timestamp
   };
@@ -48,10 +62,11 @@ export async function createRunnerLog(
 
   // Map step/result details if provided in metadata
   if (metadata) {
-    if (metadata.stepIndex !== undefined) payload.stepIndex = metadata.stepIndex;
-    if (metadata.stepType !== undefined) payload.stepType = metadata.stepType;
-    if (metadata.status !== undefined) payload.status = metadata.status;
-    if (metadata.screenshotPath !== undefined) payload.screenshotPath = metadata.screenshotPath;
+    const cleanedMeta = cleanUndefined(metadata);
+    if (cleanedMeta.stepIndex !== undefined) payload.stepIndex = cleanedMeta.stepIndex;
+    if (cleanedMeta.stepType !== undefined) payload.stepType = cleanedMeta.stepType;
+    if (cleanedMeta.status !== undefined) payload.status = cleanedMeta.status;
+    if (cleanedMeta.screenshotPath !== undefined) payload.screenshotPath = cleanedMeta.screenshotPath;
   }
 
   await logRef.set(payload);

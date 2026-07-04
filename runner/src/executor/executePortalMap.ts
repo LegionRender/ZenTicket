@@ -313,7 +313,7 @@ export async function executePortalMap(
               const elements = Array.from(document.querySelectorAll(cleanSel));
               const visibleEnabledEl = elements.find(el => {
                 const style = window.getComputedStyle(el);
-                const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && el.offsetHeight > 0;
+                const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && (el as any).offsetHeight > 0;
                 return isVisible && !el.classList.contains("ui-state-disabled");
               });
               return !!visibleEnabledEl;
