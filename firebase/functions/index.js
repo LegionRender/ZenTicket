@@ -1345,14 +1345,454 @@ app.post("/api/tickets/analyze", async (req, res) => {
   if (!image) {
     res.status(400).json({ error: "Missing base64 ticket image" });
     return;
-  }
-
-  try {
+  }  try {
     const result = await processOcrRequest({ req, image, mimeType, userId, forceTargetedRetry, connectorId });
     res.json(result);
   } catch (err) {
     console.error("[OCR] Critical failure:", err);
     res.json(emptyOcrDraft("El OCR no pudo procesar la imagen por un error interno. El equipo tecnico debe revisar la consola."));
+  }
+});
+
+app.post("/api/tickets/train-jit", async (req, res) => {
+  const { ticketId, nombreEmisor: bodyNombre, rfcEmisor: bodyRfc } = req.body || {};
+  const customKey = req.headers["x-gemini-api-key"];
+
+  if (!ticketId) {
+    res.status(400).json({ error: "Falta el ticketId" });
+    return;
+  }
+
+  // Helper to update progress in automation_trainings
+  const updateProgress = async (progress, step, state = "in_progress") => {
+    try {
+      if (db && typeof db.collection === "function") {
+        await db.collection("automation_trainings").doc(ticketId).set({
+          progress,
+          step,
+          status: step,
+          state,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.warn("Could not update training progress in Firestore:", e.message);
+    }
+  };
+
+  try {
+    // 1. Load the ticket from Firestore
+    if (!db || typeof db.collection !== "function") {
+      throw new Error("Firestore SDK no inicializado");
+    }
+    const ticketDoc = await db.collection("tickets").doc(ticketId).get();
+    if (!ticketDoc.exists) {
+      throw new Error("Ticket no encontrado");
+    }
+    const ticketData = ticketDoc.data();
+    // Use body values as primary source (fresher), fall back to stored data
+    const nombreEmisor = bodyNombre || ticketData.nombreEmisor || "Comercio por identificar";
+    const rfcEmisor = bodyRfc || ticketData.rfcEmisor || "XAXX010101000";
+    const imageBase64 = ticketData.imageUrl || "";
+
+    // 2. Search for the portal URL via Search Grounding
+    await updateProgress(15, "Buscando portal de facturación en base a DNS y Búsqueda de Google...");
+    
+    let portalUrl = "";
+    try {
+      const keyToUse = customKey || optionalSecret(geminiPrimaryKey) || optionalSecret(geminiApiKey) || "";
+      const ai = new GoogleGenAI({ apiKey: keyToUse });
+      const searchPrompt = `Encuentra la URL exacta del portal oficial de autofacturación para clientes de la empresa mexicana '${nombreEmisor}' (RFC: ${rfcEmisor}). 
+      Busca el sitio web donde los compradores pueden solicitar su factura electrónica CFDI ingresando su ticket de compra.
+      Responde SOLO con la URL directa al portal de facturación, sin explicaciones adicionales. Ejemplo de respuesta: https://facturacion.empresa.com.mx/`;
+      
+      // Step A: Google Search Grounding to get the URL (plain text - no JSON schema with grounding)
+      const searchResponse = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: searchPrompt,
+        config: {
+          tools: [{ googleSearch: {} }]
+        }
+      });
+      const searchText = searchResponse.text || "";
+      
+      // Step B: Extract URL from the plain text response using regex
+      const urlMatch = searchText.match(/https?:\/\/[^\s"'<>()]+/i);
+      if (urlMatch) {
+        portalUrl = urlMatch[0].replace(/[.,;:!?]+$/, ""); // Remove trailing punctuation
+      }
+      
+      // Step C: If regex didn't find a URL, use a second AI call to extract it cleanly
+      if (!portalUrl && searchText.length > 10) {
+        const extractResponse = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `Del siguiente texto, extrae ÚNICAMENTE la URL del portal de facturación mencionado. Responde solo con la URL:\n${searchText}`,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: { portalUrl: { type: "STRING" } },
+              required: ["portalUrl"]
+            }
+          }
+        });
+        const parsed = JSON.parse(extractResponse.text || "{}");
+        portalUrl = parsed.portalUrl || "";
+      }
+    } catch (err) {
+      console.warn("Google Search Grounding failed, using keyword fallback:", err.message);
+    }
+    
+    // Fallback: try known portal patterns or generic search
+    if (!portalUrl) {
+      const merchantSlug = nombreEmisor.toLowerCase().replace(/[^a-z0-9]/g, "");
+      portalUrl = `https://facturacion.${merchantSlug}.com.mx/`;
+    }
+
+    // 3. Portal Structure Discovery — Gemini-first, Playwright as refinement
+    await updateProgress(45, "Analizando el portal de facturación con IA para identificar los campos...");
+    let discoverResult = null;
+    
+    // Primary: Gemini-only discovery (reliable, no browser dependency)
+    try {
+      const keyToUse = customKey || optionalSecret(geminiPrimaryKey) || optionalSecret(geminiApiKey) || "";
+      const ai = new GoogleGenAI({ apiKey: keyToUse });
+      const discoveryPrompt = `Eres un experto en portales de facturación electrónica CFDI de México.
+      
+      Necesito crear un conector automatizado para el comercio: '${nombreEmisor}' (RFC: ${rfcEmisor}).
+      Portal de facturación detectado: ${portalUrl}
+      
+      Basándote en tu conocimiento de portales de facturación mexicanos similares a este comercio, genera:
+      
+      1. requiredPortalFields: Los campos que el portal pide para BUSCAR el ticket (normalmente: número de ticket/folio, fecha, sucursal, total). SOLO los campos del formulario de búsqueda inicial.
+      2. fiscalFields: Los campos fiscales que pide después (RFC, Razón Social, CP, Régimen Fiscal, Uso CFDI, Email).
+      3. stepsJson: Pasos de automatización con selectores CSS genéricos pero funcionales para este tipo de portal.
+      4. portalUrl: La URL más probable del portal de facturación (corrige si el detectado parece incorrecto).
+      
+      IMPORTANTE: Los portales mexicanos de facturación típicamente tienen:
+      - Campo "Folio" o "No. de ticket" para buscar el comprobante
+      - Campo "Fecha" en formato DD/MM/YYYY o selector de fecha
+      - Campo "Total" o "Importe" del ticket
+      - Después solicitan datos fiscales del cliente
+      
+      Genera selectores específicos para ${nombreEmisor} si los conoces, o selectores genéricos funcionales.`;
+      
+      const discoveryResponse = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: discoveryPrompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              requiredPortalFields: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    key: { type: "STRING" },
+                    canonicalKey: { type: "STRING" },
+                    label: { type: "STRING" },
+                    type: { type: "STRING" },
+                    required: { type: "BOOLEAN" },
+                    userEditable: { type: "BOOLEAN" }
+                  },
+                  required: ["key", "canonicalKey", "label", "type", "required"]
+                }
+              },
+              fiscalFields: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    key: { type: "STRING" },
+                    label: { type: "STRING" },
+                    required: { type: "BOOLEAN" }
+                  }
+                }
+              },
+              stepsJson: { type: "STRING" },
+              portalUrl: { type: "STRING" },
+              warnings: { type: "ARRAY", items: { type: "STRING" } }
+            },
+            required: ["requiredPortalFields", "fiscalFields", "stepsJson", "warnings"]
+          }
+        }
+      });
+      discoverResult = JSON.parse(discoveryResponse.text || "{}");
+      if (discoverResult.portalUrl && discoverResult.portalUrl.startsWith("http")) {
+        portalUrl = discoverResult.portalUrl;
+      }
+      
+      // Secondary: Try Playwright to refine selectors (optional, non-blocking)
+      await updateProgress(60, "Verificando estructura del portal con navegador automatizado...");
+      let browser = null;
+      try {
+        const { chromium } = require("playwright");
+        browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+        const page = await browser.newPage();
+        await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 12000 });
+        await page.waitForTimeout(1500);
+
+        const discoveredInputs = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll("input, select, textarea")).slice(0, 20).map(el => ({
+            id: el.id || "",
+            name: el.name || "",
+            type: el.getAttribute("type") || "",
+            placeholder: el.getAttribute("placeholder") || "",
+            labelText: (() => {
+              if (el.id) {
+                const lbl = document.querySelector(`label[for="${el.id}"]`);
+                if (lbl) return lbl.textContent?.trim() || "";
+              }
+              const parentLbl = el.closest("label");
+              return parentLbl?.textContent?.trim() || el.getAttribute("aria-label") || "";
+            })()
+          }));
+        });
+        await browser.close();
+        browser = null;
+
+        if (discoveredInputs.length > 0) {
+          const ai2 = new GoogleGenAI({ apiKey: keyToUse });
+          const refineResponse = await ai2.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: `Refina los selectores CSS del conector para '${nombreEmisor}' basándote en los inputs reales encontrados en el portal.
+            
+            Conector base generado:
+            ${JSON.stringify(discoverResult, null, 2)}
+            
+            Inputs reales del portal:
+            ${JSON.stringify(discoveredInputs, null, 2)}
+            
+            Actualiza SOLO los stepsJson con selectores más precisos basados en los inputs reales. Mantén el resto igual.`,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "OBJECT",
+                properties: {
+                  stepsJson: { type: "STRING" }
+                },
+                required: ["stepsJson"]
+              }
+            }
+          });
+          const refined = JSON.parse(refineResponse.text || "{}");
+          if (refined.stepsJson) {
+            discoverResult.stepsJson = refined.stepsJson;
+            discoverResult.warnings = [...(discoverResult.warnings || []), "Selectores refinados con datos reales de Playwright"];
+          }
+        }
+      } catch (playwrightErr) {
+        if (browser) { try { await browser.close(); } catch(_e) {} }
+        console.info("Playwright refinement skipped (non-fatal):", playwrightErr.message?.substring(0, 100));
+      }
+    } catch (discoveryErr) {
+      console.warn("Gemini discovery failed, using hardcoded template:", discoveryErr.message);
+      discoverResult = {
+        requiredPortalFields: [
+          { key: "portalFields.billingReference", canonicalKey: "portalFields.billingReference", label: "Folio / No. de Ticket", type: "text", required: true, userEditable: true },
+          { key: "portalFields.fechaCompra", canonicalKey: "portalFields.fechaCompra", label: "Fecha de Compra", type: "date", required: false, userEditable: true },
+          { key: "portalFields.total", canonicalKey: "portalFields.total", label: "Total de la Compra ($)", type: "number", required: false, userEditable: true }
+        ],
+        fiscalFields: [
+          { key: "fiscalProfile.rfc", label: "RFC", required: true },
+          { key: "fiscalProfile.razonSocial", label: "Razón Social", required: true },
+          { key: "fiscalProfile.codigoPostal", label: "Código Postal", required: true },
+          { key: "fiscalProfile.regimenFiscal", label: "Régimen Fiscal", required: true },
+          { key: "fiscalProfile.usoCFDI", label: "Uso CFDI", required: true },
+          { key: "fiscalProfile.email", label: "Correo Electrónico", required: true }
+        ],
+        stepsJson: JSON.stringify([
+          { action: "navigate", url: portalUrl },
+          { action: "fill", selector: "input[name*='folio'],input[id*='folio'],input[placeholder*='ticket'],input[placeholder*='folio'],input[name*='ticket']", value: "{{portalFields.billingReference}}" },
+          { action: "fill", selector: "input[name*='rfc'],input[id*='rfc'],input[placeholder*='RFC']", value: "{{fiscalProfile.rfc}}" },
+          { action: "click", selector: "button[type='submit'],input[type='submit']" }
+        ]),
+        warnings: ["Usando plantilla genérica por fallo en discovery: " + discoveryErr.message]
+      };
+    }
+
+    // 4. Save Connector to Firestore
+    await updateProgress(70, "Guardando conector y mapa de navegación en base de datos...");
+    const connectorId = nombreEmisor.toLowerCase().replace(/[^a-z0-9]/g, "-") || "gen-" + Date.now();
+    const contract = {
+      requiredPortalFields: discoverResult.requiredPortalFields,
+      fiscalFields: discoverResult.fiscalFields,
+      screenOrder: [
+        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: discoverResult.requiredPortalFields.map(f => f.key) },
+        { screenIndex: 2, description: "Datos fiscales", requiredFields: discoverResult.fiscalFields.map(f => f.key) }
+      ]
+    };
+    const fields = discoverResult.requiredPortalFields.map(f => ({
+      key: f.canonicalKey,
+      name: f.label,
+      selector: "input",
+      type: f.type === "number" ? "number" : "text",
+      required: f.required !== false,
+      source: "ticket"
+    }));
+
+    const newConnector = {
+      id: connectorId,
+      nombre: nombreEmisor,
+      rfc: rfcEmisor,
+      aliases: [nombreEmisor],
+      portalUrl: portalUrl,
+      status: "production_ready",
+      runnerAvailable: true,
+      extractionContract: contract,
+      fieldsJson: JSON.stringify(fields),
+      flowJson: discoverResult.stepsJson,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection("connectors").doc(connectorId).set(newConnector);
+
+    // Save Portal Map
+    const reqFieldsList = discoverResult.requiredPortalFields.map(f => ({
+      key: f.key,
+      label: f.label,
+      source: "portalFields",
+      required: f.required !== false,
+      userEditable: true
+    }));
+    const fiscalKeys = ["rfc", "businessName", "postalCode", "taxRegime", "cfdiUse", "email"];
+    fiscalKeys.forEach(k => {
+      const matched = discoverResult.fiscalFields?.find(f => f.key.endsWith("." + k));
+      reqFieldsList.push({
+        key: matched?.key || `fiscalProfile.${k}`,
+        label: matched?.label || k,
+        source: "fiscalProfile",
+        required: true,
+        userEditable: true
+      });
+    });
+
+    const portalMapData = {
+      connectorId: connectorId,
+      entryUrl: portalUrl,
+      url: portalUrl,
+      requiredFields: reqFieldsList,
+      fiscalFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"],
+      captchaSelectorsJson: JSON.stringify(["iframe[src*='recaptcha']", ".g-recaptcha", "#captcha"]),
+      errorSelectorsJson: JSON.stringify([".swal-text", ".alert-danger", "#error-msg", ".text-danger"]),
+      successSelectorsJson: JSON.stringify([".success-msg", "#download-area"]),
+      downloadRulesJson: JSON.stringify({ xmlRequired: true, pdfRequired: false }),
+      stepsJson: discoverResult.stepsJson,
+      isApproved: true,
+      status: "approved",
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    };
+    await db.collection("portal_maps").doc(`map-${connectorId}`).set(portalMapData);
+
+    // 5. Re-run OCR Stage 2
+    await updateProgress(85, "Re-analizando el ticket para extraer los campos del portal...");
+    
+    let ocrResultData = {};
+    try {
+      const keyToUse = customKey || optionalSecret(geminiPrimaryKey) || optionalSecret(geminiApiKey) || "";
+      const ai = new GoogleGenAI({ apiKey: keyToUse });
+      const rawImage = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
+      const mime = imageBase64.includes("image/png") ? "image/png" : "image/jpeg";
+
+      const targetedPromptText = `Analiza la imagen del ticket de compra de la tienda: ${nombreEmisor}.
+      Extrae únicamente los campos requeridos por el portal de facturación oficial:
+      ${discoverResult.requiredPortalFields.map(f => `- Campo: ${f.label} (clave: ${f.key.replace(/^portalFields\./, "")})`).join("\n")}
+      También extrae el total de la compra (total) con decimales, la fecha de compra (fechaCompra) en formato YYYY-MM-DD, y el folio de venta (folio).`;
+
+      const customProperties = {
+        rfcEmisor: { type: "STRING" },
+        nombreEmisor: { type: "STRING" },
+        fechaCompra: { type: "STRING" },
+        total: { type: "NUMBER" },
+        folio: { type: "STRING" },
+        rawOcrText: { type: "STRING" },
+        portalFieldsConfidence: { type: "OBJECT", properties: {} },
+        items: {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: { description: { type: "STRING" }, amount: { type: "NUMBER" } }
+          }
+        }
+      };
+      discoverResult.requiredPortalFields.forEach(f => {
+        const fieldKey = f.key.replace(/^portalFields\./, "");
+        customProperties[fieldKey] = { type: f.type === "number" ? "NUMBER" : "STRING" };
+        customProperties.portalFieldsConfidence.properties[fieldKey] = { type: "NUMBER" };
+      });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          { inlineData: { data: rawImage, mimeType: mime } },
+          { text: targetedPromptText }
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: customProperties,
+            required: ["rfcEmisor", "nombreEmisor", "rawOcrText", "items", "portalFieldsConfidence"]
+          }
+        }
+      });
+      ocrResultData = JSON.parse(response.text || "{}");
+    } catch (ocrErr) {
+      console.warn("JIT OCR Stage 2 failed, using basic fields:", ocrErr.message);
+      ocrResultData = {
+        rfcEmisor: rfcEmisor,
+        nombreEmisor: nombreEmisor,
+        total: ticketData.total || 0,
+        fechaCompra: ticketData.fechaCompra || "",
+        folio: ticketData.folio || "",
+        rawOcrText: ticketData.rawOcrText || "",
+        portalFieldsConfidence: {}
+      };
+    }
+
+    // 6. Update Ticket in Firestore
+    await updateProgress(95, "Auto-entrenamiento completado con éxito. Encolando facturación...");
+
+    const portalFields = {};
+    discoverResult.requiredPortalFields.forEach(f => {
+      const fieldKey = f.key.replace(/^portalFields\./, "");
+      portalFields[fieldKey] = ocrResultData[fieldKey] || "";
+    });
+    portalFields.total = ocrResultData.total || ticketData.total || 0;
+    portalFields.billingReference = ocrResultData.folio || ocrResultData.billingReference || ticketData.folio || "";
+
+    const updatedFields = {
+      status: "extracted",
+      nombreEmisor: ocrResultData.nombreEmisor || nombreEmisor,
+      rfcEmisor: ocrResultData.rfcEmisor || rfcEmisor,
+      total: ocrResultData.total || ticketData.total || 0,
+      folio: ocrResultData.folio || ticketData.folio || "",
+      fechaCompra: ocrResultData.fechaCompra || ticketData.fechaCompra || "",
+      billingReference: ocrResultData.folio || ticketData.folio || "",
+      portalFields: portalFields,
+      connectorId: connectorId,
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection("tickets").doc(ticketId).update(updatedFields);
+
+    await updateProgress(100, "¡Configuración completada con éxito! Iniciando solicitud en el portal...", "completed");
+
+    res.json({
+      success: true,
+      connector: newConnector,
+      ocrResult: {
+        ...ocrResultData,
+        portalFields
+      }
+    });
+
+  } catch (err) {
+    console.error("JIT training failed:", err);
+    await updateProgress(100, "Fallo durante el auto-entrenamiento: " + err.message, "failed");
+    res.status(500).json({ error: "Fallo durante el auto-entrenamiento: " + err.message });
   }
 });
 
