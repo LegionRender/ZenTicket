@@ -28,36 +28,63 @@ function maskString(str: string): string {
   return str.substring(0, 3) + "*".repeat(str.length - 6) + str.substring(str.length - 3);
 }
 
-async function checkCaptcha(page: Page, captchaSelectors: string[]): Promise<boolean> {
+interface CaptchaEvidence {
+  selector: string;
+  description: string;
+}
+
+async function checkCaptcha(page: Page, captchaSelectors: string[]): Promise<CaptchaEvidence | null> {
   const defaultSelectors = [
     "iframe[src*='recaptcha']",
     "iframe[src*='captcha']",
     ".g-recaptcha",
     "input[name*='captcha']",
-    "input[id*='captcha']",
-    "img[src*='captcha']"
+    "input[id*='captcha']"
   ];
   const allSelectors = [...new Set([...defaultSelectors, ...captchaSelectors])];
 
   for (const selector of allSelectors) {
     try {
-      const count = await page.locator(selector).count();
-      if (count > 0) {
-        const visible = await page.locator(selector).first().isVisible();
-        if (visible) return true;
+      const matches = page.locator(selector);
+      const count = await matches.count();
+      for (let index = 0; index < count; index++) {
+        const match = matches.nth(index);
+        if (!await match.isVisible()) continue;
+        const evidence = await match.evaluate((element: HTMLElement) => {
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          return {
+            interactiveSize: rect.width >= 20 && rect.height >= 20,
+            inViewport: rect.bottom > 0 && rect.right > 0 &&
+              rect.top < window.innerHeight && rect.left < window.innerWidth,
+            invisibleWidget:
+              element.getAttribute("data-size") === "invisible" ||
+              element.getAttribute("aria-hidden") === "true" ||
+              style.pointerEvents === "none"
+          };
+        });
+        if (evidence.interactiveSize && evidence.inViewport && !evidence.invisibleWidget) {
+          return { selector, description: "Control CAPTCHA visible e interactivo" };
+        }
       }
     } catch (e) {}
   }
 
-  // Text-based checks
-  try {
-    const bodyText = await page.innerText("body");
-    if (bodyText.includes("No soy un robot") || bodyText.includes("Introduce el captcha")) {
-      return true;
+  for (const text of ["No soy un robot", "Introduce el captcha", "Resuelve el CAPTCHA"]) {
+    try {
+      const message = page.getByText(text, { exact: false }).first();
+      if (await message.count() && await message.isVisible()) {
+        const box = await message.boundingBox();
+        if (box && box.y < 800 && box.y + box.height > 0) {
+          return { selector: `text=${text}`, description: "Mensaje CAPTCHA visible" };
+        }
+      }
+    } catch (e) {
+      // Ignore detached and cross-origin elements.
     }
-  } catch (e) {}
+  }
 
-  return false;
+  return null;
 }
 
 async function checkPortalError(page: Page, errorSelectors: string[]): Promise<string | null> {
@@ -109,8 +136,13 @@ async function waitForSelectorOrError(
       }
     } catch (e) {}
 
-    if (await checkCaptcha(page, captchaSelectors)) {
-      throw { message: "Se detectó un CAPTCHA en el portal del comercio.", code: "CAPTCHA_DETECTED" };
+    const captcha = await checkCaptcha(page, captchaSelectors);
+    if (captcha) {
+      throw {
+        message: "Se detectó un CAPTCHA visible en el portal del comercio.",
+        code: "CAPTCHA_DETECTED",
+        captchaEvidence: captcha
+      };
     }
 
     const portalError = await checkPortalError(page, errorSelectors);
@@ -247,11 +279,13 @@ export async function executePortalMap(
       }
 
       // Pre-step Captcha and Portal Error checks
-      if (await checkCaptcha(page, captchaSelectors)) {
+      const captcha = await checkCaptcha(page, captchaSelectors);
+      if (captcha) {
         await uploadErrorScreenshot("CAPTCHA_DETECTED");
+        await createRunnerLog(jobId, ticketId, "WARNING", "CAPTCHA visible confirmado.", { captchaEvidence: captcha });
         return {
           success: false,
-          error: "Se detectó un CAPTCHA en el portal del comercio.",
+          error: "Se detectó un CAPTCHA visible en el portal del comercio.",
           errorCode: "CAPTCHA_DETECTED",
           screenshotPath: lastScreenshotPath,
           stepIndex: currentStepIdx,
@@ -289,7 +323,28 @@ export async function executePortalMap(
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.first().fill(value);
+        const target = locator.first();
+        const fieldState = await target.evaluate((element: HTMLInputElement | HTMLTextAreaElement) => ({
+          disabled: element.disabled,
+          readOnly: element.readOnly,
+          value: element.value || element.getAttribute("value") || ""
+        }));
+        if (fieldState.disabled || fieldState.readOnly) {
+          const normalize = (input: string) => input.trim().toUpperCase().replace(/[\s-]/g, "");
+          if (!fieldState.value || normalize(fieldState.value) !== normalize(value)) {
+            throw {
+              code: "PORTAL_LOCKED_FIELD_MISMATCH",
+              message: `El portal bloqueó el campo ${step.selector} con un valor distinto al esperado.`
+            };
+          }
+          await createRunnerLog(jobId, ticketId, "INFO", "Campo bloqueado ya validado por el portal; se omite la escritura.", {
+            stepIndex: i,
+            stepType: step.type,
+            selector: step.selector
+          });
+        } else {
+          await target.fill(value);
+        }
       } else if (step.type === "evaluate") {
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
@@ -488,8 +543,10 @@ export async function executePortalMap(
     }
 
     // Post-step error and captcha check
-    if (await checkCaptcha(page, captchaSelectors)) {
+    const finalCaptcha = await checkCaptcha(page, captchaSelectors);
+    if (finalCaptcha) {
       await uploadErrorScreenshot("CAPTCHA_DETECTED");
+      await createRunnerLog(jobId, ticketId, "WARNING", "CAPTCHA final visible confirmado.", { captchaEvidence: finalCaptcha });
       return {
         success: false,
         error: "Se detectó un CAPTCHA final en el portal.",

@@ -834,6 +834,7 @@ export default function ScannerAndSimulator({
       } else if ([
         "queued_for_runner",
         "runner_processing",
+        "waiting_user_captcha",
         "waiting_fiscal_profile",
         "missing_required_fields",
         "sat_validation_pending",
@@ -949,6 +950,9 @@ export default function ScannerAndSimulator({
       }
       setIsEditing(false);
       setActiveStep("correction");
+    } else if (tStatus === "waiting_user_captcha") {
+      setIsAutomatingLoading(false);
+      setActiveStep("tracking");
     } else if (tStatus === "cfdi_validated" || tStatus === "completed" || tStatus === "invoice_obtained") {
       setIsAutomatingLoading(false);
       setSimulationProgress(100);
@@ -2497,7 +2501,9 @@ export default function ScannerAndSimulator({
         let errMsg = `Error del servidor (HTTP ${response.status})`;
         try {
           const errData = await response.json();
-          errMsg = errData.error || errMsg;
+          errMsg = errData.code === "PORTAL_AUTH_REQUIRED"
+            ? "El portal oficial de este comercio requiere iniciar sesión o crear una cuenta. No es posible automatizarlo sin autorización del usuario."
+            : (errData.error || errMsg);
         } catch {
           // Server returned non-JSON (HTML error page) — show status code only
           errMsg = `El servidor de entrenamiento no respondió correctamente (HTTP ${response.status}). Verifica la consola del servidor.`;

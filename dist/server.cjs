@@ -854,10 +854,10 @@ app.post("/api/tickets/analyze", async (req, res) => {
         }
         matchedConnector = backendMatchConnector(connectorsList, detectedName, detectedRfc);
       }
-      isReadyConnector = false;
-      if (matchedConnector && matchedConnector.status === "production_ready" && matchedConnector.runnerAvailable === true) {
-        isReadyConnector = true;
-      }
+      const runnableStatuses = ["production_ready", "automation_available", "real_validation"];
+      isReadyConnector = Boolean(
+        matchedConnector && runnableStatuses.includes(matchedConnector.status) && matchedConnector.runnerAvailable === true
+      );
       if (!matchedConnector) {
         console.log(`[OCR Pipeline] No connector matched for ${detectedName} (${detectedRfc}). Creating candidate.`);
         if (adminDb && typeof adminDb.collection === "function") {
@@ -2270,11 +2270,21 @@ app.post("/api/tickets/train-jit", async (req, res) => {
     const imageBase64 = ticketData.imageUrl || "";
     await updateProgress(15, "Buscando portal de facturaci\xF3n en base a DNS y B\xFAsqueda de Google...");
     let portalUrl = "";
+    const portalCandidates = [];
+    const addPortalCandidate = (candidate) => {
+      const clean = String(candidate || "").trim().replace(/[.,;:!?]+$/, "");
+      if (/^https?:\/\//i.test(clean) && !portalCandidates.includes(clean)) portalCandidates.push(clean);
+    };
+    const rawTicketText = `${ticketData.rawOcrText || ""}
+${ticketData.billingUrl || ""}`;
+    for (const match of rawTicketText.matchAll(/(?:https?:\/\/|www\.)[^\s"'<>]+/gi)) {
+      addPortalCandidate(match[0].startsWith("www.") ? `https://${match[0]}` : match[0]);
+    }
     try {
       const ai = getGeminiClient(customKey);
-      const searchPrompt = `Encuentra la URL exacta del portal oficial de autofacturaci\xF3n para clientes de la empresa mexicana '${nombreEmisor}' (RFC: ${rfcEmisor}). 
-      Busca el sitio web donde los compradores pueden solicitar su factura electr\xF3nica CFDI ingresando su ticket de compra.
-      Responde SOLO con la URL directa al portal de facturaci\xF3n, sin explicaciones adicionales. Ejemplo de respuesta: https://facturacion.empresa.com.mx/`;
+      const searchPrompt = `Encuentra URLs reales y actualmente accesibles para facturar tickets de la empresa mexicana '${nombreEmisor}' (RFC: ${rfcEmisor}).
+      Devuelve hasta 5 URLs candidatas: primero el portal directo y despu\xE9s p\xE1ginas oficiales de la empresa que enlacen a facturaci\xF3n.
+      No inventes subdominios. Incluye \xFAnicamente URLs encontradas mediante Google Search, una por l\xEDnea.`;
       const searchResponse = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: searchPrompt,
@@ -2283,11 +2293,12 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         }
       });
       const searchText = searchResponse.text || "";
-      const urlMatch = searchText.match(/https?:\/\/[^\s"'<>()]+/i);
-      if (urlMatch) {
-        portalUrl = urlMatch[0].replace(/[.,;:!?]+$/, "");
+      for (const match of searchText.matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
+        addPortalCandidate(match[0]);
       }
-      if (!portalUrl && searchText.length > 10) {
+      const groundingChunks = searchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      for (const chunk of groundingChunks) addPortalCandidate(chunk?.web?.uri);
+      if (portalCandidates.length === 0 && searchText.length > 10) {
         const extractResponse = await ai.models.generateContent({
           model: "gemini-2.5-flash",
           contents: `Del siguiente texto, extrae \xDANICAMENTE la URL del portal de facturaci\xF3n mencionado. Responde solo con la URL:
@@ -2302,10 +2313,26 @@ ${searchText}`,
           }
         });
         const parsed = JSON.parse(extractResponse.text || "{}");
-        portalUrl = parsed.portalUrl || "";
+        addPortalCandidate(parsed.portalUrl);
       }
     } catch (err) {
       console.warn("Google Search Grounding failed, using keyword fallback:", err.message);
+    }
+    for (const candidate of portalCandidates) {
+      try {
+        const response = await fetch(candidate, {
+          method: "GET",
+          redirect: "follow",
+          signal: AbortSignal.timeout(12e3),
+          headers: { "User-Agent": "Mozilla/5.0 ZenTicket-PortalDiscovery/1.0" }
+        });
+        if (response.ok) {
+          portalUrl = response.url || candidate;
+          break;
+        }
+      } catch (candidateError) {
+        console.info(`[JIT] Portal candidate rejected: ${candidate} (${candidateError.message})`);
+      }
     }
     if (!portalUrl) {
       throw new Error("No se pudo verificar un portal oficial de autofacturaci\xF3n para este comercio.");
@@ -2319,20 +2346,14 @@ ${searchText}`,
       Necesito crear un conector automatizado para el comercio: '${nombreEmisor}' (RFC: ${rfcEmisor}).
       Portal de facturaci\xF3n detectado: ${portalUrl}
       
-      Bas\xE1ndote en tu conocimiento de portales de facturaci\xF3n mexicanos similares a este comercio, genera:
+      Genera una propuesta provisional que despu\xE9s ser\xE1 reemplazada por el an\xE1lisis del DOM real. No inventes campos ni URLs:
       
       1. requiredPortalFields: Los campos que el portal pide para BUSCAR el ticket (normalmente: n\xFAmero de ticket/folio, fecha, sucursal, total). SOLO los campos del formulario de b\xFAsqueda inicial.
       2. fiscalFields: Los campos fiscales que pide despu\xE9s (RFC, Raz\xF3n Social, CP, R\xE9gimen Fiscal, Uso CFDI, Email).
       3. stepsJson: Pasos de automatizaci\xF3n con selectores CSS gen\xE9ricos pero funcionales para este tipo de portal.
       4. portalUrl: La URL m\xE1s probable del portal de facturaci\xF3n (corrige si el detectado parece incorrecto).
       
-      IMPORTANTE: Los portales mexicanos de facturaci\xF3n t\xEDpicamente tienen:
-      - Campo "Folio" o "No. de ticket" para buscar el comprobante
-      - Campo "Fecha" en formato DD/MM/YYYY o selector de fecha
-      - Campo "Total" o "Importe" del ticket
-      - Despu\xE9s solicitan datos fiscales del cliente
-      
-      Genera selectores espec\xEDficos para ${nombreEmisor} si los conoces, o selectores gen\xE9ricos funcionales.`;
+      Los campos y selectores deben confirmarse posteriormente contra el DOM; no agregues campos por analog\xEDa con otros comercios.`;
       const discoveryResponse = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: discoveryPrompt,
@@ -2376,9 +2397,6 @@ ${searchText}`,
         }
       });
       discoverResult = JSON.parse(discoveryResponse.text || "{}");
-      if (discoverResult.portalUrl && discoverResult.portalUrl.startsWith("http")) {
-        portalUrl = discoverResult.portalUrl;
-      }
       await updateProgress(60, "Verificando estructura del portal con navegador automatizado...");
       let browser = null;
       try {
@@ -2387,6 +2405,12 @@ ${searchText}`,
         const page = await browser.newPage();
         await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 12e3 });
         await page.waitForTimeout(1500);
+        const visiblePortalText = await page.locator("body").innerText().catch(() => "");
+        if (/para poder facturar.{0,120}necesitas iniciar sesi[oó]n|inicia sesi[oó]n o reg[ií]strate/i.test(visiblePortalText)) {
+          const authError = new Error("El portal oficial requiere una cuenta o sesi\xF3n del comercio para facturar.");
+          authError.code = "PORTAL_AUTH_REQUIRED";
+          throw authError;
+        }
         const portalDom = (await page.content()).substring(0, 5e4);
         const portalScreenshot = (await page.screenshot({ fullPage: true })).toString("base64");
         const discoveredInputs = await page.evaluate(() => {
@@ -2413,9 +2437,9 @@ ${searchText}`,
             model: "gemini-2.5-flash",
             contents: [
               { inlineData: { data: portalScreenshot, mimeType: "image/png" } },
-              { text: `Refina los selectores CSS del conector para '${nombreEmisor}' bas\xE1ndote en el DOM, la captura y los inputs reales encontrados en el portal.
+              { text: `Reconstruye por completo el contrato para '${nombreEmisor}' usando exclusivamente el DOM, la captura y los inputs reales.
 
-              Conector base generado:
+              Propuesta provisional (no conf\xEDes en sus campos ni selectores):
               ${JSON.stringify(discoverResult, null, 2)}
 
               Inputs reales del portal:
@@ -2424,23 +2448,55 @@ ${searchText}`,
               DOM real del portal:
               ${portalDom}
 
-              Actualiza SOLO los stepsJson con selectores m\xE1s precisos basados en los inputs reales. Mant\xE9n el resto igual.` }
+              Devuelve requiredPortalFields, fiscalFields y stepsJson. No agregues campos que no est\xE9n respaldados por el DOM. No automatices usuarios, contrase\xF1as, CAPTCHA ni OTP.` }
             ],
             config: {
               responseMimeType: "application/json",
               responseSchema: {
                 type: "OBJECT",
                 properties: {
+                  requiredPortalFields: {
+                    type: "ARRAY",
+                    items: {
+                      type: "OBJECT",
+                      properties: {
+                        key: { type: "STRING" },
+                        canonicalKey: { type: "STRING" },
+                        label: { type: "STRING" },
+                        type: { type: "STRING" },
+                        required: { type: "BOOLEAN" },
+                        userEditable: { type: "BOOLEAN" }
+                      },
+                      required: ["key", "canonicalKey", "label", "type", "required"]
+                    }
+                  },
+                  fiscalFields: {
+                    type: "ARRAY",
+                    items: {
+                      type: "OBJECT",
+                      properties: {
+                        key: { type: "STRING" },
+                        label: { type: "STRING" },
+                        required: { type: "BOOLEAN" }
+                      },
+                      required: ["key", "label", "required"]
+                    }
+                  },
                   stepsJson: { type: "STRING" }
                 },
-                required: ["stepsJson"]
+                required: ["requiredPortalFields", "fiscalFields", "stepsJson"]
               }
             }
           });
           const refined = JSON.parse(refineResponse.text || "{}");
           if (refined.stepsJson) {
-            discoverResult.stepsJson = refined.stepsJson;
-            discoverResult.warnings = [...discoverResult.warnings || [], "Selectores refinados con datos reales de Playwright"];
+            discoverResult = {
+              ...discoverResult,
+              requiredPortalFields: refined.requiredPortalFields,
+              fiscalFields: refined.fiscalFields,
+              stepsJson: refined.stepsJson,
+              warnings: [...discoverResult.warnings || [], "Contrato reconstruido con DOM real de Playwright"]
+            };
           }
         } else {
           throw new Error("El portal no expuso campos de facturaci\xF3n analizables.");
@@ -2455,43 +2511,31 @@ ${searchText}`,
         throw new Error(`Playwright no pudo verificar el portal: ${playwrightErr.message}`);
       }
     } catch (discoveryErr) {
-      throw new Error(`No fue posible construir un conector verificable: ${discoveryErr.message}`);
-      discoverResult = {
-        requiredPortalFields: [
-          { key: "portalFields.billingReference", canonicalKey: "portalFields.billingReference", label: "Folio / No. de Ticket", type: "text", required: true, userEditable: true },
-          { key: "portalFields.fechaCompra", canonicalKey: "portalFields.fechaCompra", label: "Fecha de Compra", type: "date", required: false, userEditable: true },
-          { key: "portalFields.total", canonicalKey: "portalFields.total", label: "Total de la Compra ($)", type: "number", required: false, userEditable: true }
-        ],
-        fiscalFields: [
-          { key: "fiscalProfile.rfc", label: "RFC", required: true },
-          { key: "fiscalProfile.razonSocial", label: "Raz\xF3n Social", required: true },
-          { key: "fiscalProfile.codigoPostal", label: "C\xF3digo Postal", required: true },
-          { key: "fiscalProfile.regimenFiscal", label: "R\xE9gimen Fiscal", required: true },
-          { key: "fiscalProfile.usoCFDI", label: "Uso CFDI", required: true },
-          { key: "fiscalProfile.email", label: "Correo Electr\xF3nico", required: true }
-        ],
-        stepsJson: JSON.stringify([
-          { type: "goto", url: portalUrl },
-          { type: "fill", selector: "input[name*='folio'],input[id*='folio'],input[placeholder*='ticket'],input[placeholder*='folio'],input[name*='ticket']", value: "{{portalFields.billingReference}}" },
-          { type: "fill", selector: "input[name*='rfc'],input[id*='rfc'],input[placeholder*='RFC']", value: "{{fiscalProfile.rfc}}" },
-          { type: "click", selector: "button[type='submit'],input[type='submit']" }
-        ]),
-        warnings: ["Usando plantilla gen\xE9rica por fallo en discovery: " + discoveryErr.message]
-      };
+      const wrappedError = new Error(`No fue posible construir un conector verificable: ${discoveryErr.message}`);
+      wrappedError.code = discoveryErr.code;
+      throw wrappedError;
     }
     const supportedStepTypes = /* @__PURE__ */ new Set(["goto", "fill", "evaluate", "select", "click", "check", "radio", "waitForSelector", "waitForNavigation", "waitForTimeout", "assertText", "extractText", "conditional", "waitForDownload"]);
-    let parsedSteps;
-    try {
-      const rawSteps = typeof discoverResult.stepsJson === "string" ? JSON.parse(discoverResult.stepsJson) : discoverResult.stepsJson;
+    const stepTypeAliases = {
+      navigate: "goto",
+      type: "fill",
+      wait_for_selector: "waitForSelector",
+      wait_for_navigation: "waitForNavigation",
+      wait_for_timeout: "waitForTimeout",
+      wait_for_download: "waitForDownload",
+      assert_text: "assertText",
+      extract_text: "extractText"
+    };
+    const normalizeAndValidateSteps = (source) => {
+      const rawSteps = typeof source === "string" ? JSON.parse(source) : source;
       if (!Array.isArray(rawSteps) || rawSteps.length === 0) throw new Error("stepsJson vac\xEDo");
-      parsedSteps = rawSteps.map((raw) => {
-        const type = raw.type || raw.action;
-        return { ...raw, type: type === "navigate" ? "goto" : type };
+      const normalized = rawSteps.map((raw) => {
+        const sourceType = raw.type || raw.action;
+        const type = stepTypeAliases[sourceType] || sourceType;
+        return { ...raw, type };
       });
-      if (!parsedSteps.some((step) => step.type === "goto")) {
-        parsedSteps.unshift({ type: "goto", url: portalUrl });
-      }
-      for (const step of parsedSteps) {
+      if (!normalized.some((step) => step.type === "goto")) normalized.unshift({ type: "goto", url: portalUrl });
+      for (const step of normalized) {
         if (!supportedStepTypes.has(step.type)) throw new Error(`tipo de paso no soportado: ${step.type || "vac\xEDo"}`);
         if (["fill", "evaluate", "select", "click", "check", "radio", "waitForSelector", "assertText", "extractText"].includes(step.type) && !step.selector) {
           throw new Error(`el paso ${step.type} no contiene selector`);
@@ -2500,9 +2544,38 @@ ${searchText}`,
           throw new Error(`el paso ${step.type} no contiene value`);
         }
       }
+      return normalized;
+    };
+    let parsedSteps;
+    try {
+      parsedSteps = normalizeAndValidateSteps(discoverResult.stepsJson);
       discoverResult.stepsJson = JSON.stringify(parsedSteps);
     } catch (stepError) {
-      throw new Error(`Gemini gener\xF3 un mapa de navegaci\xF3n inv\xE1lido: ${stepError.message}`);
+      try {
+        const repairAi = getGeminiClient(customKey);
+        const repairResponse = await repairAi.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `Repara este stepsJson sin inventar selectores nuevos. Usa exclusivamente estos tipos:
+          ${[...supportedStepTypes].join(", ")}.
+          Cada fill/select/evaluate/assertText requiere value; cada interacci\xF3n con elemento requiere selector.
+          Mapa inv\xE1lido: ${JSON.stringify(discoverResult.stepsJson)}
+          Error: ${stepError.message}`,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: { stepsJson: { type: "STRING" } },
+              required: ["stepsJson"]
+            }
+          }
+        });
+        const repaired = JSON.parse(repairResponse.text || "{}");
+        parsedSteps = normalizeAndValidateSteps(repaired.stepsJson);
+        discoverResult.stepsJson = JSON.stringify(parsedSteps);
+        discoverResult.warnings = [...discoverResult.warnings || [], "stepsJson reparado y revalidado"];
+      } catch (repairError) {
+        throw new Error(`Gemini gener\xF3 un mapa de navegaci\xF3n inv\xE1lido: ${repairError.message}`);
+      }
     }
     await updateProgress(70, "Guardando conector y mapa de navegaci\xF3n en base de datos...");
     const connectorId = nombreEmisor.toLowerCase().replace(/[^a-z0-9]/g, "-") || "gen-" + Date.now();
@@ -2668,7 +2741,11 @@ ${searchText}`,
   } catch (err) {
     console.error("JIT training failed:", err);
     await updateProgress(100, "Fallo durante el auto-entrenamiento: " + err.message, "failed");
-    res.status(500).json({ error: "Fallo durante el auto-entrenamiento: " + err.message });
+    const statusCode = err.code === "PORTAL_AUTH_REQUIRED" ? 409 : 500;
+    res.status(statusCode).json({
+      error: "Fallo durante el auto-entrenamiento: " + err.message,
+      code: err.code || "JIT_TRAINING_FAILED"
+    });
   }
 });
 app.post("/api/admin/analyze-html", async (req, res) => {

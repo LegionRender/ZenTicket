@@ -361,6 +361,36 @@ export async function processJob(jobId: string) {
       return;
     }
 
+    if (errorCode === "CAPTCHA_DETECTED") {
+      await jobRef.update({
+        status: "waiting_user_action",
+        lastError: errorMessage,
+        lastErrorTime: new Date().toISOString(),
+        lockedBy: null,
+        lockedAt: null,
+        updatedAt: new Date().toISOString(),
+        ...(err.screenshotPath && { screenshotPath: err.screenshotPath }),
+        ...(err.stepIndex !== undefined && { stepIndex: err.stepIndex })
+      });
+      await ticketRef.update({
+        status: "waiting_user_captcha",
+        errorMsg: "El portal mostró una verificación humana. Abre el portal oficial para continuar de forma segura.",
+        reviewReasonCode: "CAPTCHA_DETECTED",
+        reviewError: {
+          reviewReasonCode: "CAPTCHA_DETECTED",
+          reviewReasonMessage: "El portal mostró una verificación humana.",
+          lastAutomationStep: "runner_processing",
+          connectorAttempted: true,
+          connectorId: lockedJob.connectorId,
+          portalErrorMessage: errorMessage,
+          ...(err.screenshotPath && { screenshotPath: err.screenshotPath }),
+          ...(err.stepIndex !== undefined && { stepIndex: err.stepIndex })
+        },
+        updatedAt: new Date().toISOString()
+      });
+      return;
+    }
+
     const isRejected = errorCode === "PORTAL_RETURNED_ERROR";
     const finalJobStatus = isRejected ? "manual_review" : "failed";
     const finalReviewReasonCode = isRejected ? "PORTAL_REJECTED_TICKET_DATA" : errorCode;
