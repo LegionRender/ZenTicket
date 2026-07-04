@@ -4,6 +4,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import { resolveValue } from "./resolveValue";
+import { normalizePortalSteps } from "./normalizePortalSteps";
 import { createRunnerLog } from "../logging/createRunnerLog";
 
 export interface ExecutionResult {
@@ -132,6 +133,10 @@ export async function executePortalMap(
   fiscalProfile: any
 ): Promise<ExecutionResult> {
   const userId = fiscalProfile.userId;
+  const captchaSelectors = JSON.parse(portalMap.captchaSelectorsJson || portalMap.captchaSelectors || "[]");
+  const errorSelectors = JSON.parse(portalMap.errorSelectorsJson || portalMap.errorSelectors || "[]");
+  const rawSteps = JSON.parse(portalMap.stepsJson || portalMap.steps || "[]");
+  const steps = normalizePortalSteps(rawSteps, connector);
   const tmpDir = path.join(os.tmpdir(), "zenticket-runner", jobId);
   fs.mkdirSync(tmpDir, { recursive: true });
 
@@ -162,10 +167,6 @@ export async function executePortalMap(
     downloadedFiles.push({ filename, path: savePath });
     await createRunnerLog(jobId, ticketId, "INFO", `Archivo descargado capturado: ${filename}`);
   });
-
-  const captchaSelectors = JSON.parse(portalMap.captchaSelectorsJson || portalMap.captchaSelectors || "[]");
-  const errorSelectors = JSON.parse(portalMap.errorSelectorsJson || portalMap.errorSelectors || "[]");
-  const steps = JSON.parse(portalMap.stepsJson || portalMap.steps || "[]");
 
   const getLocator = (selector: string, iframeSelector?: string) => {
     if (iframeSelector) {

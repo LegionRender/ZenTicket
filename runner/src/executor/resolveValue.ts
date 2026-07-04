@@ -45,6 +45,19 @@ function resolvePath(path: string, ticketData: any, fiscalProfile: any, connecto
   return "";
 }
 
+function toPortalDate(value: string): string {
+  const clean = value.trim();
+  let match = clean.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (match) return `${match[3].padStart(2, "0")}/${match[2].padStart(2, "0")}/${match[1]}`;
+
+  match = clean.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2}|\d{4})$/);
+  if (match) {
+    const year = match[3].length === 2 ? `20${match[3]}` : match[3];
+    return `${match[1].padStart(2, "0")}/${match[2].padStart(2, "0")}/${year}`;
+  }
+  return clean;
+}
+
 export function resolveValue(
   template: string,
   ticketData: any,
@@ -79,6 +92,7 @@ export function resolveValue(
       if (match) return `${match[3]}/${match[2]}/${match[1]}`;
       return resolved;
     }
+    case "portaldate": return toPortalDate(resolved);
     default: return resolved;
   }
 }
