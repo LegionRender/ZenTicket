@@ -4293,18 +4293,16 @@ return list.map(n => {
                           const ticketFields = contract.requiredPortalFields || [];
                           const fiscalFields = contract.fiscalFields || [];
 
-                          // Map key helper
+                          // Map key helper — supports both prefixed ("fiscalProfile.rfc") and bare ("rfc", "companyName") keys
                           const mapContractKeyToStateKey = (key: string): string => {
-                            if (key.startsWith("fiscalProfile.")) {
-                              const k = key.replace("fiscalProfile.", "");
-                              if (k === "rfc") return "rfcReceptor";
-                              if (k === "businessName") return "razonSocial";
-                              if (k === "postalCode") return "codigoPostal";
-                              if (k === "taxRegime") return "regimenFiscal";
-                              if (k === "cfdiUse") return "usoCFDI";
-                              return k;
-                            }
-                            return key;
+                            const k = key.startsWith("fiscalProfile.") ? key.replace("fiscalProfile.", "") : key;
+                            if (k === "rfc") return "rfcReceptor";
+                            if (k === "businessName" || k === "companyName" || k === "razonSocial") return "razonSocial";
+                            if (k === "postalCode" || k === "zipCode" || k === "codigoPostal") return "codigoPostal";
+                            if (k === "taxRegime" || k === "regimenFiscal") return "regimenFiscal";
+                            if (k === "cfdiUse" || k === "usoCFDI") return "usoCFDI";
+                            if (k === "email" || k === "correoElectronico" || k === "correoRecepcion") return "email";
+                            return k;
                           };
 
                           return (
