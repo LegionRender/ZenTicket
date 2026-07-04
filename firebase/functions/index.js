@@ -880,7 +880,8 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         };
       }
 
-      if (matchedConnector.status !== "production_ready" || matchedConnector.runnerAvailable !== true) {
+      const runnableStatuses = ["production_ready", "automation_available", "real_validation"];
+      if (!runnableStatuses.includes(matchedConnector.status) || matchedConnector.runnerAvailable !== true) {
         console.log(`[OCR Pipeline Cloud] Connector matched (${matchedConnector.nombre}) but not ready. Creating training request.`);
         try {
           const existingSnap = await db.collection("training_requests")
@@ -3169,8 +3170,8 @@ app.post("/api/cfdi/verify-sat", async (req, res) => {
 exports.api = onRequest(
   {
     region: "us-central1",
-    timeoutSeconds: 120,
-    memory: "512MiB",
+    timeoutSeconds: 540,
+    memory: "2GiB",
     secrets: [
       geminiApiKey,
       geminiPrimaryKey,

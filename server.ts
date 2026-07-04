@@ -797,10 +797,12 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       }
 
       // Check conector existence and readiness
-      isReadyConnector = false;
-      if (matchedConnector && matchedConnector.status === "production_ready" && matchedConnector.runnerAvailable === true) {
-        isReadyConnector = true;
-      }
+      const runnableStatuses = ["production_ready", "automation_available", "real_validation"];
+      isReadyConnector = Boolean(
+        matchedConnector &&
+        runnableStatuses.includes(matchedConnector.status) &&
+        matchedConnector.runnerAvailable === true
+      );
 
       if (!matchedConnector) {
         console.log(`[OCR Pipeline] No connector matched for ${detectedName} (${detectedRfc}). Creating candidate.`);
