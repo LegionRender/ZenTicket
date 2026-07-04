@@ -2,6 +2,7 @@ import { chromium, Page } from "playwright";
 import { getStorage } from "firebase-admin/storage";
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 import { resolveValue } from "./resolveValue";
 import { createRunnerLog } from "../logging/createRunnerLog";
 
@@ -131,14 +132,20 @@ export async function executePortalMap(
   fiscalProfile: any
 ): Promise<ExecutionResult> {
   const userId = fiscalProfile.userId;
-  const tmpDir = path.join(__dirname, `../../tmp/${jobId}`);
+  const tmpDir = path.join(os.tmpdir(), "zenticket-runner", jobId);
   fs.mkdirSync(tmpDir, { recursive: true });
 
   await createRunnerLog(jobId, ticketId, "INFO", `Iniciando navegador headless para: ${connector.nombre}`);
 
-  const browser = await chromium.launch({
-    headless: true
-  });
+  const isServerless = Boolean(process.env.K_SERVICE || process.env.FUNCTION_TARGET);
+  const browserRuntime = isServerless ? require("playwright-core").chromium : chromium;
+  const launchOptions: any = { headless: true };
+  if (isServerless) {
+    const serverlessChromium = require("@sparticuz/chromium");
+    launchOptions.executablePath = await serverlessChromium.executablePath();
+    launchOptions.args = serverlessChromium.args;
+  }
+  const browser = await browserRuntime.launch(launchOptions);
 
   const context = await browser.newContext({
     acceptDownloads: true,
@@ -148,7 +155,7 @@ export async function executePortalMap(
   const page = await context.newPage();
   const downloadedFiles: { filename: string; path: string }[] = [];
 
-  page.on("download", async (download) => {
+  page.on("download", async (download: any) => {
     const filename = download.suggestedFilename();
     const savePath = path.join(tmpDir, filename);
     await download.saveAs(savePath);
@@ -286,7 +293,7 @@ export async function executePortalMap(
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.first().evaluate((el: any, val) => {
+        await locator.first().evaluate((el: any, val: string) => {
           el.value = val;
           el.dispatchEvent(new Event('change', { bubbles: true }));
           el.dispatchEvent(new Event('blur', { bubbles: true }));
@@ -301,7 +308,7 @@ export async function executePortalMap(
         if (isPrimeFacesDropdown) {
           console.log(`[select] PrimeFaces dropdown detected for ${step.selector}. Waiting for it to become enabled (removing .ui-state-disabled)...`);
           await page.waitForFunction(
-            (sel) => {
+            (sel: string) => {
               const cleanSel = sel.replace(/:visible/g, "");
               const elements = Array.from(document.querySelectorAll(cleanSel));
               const visibleEnabledEl = elements.find(el => {
@@ -313,7 +320,7 @@ export async function executePortalMap(
             },
             step.selector,
             { timeout: 15000 }
-          ).catch((e) => console.warn(`[select] Warning: dropdown ${step.selector} did not enable: ${e.message}`));
+          ).catch((e: any) => console.warn(`[select] Warning: dropdown ${step.selector} did not enable: ${e.message}`));
 
           // Click the dropdown to open the panel so that PrimeFaces populates and updates options correctly
           await locator.first().click().catch(() => null);
@@ -403,7 +410,7 @@ export async function executePortalMap(
         await createRunnerLog(jobId, ticketId, "INFO", `Texto extraído del selector ${step.selector}: ${text}`, { stepIndex: i, stepType: step.type });
       } else if (step.type === "conditional") {
         const locator = page.locator(step.selector);
-        const exists = await locator.count().then(c => c > 0).catch(() => false);
+        const exists = await locator.count().then((c: number) => c > 0).catch(() => false);
         const visible = exists && await locator.first().isVisible().catch(() => false);
         if (visible) {
           await createRunnerLog(jobId, ticketId, "INFO", `Condición cumplida para el selector: ${step.selector}. Ejecutando subpasos.`, { stepIndex: i, stepType: step.type });

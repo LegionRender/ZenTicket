@@ -9,10 +9,18 @@
       "rules": "firestore.rules"
     }
   ],
-  "functions": {
-    "source": "firebase/functions",
-    "runtime": "nodejs20"
-  },
+  "functions": [
+    {
+      "source": "firebase/functions",
+      "runtime": "nodejs20",
+      "codebase": "default"
+    },
+    {
+      "source": "runner",
+      "runtime": "nodejs20",
+      "codebase": "runner"
+    }
+  ],
   "hosting": {
     "public": "dist",
     "ignore": [

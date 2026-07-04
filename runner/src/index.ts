@@ -10,6 +10,7 @@ import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiX
 import { createRunnerLog, setActiveJobContext } from "./logging/createRunnerLog";
 import { validateJobContract } from "./validators/validateJobContract";
 import { verifySatCfdi } from "./validators/verifySatCfdi";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 
 const workerId = `worker-node-${process.pid}`;
 const serviceAccountPath = path.join(__dirname, "../../serviceAccountKey.json");
@@ -38,7 +39,7 @@ console.log(`[Runner] Modo de ejecución: ${fs.existsSync(serviceAccountPath) ? 
 console.log("[Runner] Buscando invoice_jobs pending...");
 console.log("=========================================");
 
-async function processJob(jobId: string) {
+export async function processJob(jobId: string) {
   const lockedJob = await lockJob(jobId, workerId);
   if (!lockedJob) return;
 
@@ -265,7 +266,7 @@ async function processJob(jobId: string) {
 
     // Clean up temporary local directory
     try {
-      const tmpDir = path.join(__dirname, `../../tmp/${jobId}`);
+      const tmpDir = path.join(require("os").tmpdir(), "zenticket-runner", jobId);
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch (e) {}
 
@@ -455,4 +456,22 @@ async function runWorkerLoop() {
   setTimeout(runWorkerLoop, 5000);
 }
 
-runWorkerLoop();
+export const processInvoiceJob = onDocumentCreated(
+  {
+    document: "invoice_jobs/{jobId}",
+    database: databaseId,
+    region: "us-central1",
+    timeoutSeconds: 540,
+    memory: "2GiB",
+    retry: false
+  },
+  async (event: any) => {
+    const job = event.data?.data();
+    if (!event.params.jobId || job?.status !== "pending") return;
+    await processJob(event.params.jobId);
+  }
+);
+
+if (require.main === module) {
+  runWorkerLoop();
+}

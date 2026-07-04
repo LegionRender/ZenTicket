@@ -9,8 +9,11 @@
     "dev": "tsc && node dist/index.js"
   },
   "dependencies": {
+    "@sparticuz/chromium": "141.0.0",
     "@google-cloud/storage": "^7.21.0",
-    "firebase-admin": "^14.1.0",
+    "firebase-admin": "^13.5.0",
+    "firebase-functions": "^6.3.2",
+    "playwright-core": "^1.61.1",
     "playwright": "^1.61.1"
   },
   "devDependencies": {

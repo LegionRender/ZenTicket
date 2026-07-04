@@ -1164,8 +1164,16 @@ export default function ScannerAndSimulator({
         onSetNewlyAddedTicketId(tId);
       }
 
-      // Auto-trigger automation if critical fields are present
-      const hasCritFields = !!(ocrResult.nombreEmisor?.trim() && ocrResult.total && ocrResult.total > 0 && ocrResult.fechaCompra?.trim() && ocrResult.folio?.trim());
+      // Contract-based connectors may use ticketNumber, transactionId, etc. instead of a generic folio.
+      const portalContractValidation = foundConnector && hasUsableExtractionContract(foundConnector.extractionContract)
+        ? validatePortalFields(foundConnector.extractionContract, ocrResult.portalFields || {})
+        : null;
+      const hasCritFields = !!(
+        ocrResult.nombreEmisor?.trim() &&
+        (portalContractValidation
+          ? portalContractValidation.isValid
+          : ocrResult.total && ocrResult.total > 0 && ocrResult.fechaCompra?.trim() && ocrResult.folio?.trim())
+      );
       const rfcReceptorVal = fiscalProfile?.rfc || "";
       const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfcReceptorVal);
 
@@ -1705,8 +1713,16 @@ export default function ScannerAndSimulator({
         await new Promise(r => setTimeout(r, 50));
       }
 
-      // Auto-trigger automation if critical fields are present
-      const hasCritFields = !!(ocrResult.nombreEmisor?.trim() && ocrResult.total && ocrResult.total > 0 && ocrResult.fechaCompra?.trim() && ocrResult.folio?.trim());
+      // Validate the merchant-specific extraction contract; not every portal calls its reference "folio".
+      const portalContractValidation = foundConnector && hasUsableExtractionContract(foundConnector.extractionContract)
+        ? validatePortalFields(foundConnector.extractionContract, ocrResult.portalFields || {})
+        : null;
+      const hasCritFields = !!(
+        ocrResult.nombreEmisor?.trim() &&
+        (portalContractValidation
+          ? portalContractValidation.isValid
+          : ocrResult.total && ocrResult.total > 0 && ocrResult.fechaCompra?.trim() && ocrResult.folio?.trim())
+      );
       const rfcReceptorVal = fiscalProfile?.rfc || "";
       const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfcReceptorVal);
 
