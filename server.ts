@@ -2328,6 +2328,13 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
   };
 
   try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Debes iniciar sesión para entrenar un conector." });
+      return;
+    }
+    const decodedToken = await getAuth().verifyIdToken(authHeader.slice(7));
+
     // 1. Load the ticket from Firestore
     if (!adminDb || typeof adminDb.collection !== "function") {
       throw new Error("Firestore Admin SDK no inicializado");
@@ -2337,6 +2344,10 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
       throw new Error(`Ticket no encontrado (ID: ${ticketId}) en la base de datos Firestore: ${adminDb._databaseId || adminDb.databaseId || 'unknown'}`);
     }
     const ticketData = ticketDoc.data()!;
+    if (ticketData.userId !== decodedToken.uid) {
+      res.status(403).json({ error: "No tienes permiso para entrenar este ticket." });
+      return;
+    }
     // Use body values as primary source (fresher), fall back to stored data
     const nombreEmisor = bodyNombre || ticketData.nombreEmisor || "Comercio por identificar";
     const rfcEmisor = bodyRfc || ticketData.rfcEmisor || "XAXX010101000";
@@ -2392,10 +2403,9 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
       console.warn("Google Search Grounding failed, using keyword fallback:", err.message);
     }
     
-    // Fallback: try known portal patterns or generic search
+    // Never fabricate a billing URL: a guessed domain creates an unusable connector.
     if (!portalUrl) {
-      const merchantSlug = nombreEmisor.toLowerCase().replace(/[^a-z0-9]/g, "");
-      portalUrl = `https://facturacion.${merchantSlug}.com.mx/`;
+      throw new Error("No se pudo verificar un portal oficial de autofacturación para este comercio.");
     }
 
     // 3. Portal Structure Discovery — Gemini-first, Playwright as refinement
@@ -2482,6 +2492,8 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
         const page = await browser.newPage();
         await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 12000 });
         await page.waitForTimeout(1500);
+        const portalDom = (await page.content()).substring(0, 50000);
+        const portalScreenshot = (await page.screenshot({ fullPage: true })).toString("base64");
 
         const discoveredInputs = await page.evaluate(() => {
           return Array.from(document.querySelectorAll("input, select, textarea")).slice(0, 20).map(el => ({
@@ -2507,15 +2519,21 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
           const ai2 = getGeminiClient(customKey);
           const refineResponse = await ai2.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: `Refina los selectores CSS del conector para '${nombreEmisor}' basándote en los inputs reales encontrados en el portal.
-            
-            Conector base generado:
-            ${JSON.stringify(discoverResult, null, 2)}
-            
-            Inputs reales del portal:
-            ${JSON.stringify(discoveredInputs, null, 2)}
-            
-            Actualiza SOLO los stepsJson con selectores más precisos basados en los inputs reales. Mantén el resto igual.`,
+            contents: [
+              { inlineData: { data: portalScreenshot, mimeType: "image/png" } },
+              { text: `Refina los selectores CSS del conector para '${nombreEmisor}' basándote en el DOM, la captura y los inputs reales encontrados en el portal.
+
+              Conector base generado:
+              ${JSON.stringify(discoverResult, null, 2)}
+
+              Inputs reales del portal:
+              ${JSON.stringify(discoveredInputs, null, 2)}
+
+              DOM real del portal:
+              ${portalDom}
+
+              Actualiza SOLO los stepsJson con selectores más precisos basados en los inputs reales. Mantén el resto igual.` }
+            ],
             config: {
               responseMimeType: "application/json",
               responseSchema: {
@@ -2532,14 +2550,15 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
             discoverResult.stepsJson = refined.stepsJson;
             discoverResult.warnings = [...(discoverResult.warnings || []), "Selectores refinados con datos reales de Playwright"];
           }
+        } else {
+          throw new Error("El portal no expuso campos de facturación analizables.");
         }
       } catch (playwrightErr: any) {
         if (browser) { try { await browser.close(); } catch(_e) {} }
-        // Playwright refinement failed — OK, continue with Gemini-only result
-        console.info("Playwright refinement skipped (non-fatal):", playwrightErr.message?.substring(0, 100));
+        throw new Error(`Playwright no pudo verificar el portal: ${playwrightErr.message}`);
       }
     } catch (discoveryErr: any) {
-      console.warn("Gemini discovery failed, using hardcoded template:", discoveryErr.message);
+      throw new Error(`No fue posible construir un conector verificable: ${discoveryErr.message}`);
       // Last resort: hardcoded template
       discoverResult = {
         requiredPortalFields: [
@@ -2556,15 +2575,43 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
           { key: "fiscalProfile.email", label: "Correo Electrónico", required: true }
         ],
         stepsJson: JSON.stringify([
-          { action: "navigate", url: portalUrl },
-          { action: "fill", selector: "input[name*='folio'],input[id*='folio'],input[placeholder*='ticket'],input[placeholder*='folio'],input[name*='ticket']", value: "{{portalFields.billingReference}}" },
-          { action: "fill", selector: "input[name*='rfc'],input[id*='rfc'],input[placeholder*='RFC']", value: "{{fiscalProfile.rfc}}" },
-          { action: "click", selector: "button[type='submit'],input[type='submit']" }
+          { type: "goto", url: portalUrl },
+          { type: "fill", selector: "input[name*='folio'],input[id*='folio'],input[placeholder*='ticket'],input[placeholder*='folio'],input[name*='ticket']", value: "{{portalFields.billingReference}}" },
+          { type: "fill", selector: "input[name*='rfc'],input[id*='rfc'],input[placeholder*='RFC']", value: "{{fiscalProfile.rfc}}" },
+          { type: "click", selector: "button[type='submit'],input[type='submit']" }
         ]),
         warnings: ["Usando plantilla genérica por fallo en discovery: " + discoveryErr.message]
       };
     }
 
+
+    const supportedStepTypes = new Set(["goto", "fill", "evaluate", "select", "click", "check", "radio", "waitForSelector", "waitForNavigation", "waitForTimeout", "assertText", "extractText", "conditional", "waitForDownload"]);
+    let parsedSteps: any[];
+    try {
+      const rawSteps = typeof discoverResult.stepsJson === "string"
+        ? JSON.parse(discoverResult.stepsJson)
+        : discoverResult.stepsJson;
+      if (!Array.isArray(rawSteps) || rawSteps.length === 0) throw new Error("stepsJson vacío");
+      parsedSteps = rawSteps.map((raw: any) => {
+        const type = raw.type || raw.action;
+        return { ...raw, type: type === "navigate" ? "goto" : type };
+      });
+      if (!parsedSteps.some(step => step.type === "goto")) {
+        parsedSteps.unshift({ type: "goto", url: portalUrl });
+      }
+      for (const step of parsedSteps) {
+        if (!supportedStepTypes.has(step.type)) throw new Error(`tipo de paso no soportado: ${step.type || "vacío"}`);
+        if (["fill", "evaluate", "select", "click", "check", "radio", "waitForSelector", "assertText", "extractText"].includes(step.type) && !step.selector) {
+          throw new Error(`el paso ${step.type} no contiene selector`);
+        }
+        if (["fill", "evaluate", "select", "assertText"].includes(step.type) && typeof step.value !== "string") {
+          throw new Error(`el paso ${step.type} no contiene value`);
+        }
+      }
+      discoverResult.stepsJson = JSON.stringify(parsedSteps);
+    } catch (stepError: any) {
+      throw new Error(`Gemini generó un mapa de navegación inválido: ${stepError.message}`);
+    }
 
     // 4. Save Connector to Firestore
     await updateProgress(70, "Guardando conector y mapa de navegación en base de datos...");
@@ -2592,11 +2639,12 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
       rfc: rfcEmisor,
       aliases: [nombreEmisor],
       portalUrl: portalUrl,
-      status: "production_ready",
+      status: "real_validation",
       runnerAvailable: true,
       extractionContract: contract,
       fieldsJson: JSON.stringify(fields),
       flowJson: discoverResult.stepsJson,
+      userId: decodedToken.uid,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -2624,6 +2672,7 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
 
     const portalMapData = {
       connectorId: connectorId,
+      userId: decodedToken.uid,
       entryUrl: portalUrl,
       url: portalUrl,
       requiredFields: reqFieldsList,
@@ -2714,7 +2763,9 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
       portalFields[fieldKey] = ocrResultData[fieldKey] || "";
     });
     portalFields.total = ocrResultData.total || ticketData.total || 0;
-    portalFields.billingReference = ocrResultData.folio || ocrResultData.billingReference || ticketData.folio || "";
+    if (!portalFields.billingReference) {
+      portalFields.billingReference = ocrResultData.billingReference || ocrResultData.folio || ticketData.folio || "";
+    }
 
     const updatedFields = {
       status: "extracted",

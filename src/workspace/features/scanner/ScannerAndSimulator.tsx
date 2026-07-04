@@ -2154,7 +2154,7 @@ export default function ScannerAndSimulator({
       }
 
       // Enforce strict 7 enqueuing rules
-      const isProductionReady = activeConn.status === "production_ready";
+      const isProductionReady = ["production_ready", "real_validation"].includes(activeConn.status);
       const isRunnerAvailable = activeConn.runnerAvailable === true;
       const isPortalMapValid = pMap && (pMap.isApproved === true || pMap.status === "approved") && pMap.stepsJson;
       const isContractValid = activeConn.extractionContract && Array.isArray(activeConn.extractionContract.requiredPortalFields);
@@ -2331,7 +2331,7 @@ export default function ScannerAndSimulator({
       await addLog("📥 Encolando job en la colección invoice_jobs...", 400);
       const jobData = {
         ticketId: activeTicketId,
-        userId: fiscalProfile.userId,
+        userId: activeFiscalProfile.userId,
         status: "pending",
         connectorId: activeConn.id || "",
         portalMapId: portalMapsSnap.docs[0].id || "",

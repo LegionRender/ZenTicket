@@ -70,7 +70,9 @@ service cloud.firestore {
     // Automation Trainings rules
     // Path: automation_trainings/{trainingId}
     match /automation_trainings/{trainingId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
     }
 
     // Training Requests rules for common users
