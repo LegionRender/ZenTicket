@@ -2334,7 +2334,7 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
     }
     const ticketDoc = await adminDb.collection("tickets").doc(ticketId).get();
     if (!ticketDoc.exists) {
-      throw new Error("Ticket no encontrado");
+      throw new Error(`Ticket no encontrado (ID: ${ticketId}) en la base de datos Firestore: ${adminDb._databaseId || adminDb.databaseId || 'unknown'}`);
     }
     const ticketData = ticketDoc.data()!;
     // Use body values as primary source (fresher), fall back to stored data
