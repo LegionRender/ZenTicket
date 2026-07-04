@@ -59,6 +59,15 @@ async function checkCaptcha(page: Page, captchaSelectors: string[]): Promise<boo
 }
 
 async function checkPortalError(page: Page, errorSelectors: string[]): Promise<string | null> {
+  try {
+    const hasPendingValidationMsg = await page.evaluate(() => 
+      document.body.innerText.includes("Ticket pendiente por validar")
+    );
+    if (hasPendingValidationMsg) {
+      return "TICKET_TOO_NEW";
+    }
+  } catch (e) {}
+
   for (const selector of errorSelectors) {
     try {
       const count = await page.locator(selector).count();
@@ -244,10 +253,21 @@ export async function executePortalMap(
       const portalError = await checkPortalError(page, errorSelectors);
       if (portalError) {
         await uploadErrorScreenshot("PORTAL_RETURNED_ERROR");
+        let errorMsg = `Error devuelto por el portal: ${portalError}`;
+        let errorCode = "PORTAL_RETURNED_ERROR";
+        
+        if (portalError === "TICKET_TOO_NEW") {
+          errorCode = "TICKET_TOO_NEW";
+          errorMsg = "OXXO puede tardar hasta 24 horas en sincronizar tickets nuevos. Reintentaremos automáticamente más tarde.";
+          if (ticketData.portalFields?.fecha) {
+            errorMsg = `El ticket es reciente (${ticketData.portalFields.fecha}). OXXO puede tardar hasta 24 horas en sincronizar. Reintentaremos automáticamente más tarde.`;
+          }
+        }
+
         return {
           success: false,
-          error: `Error devuelto por el portal: ${portalError}`,
-          errorCode: "PORTAL_RETURNED_ERROR",
+          error: errorMsg,
+          errorCode: errorCode,
           screenshotPath: lastScreenshotPath,
           stepIndex: currentStepIdx,
           maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
@@ -275,6 +295,31 @@ export async function executePortalMap(
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
+
+        // If it's a PrimeFaces dropdown container, wait for it to be enabled (i.e. not have .ui-state-disabled)
+        const isPrimeFacesDropdown = await locator.first().evaluate((el: any) => el.classList.contains("ui-selectonemenu"));
+        if (isPrimeFacesDropdown) {
+          console.log(`[select] PrimeFaces dropdown detected for ${step.selector}. Waiting for it to become enabled (removing .ui-state-disabled)...`);
+          await page.waitForFunction(
+            (sel) => {
+              const cleanSel = sel.replace(/:visible/g, "");
+              const elements = Array.from(document.querySelectorAll(cleanSel));
+              const visibleEnabledEl = elements.find(el => {
+                const style = window.getComputedStyle(el);
+                const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && el.offsetHeight > 0;
+                return isVisible && !el.classList.contains("ui-state-disabled");
+              });
+              return !!visibleEnabledEl;
+            },
+            step.selector,
+            { timeout: 15000 }
+          ).catch((e) => console.warn(`[select] Warning: dropdown ${step.selector} did not enable: ${e.message}`));
+
+          // Click the dropdown to open the panel so that PrimeFaces populates and updates options correctly
+          await locator.first().click().catch(() => null);
+          await page.waitForTimeout(500);
+        }
+
         await locator.first().evaluate((targetNode: any, val: string) => {
           const selectEl = targetNode.tagName === "SELECT" ? targetNode : targetNode.querySelector("select");
           if (!selectEl) return;
@@ -409,10 +454,21 @@ export async function executePortalMap(
     const finalError = await checkPortalError(page, errorSelectors);
     if (finalError) {
       await uploadErrorScreenshot("PORTAL_RETURNED_ERROR");
+      let errorMsg = `Error final devuelto por el portal: ${finalError}`;
+      let errorCode = "PORTAL_RETURNED_ERROR";
+      
+      if (finalError === "TICKET_TOO_NEW") {
+        errorCode = "TICKET_TOO_NEW";
+        errorMsg = "OXXO puede tardar hasta 24 horas en sincronizar tickets nuevos. Reintentaremos automáticamente más tarde.";
+        if (ticketData.portalFields?.fecha) {
+          errorMsg = `El ticket es reciente (${ticketData.portalFields.fecha}). OXXO puede tardar hasta 24 horas en sincronizar. Reintentaremos automáticamente más tarde.`;
+        }
+      }
+
       return {
         success: false,
-        error: `Error final devuelto por el portal: ${finalError}`,
-        errorCode: "PORTAL_RETURNED_ERROR",
+        error: errorMsg,
+        errorCode: errorCode,
         screenshotPath: lastScreenshotPath,
         stepIndex: currentStepIdx,
         maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")

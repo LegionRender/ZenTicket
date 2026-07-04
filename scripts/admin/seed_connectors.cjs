@@ -528,9 +528,9 @@ async function seedConnectors() {
             { type: "waitForSelector", selector: "[id='form:continuar']:not(.ui-state-disabled)" },
             { type: "click", selector: "[id='form:continuar']:not(.ui-state-disabled)" },
             { type: "waitForSelector", selector: "[id='form:rfc']:visible, [id='form:rfcPend']:visible" },
-            { type: "fill", selector: "[id='form:rfc'], [id='form:rfcPend']", value: "{{fiscalProfile.rfc}}", transform: "uppercase" },
-            { type: "fill", selector: "[id='form:razon'], [id='form:razonPend']", value: "{{fiscalProfile.businessName}}", transform: "uppercase" },
-            { type: "fill", selector: "[id='form:codigo'], [id='form:codigoPen']", value: "{{fiscalProfile.postalCode}}" },
+            { type: "evaluate", selector: "[id='form:rfc']:visible, [id='form:rfcPend']:visible", value: "{{fiscalProfile.rfc}}", transform: "uppercase" },
+            { type: "evaluate", selector: "[id='form:razon']:visible, [id='form:razonPend']:visible", value: "{{fiscalProfile.businessName}}", transform: "uppercase" },
+            { type: "evaluate", selector: "[id='form:codigo']:visible, [id='form:codigoPen']:visible", value: "{{fiscalProfile.postalCode}}" },
             { type: "select", selector: "[id='form:selectOneMenuRegFis']:visible, [id='form:selectOneMenuRegFisPend']:visible", value: "{{fiscalProfile.taxRegime}}" },
             { type: "select", selector: "[id='form:selectOneMenuCFDI']:visible, [id='form:selectOneMenuCFDIPend']:visible", value: "{{fiscalProfile.cfdiUse}}" },
             {

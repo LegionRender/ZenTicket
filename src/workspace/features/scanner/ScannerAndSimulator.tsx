@@ -835,7 +835,7 @@ export default function ScannerAndSimulator({
         setSimulationProgress(progress);
         handleTriggerAutomation(found, ticket.id, data);
       } else {
-        setIsEditing(checkIsDataIncomplete(data));
+        setIsEditing(data.status !== "training_required" && data.status !== "connector_not_ready" && checkIsDataIncomplete(data));
         setActiveStep("extracted");
       }
     }
@@ -1121,13 +1121,15 @@ export default function ScannerAndSimulator({
       setEditFolio(sanitized.billingReference || "");
       setEditSucursal(ocrResult.sucursal || "");
       setEditTotal(sanitized.total || 0);
-      setIsEditing(checkIsDataIncomplete(ocrResult));
+      setIsEditing(ocrResult.status !== "training_required" && ocrResult.status !== "connector_not_ready" && checkIsDataIncomplete(ocrResult));
 
       // Auto-save this ticket in Firebase with status "extracted"
       const tId = await onSaveTicketToDb({
         userId: "guest",
         imageUrl: dataUrl,
-        status: ocrResult.ocrFailed ? "review" : "extracted",
+        status: ocrResult.status === "training_required" ? "training_required" : 
+                ocrResult.status === "connector_not_ready" ? "connector_not_ready" :
+                (ocrResult.ocrFailed ? "review" : "extracted"),
         rfcEmisor: ocrResult.rfcEmisor,
         nombreEmisor: ocrResult.nombreEmisor,
         fechaCompra: ocrResult.fechaCompra,
@@ -1467,7 +1469,9 @@ export default function ScannerAndSimulator({
 
           updateTicketInBatch(idx, { progress: 90, step: "Guardando ticket..." });
           const isDataIncomplete = checkIsDataIncomplete(ocrResult);
-          const ticketStatus = ocrResult.ocrFailed || isDataIncomplete ? "review" : "extracted";
+          const ticketStatus = ocrResult.status === "training_required" ? "training_required" : 
+                               ocrResult.status === "connector_not_ready" ? "connector_not_ready" :
+                               (ocrResult.ocrFailed || isDataIncomplete ? "review" : "extracted");
 
           const tId = await onSaveTicketToDb({
             userId: user?.uid || "guest",
@@ -1661,13 +1665,15 @@ export default function ScannerAndSimulator({
         usoCFDI: fiscalProfile?.usoCFDI || "",
         email: fiscalProfile?.correoElectronico || ""
       });
-      setIsEditing(checkIsDataIncomplete(ocrResult));
+      setIsEditing(ocrResult.status !== "training_required" && ocrResult.status !== "connector_not_ready" && checkIsDataIncomplete(ocrResult));
 
       // Save ticket in DB
       const tId = await onSaveTicketToDb({
         userId: user?.uid || "guest",
         imageUrl: base64Str,
-        status: ocrResult.ocrFailed ? "review" : "extracted",
+        status: ocrResult.status === "training_required" ? "training_required" : 
+                ocrResult.status === "connector_not_ready" ? "connector_not_ready" :
+                (ocrResult.ocrFailed ? "review" : "extracted"),
         rfcEmisor: ocrResult.rfcEmisor,
         nombreEmisor: ocrResult.nombreEmisor,
         fechaCompra: ocrResult.fechaCompra,
@@ -2385,7 +2391,7 @@ export default function ScannerAndSimulator({
     }
   };
 
-  // Run real-time high-fidelity simulated AI training sync'd with Firestore /automation_trainings
+  // Run real-time high-fidelity live AI training sync'd with Firestore /automation_trainings and backend train-jit route
   const handleRunTraining = async () => {
     if (!extractedData || !ticketId) {
       toast.error("Datos de ticket insuficientes para iniciar el entrenamiento.");
@@ -2393,8 +2399,8 @@ export default function ScannerAndSimulator({
     }
 
     setIsTrainingModel(true);
-    setTrainingProgress(0);
-    setTrainingStatus("Evaluando estructura de portales en base a DNS y Búsqueda de Google...");
+    setTrainingProgress(5);
+    setTrainingStatus("Buscando portal de facturación en base a DNS y Búsqueda de Google...");
 
     const userEmail = auth.currentUser?.email || "legionrender@gmail.com";
     const trainingDocRef = doc(db, "automation_trainings", ticketId);
@@ -2407,9 +2413,9 @@ export default function ScannerAndSimulator({
       storeName: extractedData.nombreEmisor,
       company: extractedData.nombreEmisor, // Map brand to company so it shows in Admin section
       totalAmount: extractedData.total,
-      status: "Iniciando mapeo cognitivo...", // Map status to descriptive msg for Admin list
-      progress: 0,
-      step: "Iniciando mapeo cognitivo...",
+      status: "Buscando portal del comercio...",
+      progress: 5,
+      step: "Buscando portal del comercio...",
       createdAt: new Date().toISOString()
     };
 
@@ -2419,57 +2425,61 @@ export default function ScannerAndSimulator({
       console.warn("Error creating training doc, continuing locally:", e);
     }
 
-    const steps = [
-      { progress: 15, step: "Buscando portal del comercio..." },
-      { progress: 35, step: "Preparando la solicitud..." },
-      { progress: 55, step: "Configurando conector..." },
-      { progress: 75, step: "Estableciendo conexión segura..." },
-      { progress: 95, step: "Registrando conector..." },
-      { progress: 100, step: "¡Configuración completada con éxito! Iniciando solicitud en el portal..." }
-    ];
-
-    let currentStepIdx = 0;
-
-    const interval = setInterval(async () => {
-      if (currentStepIdx < steps.length) {
-        const currentData = steps[currentStepIdx];
-        setTrainingProgress(currentData.progress);
-        setTrainingStatus(currentData.step);
-
-        try {
-          await updateDoc(trainingDocRef, {
-            progress: currentData.progress,
-            step: currentData.step,
-            status: currentData.step, // Update status message so it mirrors progress step description
-            state: currentData.progress === 100 ? "completed" : "in_progress"
-          });
-        } catch (e) {
-          console.warn("Error updating training doc, continuing locally:", e);
+    // Set up a real-time listener to Firestore to update UI progress dynamically from the backend!
+    const unsubscribe = onSnapshot(trainingDocRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.progress !== undefined) {
+          setTrainingProgress(data.progress);
         }
-
-        currentStepIdx++;
-      } else {
-        clearInterval(interval);
-        
-        try {
-          // 1. Learn the connector inline
-          const newlyCreatedConnector = await onLearnConnectorInline(extractedData.nombreEmisor, extractedData.rfcEmisor, "automatizacion_ticket");
-          
-          // 2. Set newly trained connector
-          setMatchingConnector(newlyCreatedConnector);
-          setIsConnectorNewlyLearned(true);
-          setIsTrainingModel(false);
-
-          // 3. Trigger immediate billing
-          await handleTriggerAutomation(newlyCreatedConnector);
-          toast.success("🧠 ¡Entrenamiento de IA completado! Solicitud enviada de inmediato.");
-        } catch (err: any) {
-          console.error("Error after training complete:", err);
-          toast.error("La configuración finalizó pero no se pudo obtener la factura desde el portal automáticamente.");
-          setIsTrainingModel(false);
+        if (data.step !== undefined) {
+          setTrainingStatus(data.step);
         }
       }
-    }, 1500); // 1.5 seconds per step, total ~9 seconds
+    });
+
+    try {
+      const response = await fetch("/api/tickets/train-jit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-gemini-api-key": localStorage.getItem("personalGeminiKey") || ""
+        },
+        body: JSON.stringify({ ticketId })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Fallo en la comunicación con el servidor de entrenamiento.");
+      }
+
+      const data = await response.json();
+      
+      // 1. Set newly trained connector
+      setMatchingConnector(data.connector);
+      setExtractedData({
+        ...extractedData,
+        ...data.ocrResult,
+        status: "extracted"
+      });
+      setIsConnectorNewlyLearned(true);
+      setIsTrainingModel(false);
+
+      unsubscribe();
+
+      // 2. Trigger immediate billing
+      toast.success("🧠 ¡Entrenamiento de IA completado! Mapeo finalizado con éxito.");
+      await handleTriggerAutomation(data.connector, ticketId, {
+        ...extractedData,
+        ...data.ocrResult,
+        status: "extracted"
+      });
+    } catch (err: any) {
+      console.error("Error during real-time JIT training:", err);
+      toast.error("El auto-entrenamiento falló: " + err.message);
+      setIsTrainingModel(false);
+      unsubscribe();
+    }
   };
 
   const handleSaveEditedData = async () => {
@@ -4153,10 +4163,10 @@ return list.map(n => {
 
                 <div className="flex flex-col sm:flex-row gap-3 pt-3 border-t border-slate-100">
                   <button
-                    onClick={resetAll}
+                    onClick={handleRunTraining}
                     className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-white bg-[#0B53F4] hover:bg-blue-600 px-6 py-4 rounded-xl transition duration-150 shadow-md shadow-[#0B53F4]/15 active:scale-[0.98] select-none cursor-pointer border-none font-sans"
                   >
-                    Subir otro ticket
+                    🧠 Entrenar IA e intentar facturar
                   </button>
                   <a
                     href={matchingConnector?.portalUrl || extractedData?.portalUrl || "https://www.google.com"}
@@ -4166,6 +4176,12 @@ return list.map(n => {
                   >
                     Facturar manualmente
                   </a>
+                  <button
+                    onClick={resetAll}
+                    className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-slate-500 bg-slate-100 hover:bg-slate-200 px-6 py-4 rounded-xl transition duration-150 active:scale-[0.98] select-none cursor-pointer border-none font-sans"
+                  >
+                    Subir otro
+                  </button>
                 </div>
               </div>
             ) : (

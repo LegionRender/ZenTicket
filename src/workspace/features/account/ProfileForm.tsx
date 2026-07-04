@@ -1569,6 +1569,7 @@ export default function ProfileForm({
 
   const renderPayButtonInline = () => {
     const isProcessing = isProcessingPayment || isProcessingWallet;
+    const isAdminUser = (correoElectronico || auth.currentUser?.email || "").toLowerCase() === "legionrender@gmail.com";
     
     return (
       <button
@@ -1579,10 +1580,21 @@ export default function ProfileForm({
           
           if (shouldDisablePayButton) return;
 
-          // If plan is free plan
-          if (checkoutPlanType === "gratuito") {
+          // If plan is free plan or user is admin, change plan directly without Stripe!
+          if (checkoutPlanType === "gratuito" || isAdminUser) {
             setIsProcessingPayment(true);
             try {
+              const invoicesLimitMap = {
+                gratuito: 5,
+                brisa: 10,
+                personal: 20,
+                serenidad: 30,
+                empresa: 60,
+                nirvana: 100
+              };
+              const chosenPlan = checkoutPlanType || "gratuito";
+              const limit = invoicesLimitMap[chosenPlan] || 5;
+
               await onSave({
                 ...initialProfile,
                 userId: resolvedUserId || "guest",
@@ -1593,9 +1605,11 @@ export default function ProfileForm({
                 usoCFDI,
                 createdAt: initialProfile?.createdAt || new Date().toISOString(),
                 personalGeminiKey: personalGeminiKey || "",
-                plan: "gratuito",
+                plan: chosenPlan,
                 planStartDate: new Date().toISOString(),
-                autoRenew: false,
+                autoRenew: isAdminUser ? autoRenewChoice : false,
+                paymentStatus: isAdminUser && chosenPlan !== "gratuito" ? "subscription_active" : "free",
+                invoicesLimit: limit,
                 nombreCompleto: nombreCompleto.trim(),
                 correoElectronico: correoElectronico.trim(),
                 telefono: telefono.trim()
@@ -1604,7 +1618,7 @@ export default function ProfileForm({
               setCheckoutPlanType(null);
               localStorage.removeItem("zenticket_checkout_plan");
               localStorage.removeItem("selectedPlanOnSignup");
-              toast.success("Tu plan ha sido cambiado al Plan Gratuito exitosamente.", "Suscripción actualizada");
+              toast.success(`Tu plan ha sido cambiado a ${chosenPlan.toUpperCase()} exitosamente (Modo Admin).`, "Suscripción actualizada");
             } catch (err) {
               setIsProcessingPayment(false);
               toast.error("Error al actualizar suscripción.", "Error");
@@ -1638,8 +1652,8 @@ export default function ProfileForm({
           <span>
             {shouldDisablePayButton 
               ? "Activo" 
-              : checkoutPlanType === "gratuito" 
-                ? "Activar Plan" 
+              : (checkoutPlanType === "gratuito" || isAdminUser)
+                ? "Activar Plan (Admin - Gratis)" 
                 : selectedCardForPlan === "googlepay_wallet"
                   ? "Pagar con Google Pay"
                   : selectedCardForPlan === "paypal_wallet"

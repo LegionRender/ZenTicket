@@ -731,6 +731,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
     let billingUrl = "";
     let evidence = "";
     let confidence = 0.0;
+    let isReadyConnector = false;
 
     if (!fallbackToOcrMock && ai) {
       let detectedName = "";
@@ -796,6 +797,11 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       }
 
       // Check conector existence and readiness
+      isReadyConnector = false;
+      if (matchedConnector && matchedConnector.status === "production_ready" && matchedConnector.runnerAvailable === true) {
+        isReadyConnector = true;
+      }
+
       if (!matchedConnector) {
         console.log(`[OCR Pipeline] No connector matched for ${detectedName} (${detectedRfc}). Creating candidate.`);
         if (adminDb && typeof adminDb.collection === "function") {
@@ -823,21 +829,7 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
             console.warn("Could not save connector candidate/training request to Firestore:", e.message);
           }
         }
-
-        res.status(200).json({
-          ocrFailed: false,
-          status: "training_required",
-          nombreEmisor: detectedName || "Comercio por identificar",
-          rfcEmisor: detectedRfc || "XAXX010101000",
-          items: [],
-          rawOcrText: "",
-          portalFields: {},
-          portalFieldsConfidence: {}
-        });
-        return;
-      }
-
-      if (matchedConnector.status !== "production_ready" || matchedConnector.runnerAvailable !== true) {
+      } else if (!isReadyConnector) {
         console.log(`[OCR Pipeline] Connector matched (${matchedConnector.nombre}) but not ready. Creating training request.`);
         if (adminDb && typeof adminDb.collection === "function") {
           try {
@@ -860,26 +852,13 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
             console.warn("Could not save training request to Firestore:", e.message);
           }
         }
-
-        res.status(200).json({
-          ocrFailed: false,
-          status: "connector_not_ready",
-          nombreEmisor: matchedConnector.nombre || detectedName,
-          rfcEmisor: matchedConnector.rfc || detectedRfc,
-          connectorId: matchedConnector.id,
-          items: [],
-          rawOcrText: "",
-          portalFields: {},
-          portalFieldsConfidence: {}
-        });
-        return;
       }
 
-      // STAGE 2: Targeted OCR using extractionContract only
+      // STAGE 2: Targeted OCR using extractionContract or generic fallback
       let targetedPromptText = "";
       let targetedSchema: any = {};
 
-      if (matchedConnector && matchedConnector.extractionContract) {
+      if (isReadyConnector && matchedConnector && matchedConnector.extractionContract) {
         console.log(`[OCR Stage 2] Matched connector ${matchedConnector.nombre}. Loading extractionContract.`);
         const contract = matchedConnector.extractionContract;
 
@@ -942,6 +921,52 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         if (confidenceRequired.length > 0) {
           customProperties.portalFieldsConfidence.required = confidenceRequired;
         }
+
+        targetedSchema = {
+          type: "OBJECT",
+          properties: customProperties,
+          required: ["rfcEmisor", "nombreEmisor", "rawOcrText", "items", "portalFieldsConfidence"]
+        };
+      } else {
+        // Generic fallback for connector candidate or not ready!
+        const storeName = matchedConnector ? matchedConnector.nombre : detectedName;
+        console.log(`[OCR Stage 2 Fallback] Connector not ready/found for ${storeName}. Using generic fallback contract.`);
+
+        targetedPromptText = `Analiza la imagen del ticket de compra de la tienda: ${storeName}.\n`;
+        targetedPromptText += `Extrae los campos generales del ticket para poder registrar la compra:\n`;
+        targetedPromptText += `- total (Importe Total de la compra con decimales)\n`;
+        targetedPromptText += `- billingReference (Folio de venta o código de facturación impreso en el ticket)\n`;
+        targetedPromptText += `- fechaCompra (Fecha de compra en formato YYYY-MM-DD)\n`;
+
+        const customProperties: any = {
+          rfcEmisor: { type: "STRING" },
+          nombreEmisor: { type: "STRING" },
+          fechaCompra: { type: "STRING", description: "Fecha de compra en formato YYYY-MM-DD. Si no la encuentras, devuelve null." },
+          sucursal: { type: "STRING" },
+          total: { type: "NUMBER", description: "Importe total del ticket con decimales. Si no lo encuentras, devuelve 0." },
+          billingReference: { type: "STRING", description: "Folio de venta, número de ticket o referencia de facturación del ticket. Si no lo encuentras, devuelve una cadena vacía." },
+          rawOcrText: { type: "STRING", description: "El texto completo e íntegro extraído del ticket de forma literal, línea por línea." },
+          portalFieldsConfidence: {
+            type: "OBJECT",
+            properties: {
+              total: { type: "NUMBER" },
+              billingReference: { type: "NUMBER" }
+            },
+            required: ["total", "billingReference"]
+          },
+          items: {
+            type: "ARRAY",
+            description: "Lista de conceptos comprados descritos en el ticket",
+            items: {
+              type: "OBJECT",
+              properties: {
+                description: { type: "STRING" },
+                amount: { type: "NUMBER" }
+              },
+              required: ["description", "amount"]
+            }
+          }
+        };
 
         targetedSchema = {
           type: "OBJECT",
@@ -1312,7 +1337,11 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
 
     pipelineLogs.push("Etapa 5: Ejecutando normalización de campos (limpieza de RFC, formato de fechas y totales).");
 
-    const portalFields = matchedConnector ? dynamicPortalFields : {};
+    const portalFields = isReadyConnector ? dynamicPortalFields : {
+      billingReference: extractedData.billingReference || "",
+      total: extractedData.total || 0,
+      fecha: extractedData.fechaCompra || ""
+    };
 
     const avgConfidence = Object.values(fields).reduce((sum, f) => sum + f.confidence, 0) / Object.keys(fields).length;
 
@@ -1328,8 +1357,8 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
       codigoBarras: fields.codigoBarras.value,
       portalFields,
       qrCfdiUuid: qrParsed ? qrParsed.uuid : null,
-      ocrFailed: extractionState === "manual_input_required",
-      ocrError: (extractionState === "manual_input_required") ? "Requiere revisión del usuario por campo faltante o ilegible." : null,
+      ocrFailed: isReadyConnector ? (extractionState === "manual_input_required") : false,
+      ocrError: isReadyConnector && (extractionState === "manual_input_required") ? "Requiere revisión del usuario por campo faltante o ilegible." : null,
       confidenceScore: parseFloat(avgConfidence.toFixed(4)),
       extractedFields: fields,
       pipelineLogs,
@@ -1345,9 +1374,10 @@ app.post("/api/tickets/analyze", async (req: Request, res: Response): Promise<vo
         extractionContract: matchedConnector.extractionContract,
         status: matchedConnector.status
       } : null,
-      extractionState,
+      extractionState: isReadyConnector ? extractionState : "extraction_found",
       portalFieldsConfidence,
-      extractionDiagnostics
+      extractionDiagnostics,
+      status: isReadyConnector ? "extracted" : (matchedConnector ? "connector_not_ready" : "training_required")
     });
   } catch (error: any) {
     console.error("Critical OCR Analysis process went down:", error);
@@ -1935,7 +1965,7 @@ app.post("/api/connectors/learn", async (req: Request, res: Response): Promise<v
         model: "gemini-3.5-flash",
         contents: prompt,
         config: {
-          thinkingConfig: { thinkingLevel: "LOW" }, // Disables heavy reasoning tokens!
+          thinkingConfig: { thinkingLevel: "LOW" as any }, // Disables heavy reasoning tokens!
           responseMimeType: "application/json",
           responseSchema: {
             type: "OBJECT",
@@ -2268,6 +2298,378 @@ app.post("/api/admin/discover-portal", async (req: Request, res: Response): Prom
     }
     console.error("Playwright discovery failed:", err);
     res.status(500).json({ error: "Fallo durante el descubrimiento con Playwright: " + err.message });
+  }
+});
+
+app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<void> => {
+  const { ticketId } = req.body;
+  const customKey = req.headers["x-gemini-api-key"] as string | undefined;
+
+  if (!ticketId) {
+    res.status(400).json({ error: "Falta el ticketId" });
+    return;
+  }
+
+  // Helper to update progress in automation_trainings
+  const updateProgress = async (progress: number, step: string, state: "in_progress" | "completed" | "failed" = "in_progress") => {
+    try {
+      if (adminDb && typeof adminDb.collection === "function") {
+        await adminDb.collection("automation_trainings").doc(ticketId).set({
+          progress,
+          step,
+          status: step,
+          state,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      }
+    } catch (e: any) {
+      console.warn("Could not update training progress in Firestore:", e.message);
+    }
+  };
+
+  try {
+    // 1. Load the ticket from Firestore
+    if (!adminDb || typeof adminDb.collection !== "function") {
+      throw new Error("Firestore Admin SDK no inicializado");
+    }
+    const ticketDoc = await adminDb.collection("tickets").doc(ticketId).get();
+    if (!ticketDoc.exists) {
+      throw new Error("Ticket no encontrado");
+    }
+    const ticketData = ticketDoc.data()!;
+    const nombreEmisor = ticketData.nombreEmisor || "Comercio por identificar";
+    const rfcEmisor = ticketData.rfcEmisor || "XAXX010101000";
+    const imageBase64 = ticketData.imageUrl || "";
+
+    // 2. Search for the portal URL via Search Grounding
+    await updateProgress(15, "Buscando portal de facturación en base a DNS y Búsqueda de Google...");
+    
+    let portalUrl = "";
+    try {
+      const ai = getGeminiClient(customKey);
+      const prompt = `Queremos automatizar el proceso de facturación de tickets de la empresa mexicana '${nombreEmisor}' con RFC '${rfcEmisor}'.
+                      Utilizando Google Search, busca el link directo al portal oficial de autofacturación de tickets para clientes en México.
+                      Devuelve un objeto JSON con la propiedad portalUrl conteniendo únicamente la URL directa.`;
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          thinkingConfig: { thinkingLevel: "LOW" as any },
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              portalUrl: { type: "STRING" }
+            },
+            required: ["portalUrl"]
+          }
+        }
+      });
+      const parsed = JSON.parse(response.text || "{}");
+      portalUrl = parsed.portalUrl || "";
+    } catch (err: any) {
+      console.warn("Google Search Grounding failed, using fallback:", err.message);
+    }
+    if (!portalUrl) {
+      portalUrl = `https://www.google.com/search?q=facturacion+${encodeURIComponent(nombreEmisor)}`;
+    }
+
+    // 3. Playwright Discovery
+    await updateProgress(45, "Accediendo al portal de facturación con Playwright para extraer los inputs...");
+    let browser = null;
+    let discoverResult: any = null;
+    try {
+      const { chromium } = await import("playwright");
+      browser = await chromium.launch({ headless: true });
+      const page = await browser.newPage();
+      await page.goto(portalUrl, { waitUntil: "load", timeout: 20000 });
+      await page.waitForTimeout(3000);
+
+      const discoveredElements = await page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll("input, select, textarea, button")).map(el => {
+          let labelText = "";
+          if (el.id) {
+            const lbl = document.querySelector(`label[for="${el.id}"]`);
+            if (lbl) labelText = lbl.textContent?.trim() || "";
+          }
+          if (!labelText) {
+            const parentLbl = el.closest("label");
+            if (parentLbl) labelText = parentLbl.textContent?.trim() || "";
+          }
+          if (!labelText) {
+            labelText = el.getAttribute("placeholder") || el.getAttribute("aria-label") || "";
+          }
+          return {
+            tag: el.tagName.toLowerCase(),
+            id: el.id || "",
+            name: (el as any).name || "",
+            type: el.getAttribute("type") || "",
+            placeholder: el.getAttribute("placeholder") || "",
+            labelText: labelText.replace(/\s+/g, " ").trim(),
+            className: el.className || "",
+            value: (el as any).value || "",
+            options: el.tagName === "SELECT" ? Array.from((el as HTMLSelectElement).options).map(o => o.text.trim()) : []
+          };
+        });
+        const title = document.title;
+        const bodyText = document.body.innerText.substring(0, 1000).replace(/\s+/g, " ");
+        return { title, bodyText, inputs };
+      });
+      await browser.close();
+
+      const ai = getGeminiClient(customKey);
+      const geminiPrompt = `Analiza la estructura del portal de facturación y propón el extractionContract y stepsJson correspondientes.
+      Título del portal: ${discoveredElements.title}
+      Muestra del texto del portal: ${discoveredElements.bodyText}
+      Elementos inputs/selects encontrados:
+      ${JSON.stringify(discoveredElements.inputs, null, 2)}
+      El extractionContract debe mapear únicamente los campos reales que el portal solicita en su primer formulario para identificar el ticket de consumo.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: geminiPrompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              requiredPortalFields: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    key: { type: "STRING" },
+                    canonicalKey: { type: "STRING" },
+                    label: { type: "STRING" },
+                    type: { type: "STRING" },
+                    hints: { type: "ARRAY", items: { type: "STRING" } },
+                    validationPattern: { type: "STRING" },
+                    required: { type: "BOOLEAN" },
+                    userEditable: { type: "BOOLEAN" }
+                  },
+                  required: ["key", "canonicalKey", "label", "type", "required"]
+                }
+              },
+              fiscalFields: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    key: { type: "STRING" },
+                    label: { type: "STRING" },
+                    required: { type: "BOOLEAN" }
+                  }
+                }
+              },
+              stepsJson: { type: "STRING" },
+              warnings: { type: "ARRAY", items: { type: "STRING" } }
+            },
+            required: ["requiredPortalFields", "fiscalFields", "stepsJson", "warnings"]
+          }
+        }
+      });
+      discoverResult = JSON.parse(response.text || "{}");
+    } catch (playwrightErr: any) {
+      if (browser) { try { await browser.close(); } catch(e) {} }
+      console.warn("Playwright Discovery failed, creating fallback specs:", playwrightErr.message);
+      // Fallback discovery
+      discoverResult = {
+        requiredPortalFields: [
+          { key: "portalFields.billingReference", canonicalKey: "portalFields.billingReference", label: "Referencia de Facturación", type: "text", required: true }
+        ],
+        fiscalFields: [
+          { key: "fiscalProfile.rfc", label: "RFC", required: true }
+        ],
+        stepsJson: JSON.stringify([
+          { action: "navigate", url: portalUrl },
+          { action: "fill", selector: "input[placeholder*='referencia'], input[name*='referencia'], input[id*='referencia']", value: "{{portalFields.billingReference}}" },
+          { action: "fill", selector: "input[placeholder*='rfc'], input[name*='rfc'], input[id*='rfc']", value: "{{fiscalProfile.rfc}}" },
+          { action: "click", selector: "button[type='submit'], input[type='submit'], button:has-text('Continuar')" }
+        ]),
+        warnings: ["Usando fallback por fallo en Playwright: " + playwrightErr.message]
+      };
+    }
+
+    // 4. Save Connector to Firestore
+    await updateProgress(70, "Guardando conector y mapa de navegación en base de datos...");
+    const connectorId = nombreEmisor.toLowerCase().replace(/[^a-z0-9]/g, "-") || "gen-" + Date.now();
+    const contract = {
+      requiredPortalFields: discoverResult.requiredPortalFields,
+      fiscalFields: discoverResult.fiscalFields,
+      screenOrder: [
+        { screenIndex: 1, description: "Búsqueda de ticket", requiredFields: discoverResult.requiredPortalFields.map((f: any) => f.key) },
+        { screenIndex: 2, description: "Datos fiscales", requiredFields: discoverResult.fiscalFields.map((f: any) => f.key) }
+      ]
+    };
+    const fields = discoverResult.requiredPortalFields.map((f: any) => ({
+      key: f.canonicalKey,
+      name: f.label,
+      selector: "input",
+      type: f.type === "number" ? "number" : "text",
+      required: f.required !== false,
+      source: "ticket"
+    }));
+
+    const newConnector = {
+      id: connectorId,
+      nombre: nombreEmisor,
+      rfc: rfcEmisor,
+      aliases: [nombreEmisor],
+      portalUrl: portalUrl,
+      status: "production_ready",
+      runnerAvailable: true,
+      extractionContract: contract,
+      fieldsJson: JSON.stringify(fields),
+      flowJson: discoverResult.stepsJson,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await adminDb.collection("connectors").doc(connectorId).set(newConnector);
+
+    // Save Portal Map
+    const reqFieldsList = discoverResult.requiredPortalFields.map((f: any) => ({
+      key: f.key,
+      label: f.label,
+      source: "portalFields",
+      required: f.required !== false,
+      userEditable: true
+    }));
+    const fiscalKeys = ["rfc", "businessName", "postalCode", "taxRegime", "cfdiUse", "email"];
+    fiscalKeys.forEach(k => {
+      const matched = discoverResult.fiscalFields?.find((f: any) => f.key.endsWith("." + k));
+      reqFieldsList.push({
+        key: matched?.key || `fiscalProfile.${k}`,
+        label: matched?.label || k,
+        source: "fiscalProfile",
+        required: true,
+        userEditable: true
+      });
+    });
+
+    const portalMapData = {
+      connectorId: connectorId,
+      entryUrl: portalUrl,
+      url: portalUrl,
+      requiredFields: reqFieldsList,
+      fiscalFields: ["fiscalProfile.rfc", "fiscalProfile.businessName", "fiscalProfile.postalCode", "fiscalProfile.taxRegime", "fiscalProfile.cfdiUse", "fiscalProfile.email"],
+      captchaSelectorsJson: JSON.stringify(["iframe[src*='recaptcha']", ".g-recaptcha", "#captcha"]),
+      errorSelectorsJson: JSON.stringify([".swal-text", ".alert-danger", "#error-msg", ".text-danger"]),
+      successSelectorsJson: JSON.stringify([".success-msg", "#download-area"]),
+      downloadRulesJson: JSON.stringify({ xmlRequired: true, pdfRequired: false }),
+      stepsJson: discoverResult.stepsJson,
+      isApproved: true,
+      status: "approved",
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    };
+    await adminDb.collection("portal_maps").doc(`map-${connectorId}`).set(portalMapData);
+
+    // 5. Re-run OCR Stage 2
+    await updateProgress(85, "Re-analizando el ticket para extraer los campos del portal...");
+    
+    let ocrResultData: any = {};
+    try {
+      const ai = getGeminiClient(customKey);
+      const rawImage = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
+      const mime = imageBase64.includes("image/png") ? "image/png" : "image/jpeg";
+
+      const targetedPromptText = `Analiza la imagen del ticket de compra de la tienda: ${nombreEmisor}.
+      Extrae únicamente los campos requeridos por el portal de facturación oficial:
+      ${discoverResult.requiredPortalFields.map((f: any) => `- Campo: ${f.label} (clave: ${f.key.replace(/^portalFields\./, "")})`).join("\n")}
+      También extrae el total de la compra (total) con decimales, la fecha de compra (fechaCompra) en formato YYYY-MM-DD, y el folio de venta (folio).`;
+
+      const customProperties: any = {
+        rfcEmisor: { type: "STRING" },
+        nombreEmisor: { type: "STRING" },
+        fechaCompra: { type: "STRING" },
+        total: { type: "NUMBER" },
+        folio: { type: "STRING" },
+        rawOcrText: { type: "STRING" },
+        portalFieldsConfidence: { type: "OBJECT", properties: {} },
+        items: {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: { description: { type: "STRING" }, amount: { type: "NUMBER" } }
+          }
+        }
+      };
+      discoverResult.requiredPortalFields.forEach((f: any) => {
+        const fieldKey = f.key.replace(/^portalFields\./, "");
+        customProperties[fieldKey] = { type: f.type === "number" ? "NUMBER" : "STRING" };
+        customProperties.portalFieldsConfidence.properties[fieldKey] = { type: "NUMBER" };
+      });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          { inlineData: { data: rawImage, mimeType: mime } },
+          { text: targetedPromptText }
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: customProperties,
+            required: ["rfcEmisor", "nombreEmisor", "rawOcrText", "items", "portalFieldsConfidence"]
+          }
+        }
+      });
+      ocrResultData = JSON.parse(response.text || "{}");
+    } catch (ocrErr: any) {
+      console.warn("JIT OCR Stage 2 failed, using basic fields:", ocrErr.message);
+      ocrResultData = {
+        rfcEmisor: rfcEmisor,
+        nombreEmisor: nombreEmisor,
+        total: ticketData.total || 0,
+        fechaCompra: ticketData.fechaCompra || "",
+        folio: ticketData.folio || "",
+        rawOcrText: ticketData.rawOcrText || "",
+        portalFieldsConfidence: {}
+      };
+    }
+
+    // 6. Update Ticket in Firestore
+    await updateProgress(95, "Auto-entrenamiento completado con éxito. Encolando facturación...");
+
+    const portalFields: any = {};
+    discoverResult.requiredPortalFields.forEach((f: any) => {
+      const fieldKey = f.key.replace(/^portalFields\./, "");
+      portalFields[fieldKey] = ocrResultData[fieldKey] || "";
+    });
+    portalFields.total = ocrResultData.total || ticketData.total || 0;
+    portalFields.billingReference = ocrResultData.folio || ocrResultData.billingReference || ticketData.folio || "";
+
+    const updatedFields = {
+      status: "extracted",
+      nombreEmisor: ocrResultData.nombreEmisor || nombreEmisor,
+      rfcEmisor: ocrResultData.rfcEmisor || rfcEmisor,
+      total: ocrResultData.total || ticketData.total || 0,
+      folio: ocrResultData.folio || ticketData.folio || "",
+      fechaCompra: ocrResultData.fechaCompra || ticketData.fechaCompra || "",
+      billingReference: ocrResultData.folio || ticketData.folio || "",
+      portalFields: portalFields,
+      connectorId: connectorId,
+      updatedAt: new Date().toISOString()
+    };
+    await adminDb.collection("tickets").doc(ticketId).update(updatedFields);
+
+    await updateProgress(100, "¡Configuración completada con éxito! Iniciando solicitud en el portal...", "completed");
+
+    res.json({
+      success: true,
+      connector: newConnector,
+      ocrResult: {
+        ...ocrResultData,
+        portalFields
+      }
+    });
+
+  } catch (err: any) {
+    console.error("JIT training failed:", err);
+    await updateProgress(100, "Fallo durante el auto-entrenamiento: " + err.message, "failed");
+    res.status(500).json({ error: "Fallo durante el auto-entrenamiento: " + err.message });
   }
 });
 
