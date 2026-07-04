@@ -1540,8 +1540,13 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       await updateProgress(60, "Verificando estructura del portal con navegador automatizado...");
       let browser = null;
       try {
-        const { chromium } = require("playwright");
-        browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+        const { chromium } = require("playwright-core");
+        const serverlessChromium = require("@sparticuz/chromium");
+        browser = await chromium.launch({
+          executablePath: await serverlessChromium.executablePath(),
+          headless: true,
+          args: serverlessChromium.args
+        });
         const page = await browser.newPage();
         await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 12000 });
         await page.waitForTimeout(1500);
