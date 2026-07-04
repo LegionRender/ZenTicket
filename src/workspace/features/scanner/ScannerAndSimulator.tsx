@@ -2457,8 +2457,16 @@ export default function ScannerAndSimulator({
       });
 
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Fallo en la comunicación con el servidor de entrenamiento.");
+        // Safely parse error — server may return HTML if it crashed
+        let errMsg = `Error del servidor (HTTP ${response.status})`;
+        try {
+          const errData = await response.json();
+          errMsg = errData.error || errMsg;
+        } catch {
+          // Server returned non-JSON (HTML error page) — show status code only
+          errMsg = `El servidor de entrenamiento no respondió correctamente (HTTP ${response.status}). Verifica la consola del servidor.`;
+        }
+        throw new Error(errMsg);
       }
 
       const data = await response.json();
@@ -4177,7 +4185,13 @@ return list.map(n => {
                     🧠 Entrenar IA e intentar facturar
                   </button>
                   <a
-                    href={matchingConnector?.portalUrl || extractedData?.portalUrl || "https://www.google.com"}
+                    href={(() => {
+                      // Build a useful fallback URL for manual billing
+                      const portalUrl = matchingConnector?.portalUrl || (extractedData as any)?.portalUrl;
+                      if (portalUrl && portalUrl.startsWith("http") && !portalUrl.includes("google.com")) return portalUrl;
+                      const nombre = extractedData?.nombreEmisor || "";
+                      return `https://www.google.com/search?q=${encodeURIComponent(`portal facturación ${nombre} Mexico CFDI`)}`;
+                    })()}
                     target="_blank"
                     rel="noreferrer"
                     className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-[#0B53F4] bg-[#ebf1ff] hover:bg-[#ebf1ff]/85 px-6 py-4 rounded-xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-2xs font-sans text-center no-underline"

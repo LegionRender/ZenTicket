@@ -2398,72 +2398,36 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
       portalUrl = `https://facturacion.${merchantSlug}.com.mx/`;
     }
 
-    // 3. Playwright Discovery
-    await updateProgress(45, "Accediendo al portal de facturación con Playwright para extraer los inputs...");
-    let browser = null;
+    // 3. Portal Structure Discovery — Gemini-first, Playwright as refinement
+    await updateProgress(45, "Analizando el portal de facturación con IA para identificar los campos...");
     let discoverResult: any = null;
+    
+    // Primary: Gemini-only discovery (reliable, no browser dependency)
     try {
-      const { chromium } = await import("playwright");
-      browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
-      const page = await browser.newPage();
-      // Use domcontentloaded instead of 'load' - faster and handles SPAs better
-      await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {
-        // If navigation fails, stay on whatever loaded
-      });
-      await page.waitForTimeout(2000);
-
-      const discoveredElements = await page.evaluate(() => {
-        const inputs = Array.from(document.querySelectorAll("input, select, textarea, button")).map(el => {
-          let labelText = "";
-          if (el.id) {
-            const lbl = document.querySelector(`label[for="${el.id}"]`);
-            if (lbl) labelText = lbl.textContent?.trim() || "";
-          }
-          if (!labelText) {
-            const parentLbl = el.closest("label");
-            if (parentLbl) labelText = parentLbl.textContent?.trim() || "";
-          }
-          if (!labelText) {
-            labelText = el.getAttribute("placeholder") || el.getAttribute("aria-label") || "";
-          }
-          return {
-            tag: el.tagName.toLowerCase(),
-            id: el.id || "",
-            name: (el as any).name || "",
-            type: el.getAttribute("type") || "",
-            placeholder: el.getAttribute("placeholder") || "",
-            labelText: labelText.replace(/\s+/g, " ").trim(),
-            className: el.className || "",
-            value: (el as any).value || "",
-            options: el.tagName === "SELECT" ? Array.from((el as HTMLSelectElement).options).map(o => o.text.trim()) : []
-          };
-        });
-        const title = document.title;
-        const bodyText = document.body.innerText.substring(0, 2000).replace(/\s+/g, " ");
-        const currentUrl = window.location.href;
-        return { title, bodyText, inputs, currentUrl };
-      });
-      await browser.close();
-      browser = null;
-
       const ai = getGeminiClient(customKey);
-      const geminiPrompt = `Analiza la estructura del portal de facturación de '${nombreEmisor}' y propone el extractionContract y stepsJson correspondientes para automatizar la facturación.
+      const discoveryPrompt = `Eres un experto en portales de facturación electrónica CFDI de México.
       
-      URL actual del portal: ${discoveredElements.currentUrl || portalUrl}
-      Título del portal: ${discoveredElements.title}
-      Muestra del texto del portal: ${discoveredElements.bodyText}
-      Elementos inputs/selects encontrados (${discoveredElements.inputs.length} total):
-      ${JSON.stringify(discoveredElements.inputs.slice(0, 30), null, 2)}
+      Necesito crear un conector automatizado para el comercio: '${nombreEmisor}' (RFC: ${rfcEmisor}).
+      Portal de facturación detectado: ${portalUrl}
       
-      INSTRUCCIONES IMPORTANTES:
-      1. El extractionContract debe mapear SOLO los campos reales del primer formulario de búsqueda de ticket
-      2. Los stepsJson deben usar los selectores reales encontrados (id, name, placeholder) con prioridad sobre selectores genéricos
-      3. Los valores de los campos deben usar plantillas como {{portalFields.billingReference}}, {{fiscalProfile.rfc}}, etc.
-      4. Incluye en fiscalFields los campos fiscales estándar (RFC, Razón Social, CP, Régimen, Uso CFDI, Email)`;
-
-      const response = await ai.models.generateContent({
+      Basándote en tu conocimiento de portales de facturación mexicanos similares a este comercio, genera:
+      
+      1. requiredPortalFields: Los campos que el portal pide para BUSCAR el ticket (normalmente: número de ticket/folio, fecha, sucursal, total). SOLO los campos del formulario de búsqueda inicial.
+      2. fiscalFields: Los campos fiscales que pide después (RFC, Razón Social, CP, Régimen Fiscal, Uso CFDI, Email).
+      3. stepsJson: Pasos de automatización con selectores CSS genéricos pero funcionales para este tipo de portal.
+      4. portalUrl: La URL más probable del portal de facturación (corrige si el detectado parece incorrecto).
+      
+      IMPORTANTE: Los portales mexicanos de facturación típicamente tienen:
+      - Campo "Folio" o "No. de ticket" para buscar el comprobante
+      - Campo "Fecha" en formato DD/MM/YYYY o selector de fecha
+      - Campo "Total" o "Importe" del ticket
+      - Después solicitan datos fiscales del cliente
+      
+      Genera selectores específicos para ${nombreEmisor} si los conoces, o selectores genéricos funcionales.`;
+      
+      const discoveryResponse = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: geminiPrompt,
+        contents: discoveryPrompt,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -2478,8 +2442,6 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
                     canonicalKey: { type: "STRING" },
                     label: { type: "STRING" },
                     type: { type: "STRING" },
-                    hints: { type: "ARRAY", items: { type: "STRING" } },
-                    validationPattern: { type: "STRING" },
                     required: { type: "BOOLEAN" },
                     userEditable: { type: "BOOLEAN" }
                   },
@@ -2498,100 +2460,111 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
                 }
               },
               stepsJson: { type: "STRING" },
+              portalUrl: { type: "STRING" },
               warnings: { type: "ARRAY", items: { type: "STRING" } }
             },
             required: ["requiredPortalFields", "fiscalFields", "stepsJson", "warnings"]
           }
         }
       });
-      discoverResult = JSON.parse(response.text || "{}");
-    } catch (playwrightErr: any) {
-      if (browser) { try { await browser.close(); } catch(e) {} }
-      browser = null;
-      console.warn("Playwright Discovery failed, using Gemini-only fallback:", playwrightErr.message);
-      
-      // Gemini-only fallback: Ask AI to infer the portal structure from known merchant info
-      try {
-        const ai = getGeminiClient(customKey);
-        const fallbackPrompt = `Necesito crear un conector para automatizar la facturación electrónica CFDI del comercio mexicano '${nombreEmisor}' (RFC: ${rfcEmisor}).
-        El portal de facturación está en: ${portalUrl}
-        
-        Basado en tu conocimiento de portales de facturación mexicanos similares, genera el extractionContract y stepsJson más probable para este tipo de comercio.
-        Los portales mexicanos de facturación típicamente solicitan: número de ticket/folio, fecha, total, RFC del cliente, Razón Social, Código Postal, Régimen Fiscal y Uso CFDI.
-        Genera selectores genéricos pero funcionales.`;
-        
-        const fallbackResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: fallbackPrompt,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "OBJECT",
-              properties: {
-                requiredPortalFields: {
-                  type: "ARRAY",
-                  items: {
-                    type: "OBJECT",
-                    properties: {
-                      key: { type: "STRING" },
-                      canonicalKey: { type: "STRING" },
-                      label: { type: "STRING" },
-                      type: { type: "STRING" },
-                      required: { type: "BOOLEAN" },
-                      userEditable: { type: "BOOLEAN" }
-                    },
-                    required: ["key", "canonicalKey", "label", "type", "required"]
-                  }
-                },
-                fiscalFields: {
-                  type: "ARRAY",
-                  items: {
-                    type: "OBJECT",
-                    properties: {
-                      key: { type: "STRING" },
-                      label: { type: "STRING" },
-                      required: { type: "BOOLEAN" }
-                    }
-                  }
-                },
-                stepsJson: { type: "STRING" },
-                warnings: { type: "ARRAY", items: { type: "STRING" } }
-              },
-              required: ["requiredPortalFields", "fiscalFields", "stepsJson", "warnings"]
-            }
-          }
-        });
-        discoverResult = JSON.parse(fallbackResponse.text || "{}");
-        if (discoverResult.warnings) {
-          discoverResult.warnings.push("Generado sin Playwright (fallo de carga): " + playwrightErr.message);
-        }
-      } catch (geminiErr: any) {
-        console.warn("Gemini-only fallback also failed:", geminiErr.message);
-        // Last resort hardcoded fallback
-        discoverResult = {
-          requiredPortalFields: [
-            { key: "portalFields.billingReference", canonicalKey: "portalFields.billingReference", label: "Referencia de Facturación / Folio", type: "text", required: true, userEditable: true },
-            { key: "portalFields.fechaCompra", canonicalKey: "portalFields.fechaCompra", label: "Fecha de Compra", type: "date", required: false, userEditable: true },
-            { key: "portalFields.total", canonicalKey: "portalFields.total", label: "Total de la Compra", type: "number", required: false, userEditable: true }
-          ],
-          fiscalFields: [
-            { key: "fiscalProfile.rfc", label: "RFC", required: true },
-            { key: "fiscalProfile.razonSocial", label: "Razón Social", required: true },
-            { key: "fiscalProfile.codigoPostal", label: "Código Postal", required: true },
-            { key: "fiscalProfile.regimenFiscal", label: "Régimen Fiscal", required: true },
-            { key: "fiscalProfile.usoCFDI", label: "Uso CFDI", required: true },
-            { key: "fiscalProfile.email", label: "Correo Electrónico", required: true }
-          ],
-          stepsJson: JSON.stringify([
-            { action: "navigate", url: portalUrl },
-            { action: "fill", selector: "input[placeholder*='ticket'], input[name*='ticket'], input[id*='ticket'], input[placeholder*='folio'], input[name*='folio'], input[id*='folio'], input[placeholder*='referencia']", value: "{{portalFields.billingReference}}" },
-            { action: "fill", selector: "input[placeholder*='rfc'], input[name*='rfc'], input[id*='rfc']", value: "{{fiscalProfile.rfc}}" },
-            { action: "click", selector: "button[type='submit'], input[type='submit'], button:text('Buscar'), button:text('Continuar'), button:text('Facturar')" }
-          ]),
-          warnings: ["Generado sin Playwright y sin Gemini online. Usando plantilla genérica.", playwrightErr.message]
-        };
+      discoverResult = JSON.parse(discoveryResponse.text || "{}");
+      // Use refined portalUrl from Gemini if provided
+      if (discoverResult.portalUrl && discoverResult.portalUrl.startsWith("http")) {
+        portalUrl = discoverResult.portalUrl;
       }
+      
+      // Secondary: Try Playwright to refine selectors (optional, non-blocking)
+      await updateProgress(60, "Verificando estructura del portal con navegador automatizado...");
+      let browser = null;
+      try {
+        const { chromium } = await import("playwright");
+        browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+        const page = await browser.newPage();
+        await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 12000 });
+        await page.waitForTimeout(1500);
+
+        const discoveredInputs = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll("input, select, textarea")).slice(0, 20).map(el => ({
+            id: el.id || "",
+            name: (el as any).name || "",
+            type: el.getAttribute("type") || "",
+            placeholder: el.getAttribute("placeholder") || "",
+            labelText: (() => {
+              if (el.id) {
+                const lbl = document.querySelector(`label[for="${el.id}"]`);
+                if (lbl) return lbl.textContent?.trim() || "";
+              }
+              const parentLbl = el.closest("label");
+              return parentLbl?.textContent?.trim() || el.getAttribute("aria-label") || "";
+            })()
+          }));
+        });
+        await browser.close();
+        browser = null;
+
+        // Refine selectors with actual DOM info
+        if (discoveredInputs.length > 0) {
+          const ai2 = getGeminiClient(customKey);
+          const refineResponse = await ai2.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: `Refina los selectores CSS del conector para '${nombreEmisor}' basándote en los inputs reales encontrados en el portal.
+            
+            Conector base generado:
+            ${JSON.stringify(discoverResult, null, 2)}
+            
+            Inputs reales del portal:
+            ${JSON.stringify(discoveredInputs, null, 2)}
+            
+            Actualiza SOLO los stepsJson con selectores más precisos basados en los inputs reales. Mantén el resto igual.`,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "OBJECT",
+                properties: {
+                  stepsJson: { type: "STRING" }
+                },
+                required: ["stepsJson"]
+              }
+            }
+          });
+          const refined = JSON.parse(refineResponse.text || "{}");
+          if (refined.stepsJson) {
+            discoverResult.stepsJson = refined.stepsJson;
+            discoverResult.warnings = [...(discoverResult.warnings || []), "Selectores refinados con datos reales de Playwright"];
+          }
+        }
+      } catch (playwrightErr: any) {
+        if (browser) { try { await browser.close(); } catch(_e) {} }
+        // Playwright refinement failed — OK, continue with Gemini-only result
+        console.info("Playwright refinement skipped (non-fatal):", playwrightErr.message?.substring(0, 100));
+      }
+    } catch (discoveryErr: any) {
+      console.warn("Gemini discovery failed, using hardcoded template:", discoveryErr.message);
+      // Last resort: hardcoded template
+      discoverResult = {
+        requiredPortalFields: [
+          { key: "portalFields.billingReference", canonicalKey: "portalFields.billingReference", label: "Folio / No. de Ticket", type: "text", required: true, userEditable: true },
+          { key: "portalFields.fechaCompra", canonicalKey: "portalFields.fechaCompra", label: "Fecha de Compra", type: "date", required: false, userEditable: true },
+          { key: "portalFields.total", canonicalKey: "portalFields.total", label: "Total de la Compra ($)", type: "number", required: false, userEditable: true }
+        ],
+        fiscalFields: [
+          { key: "fiscalProfile.rfc", label: "RFC", required: true },
+          { key: "fiscalProfile.razonSocial", label: "Razón Social", required: true },
+          { key: "fiscalProfile.codigoPostal", label: "Código Postal", required: true },
+          { key: "fiscalProfile.regimenFiscal", label: "Régimen Fiscal", required: true },
+          { key: "fiscalProfile.usoCFDI", label: "Uso CFDI", required: true },
+          { key: "fiscalProfile.email", label: "Correo Electrónico", required: true }
+        ],
+        stepsJson: JSON.stringify([
+          { action: "navigate", url: portalUrl },
+          { action: "fill", selector: "input[name*='folio'],input[id*='folio'],input[placeholder*='ticket'],input[placeholder*='folio'],input[name*='ticket']", value: "{{portalFields.billingReference}}" },
+          { action: "fill", selector: "input[name*='rfc'],input[id*='rfc'],input[placeholder*='RFC']", value: "{{fiscalProfile.rfc}}" },
+          { action: "click", selector: "button[type='submit'],input[type='submit']" }
+        ]),
+        warnings: ["Usando plantilla genérica por fallo en discovery: " + discoveryErr.message]
+      };
     }
+
 
     // 4. Save Connector to Firestore
     await updateProgress(70, "Guardando conector y mapa de navegación en base de datos...");
