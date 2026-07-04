@@ -2445,13 +2445,15 @@ export default function ScannerAndSimulator({
     });
 
     try {
+      const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : "";
       const response = await fetch("/api/tickets/train-jit", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-gemini-api-key": localStorage.getItem("personalGeminiKey") || ""
+          "Authorization": `Bearer ${idToken}`,
+          "x-gemini-api-key": localStorage.getItem("personalGeminiKey") || fiscalProfile?.personalGeminiKey || ""
         },
-        body: JSON.stringify({ ticketId })
+        body: JSON.stringify({ ticketId, nombreEmisor: extractedData.nombreEmisor, rfcEmisor: extractedData.rfcEmisor })
       });
 
       if (!response.ok) {

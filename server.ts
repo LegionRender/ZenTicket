@@ -2302,7 +2302,7 @@ app.post("/api/admin/discover-portal", async (req: Request, res: Response): Prom
 });
 
 app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<void> => {
-  const { ticketId } = req.body;
+  const { ticketId, nombreEmisor: bodyNombre, rfcEmisor: bodyRfc } = req.body;
   const customKey = req.headers["x-gemini-api-key"] as string | undefined;
 
   if (!ticketId) {
@@ -2337,42 +2337,65 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
       throw new Error("Ticket no encontrado");
     }
     const ticketData = ticketDoc.data()!;
-    const nombreEmisor = ticketData.nombreEmisor || "Comercio por identificar";
-    const rfcEmisor = ticketData.rfcEmisor || "XAXX010101000";
+    // Use body values as primary source (fresher), fall back to stored data
+    const nombreEmisor = bodyNombre || ticketData.nombreEmisor || "Comercio por identificar";
+    const rfcEmisor = bodyRfc || ticketData.rfcEmisor || "XAXX010101000";
     const imageBase64 = ticketData.imageUrl || "";
 
+
     // 2. Search for the portal URL via Search Grounding
+    // IMPORTANT: Google Grounding tools are incompatible with responseMimeType/responseSchema.
+    // We search for the URL as plain text first, then extract it.
     await updateProgress(15, "Buscando portal de facturación en base a DNS y Búsqueda de Google...");
     
     let portalUrl = "";
     try {
       const ai = getGeminiClient(customKey);
-      const prompt = `Queremos automatizar el proceso de facturación de tickets de la empresa mexicana '${nombreEmisor}' con RFC '${rfcEmisor}'.
-                      Utilizando Google Search, busca el link directo al portal oficial de autofacturación de tickets para clientes en México.
-                      Devuelve un objeto JSON con la propiedad portalUrl conteniendo únicamente la URL directa.`;
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
+      const searchPrompt = `Encuentra la URL exacta del portal oficial de autofacturación para clientes de la empresa mexicana '${nombreEmisor}' (RFC: ${rfcEmisor}). 
+      Busca el sitio web donde los compradores pueden solicitar su factura electrónica CFDI ingresando su ticket de compra.
+      Responde SOLO con la URL directa al portal de facturación, sin explicaciones adicionales. Ejemplo de respuesta: https://facturacion.empresa.com.mx/`;
+      
+      // Step A: Google Search Grounding to get the URL (plain text - no JSON schema with grounding)
+      const searchResponse = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: searchPrompt,
         config: {
-          tools: [{ googleSearch: {} }],
-          thinkingConfig: { thinkingLevel: "LOW" as any },
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              portalUrl: { type: "STRING" }
-            },
-            required: ["portalUrl"]
-          }
+          tools: [{ googleSearch: {} }]
         }
       });
-      const parsed = JSON.parse(response.text || "{}");
-      portalUrl = parsed.portalUrl || "";
+      const searchText = searchResponse.text || "";
+      
+      // Step B: Extract URL from the plain text response using regex
+      const urlMatch = searchText.match(/https?:\/\/[^\s"'<>()]+/i);
+      if (urlMatch) {
+        portalUrl = urlMatch[0].replace(/[.,;:!?]+$/, ""); // Remove trailing punctuation
+      }
+      
+      // Step C: If regex didn't find a URL, use a second AI call to extract it cleanly
+      if (!portalUrl && searchText.length > 10) {
+        const extractResponse = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `Del siguiente texto, extrae ÚNICAMENTE la URL del portal de facturación mencionado. Responde solo con la URL:\n${searchText}`,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: { portalUrl: { type: "STRING" } },
+              required: ["portalUrl"]
+            }
+          }
+        });
+        const parsed = JSON.parse(extractResponse.text || "{}");
+        portalUrl = parsed.portalUrl || "";
+      }
     } catch (err: any) {
-      console.warn("Google Search Grounding failed, using fallback:", err.message);
+      console.warn("Google Search Grounding failed, using keyword fallback:", err.message);
     }
+    
+    // Fallback: try known portal patterns or generic search
     if (!portalUrl) {
-      portalUrl = `https://www.google.com/search?q=facturacion+${encodeURIComponent(nombreEmisor)}`;
+      const merchantSlug = nombreEmisor.toLowerCase().replace(/[^a-z0-9]/g, "");
+      portalUrl = `https://facturacion.${merchantSlug}.com.mx/`;
     }
 
     // 3. Playwright Discovery
@@ -2381,10 +2404,13 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
     let discoverResult: any = null;
     try {
       const { chromium } = await import("playwright");
-      browser = await chromium.launch({ headless: true });
+      browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
       const page = await browser.newPage();
-      await page.goto(portalUrl, { waitUntil: "load", timeout: 20000 });
-      await page.waitForTimeout(3000);
+      // Use domcontentloaded instead of 'load' - faster and handles SPAs better
+      await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {
+        // If navigation fails, stay on whatever loaded
+      });
+      await page.waitForTimeout(2000);
 
       const discoveredElements = await page.evaluate(() => {
         const inputs = Array.from(document.querySelectorAll("input, select, textarea, button")).map(el => {
@@ -2413,18 +2439,27 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
           };
         });
         const title = document.title;
-        const bodyText = document.body.innerText.substring(0, 1000).replace(/\s+/g, " ");
-        return { title, bodyText, inputs };
+        const bodyText = document.body.innerText.substring(0, 2000).replace(/\s+/g, " ");
+        const currentUrl = window.location.href;
+        return { title, bodyText, inputs, currentUrl };
       });
       await browser.close();
+      browser = null;
 
       const ai = getGeminiClient(customKey);
-      const geminiPrompt = `Analiza la estructura del portal de facturación y propón el extractionContract y stepsJson correspondientes.
+      const geminiPrompt = `Analiza la estructura del portal de facturación de '${nombreEmisor}' y propone el extractionContract y stepsJson correspondientes para automatizar la facturación.
+      
+      URL actual del portal: ${discoveredElements.currentUrl || portalUrl}
       Título del portal: ${discoveredElements.title}
       Muestra del texto del portal: ${discoveredElements.bodyText}
-      Elementos inputs/selects encontrados:
-      ${JSON.stringify(discoveredElements.inputs, null, 2)}
-      El extractionContract debe mapear únicamente los campos reales que el portal solicita en su primer formulario para identificar el ticket de consumo.`;
+      Elementos inputs/selects encontrados (${discoveredElements.inputs.length} total):
+      ${JSON.stringify(discoveredElements.inputs.slice(0, 30), null, 2)}
+      
+      INSTRUCCIONES IMPORTANTES:
+      1. El extractionContract debe mapear SOLO los campos reales del primer formulario de búsqueda de ticket
+      2. Los stepsJson deben usar los selectores reales encontrados (id, name, placeholder) con prioridad sobre selectores genéricos
+      3. Los valores de los campos deben usar plantillas como {{portalFields.billingReference}}, {{fiscalProfile.rfc}}, etc.
+      4. Incluye en fiscalFields los campos fiscales estándar (RFC, Razón Social, CP, Régimen, Uso CFDI, Email)`;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -2472,23 +2507,90 @@ app.post("/api/tickets/train-jit", async (req: Request, res: Response): Promise<
       discoverResult = JSON.parse(response.text || "{}");
     } catch (playwrightErr: any) {
       if (browser) { try { await browser.close(); } catch(e) {} }
-      console.warn("Playwright Discovery failed, creating fallback specs:", playwrightErr.message);
-      // Fallback discovery
-      discoverResult = {
-        requiredPortalFields: [
-          { key: "portalFields.billingReference", canonicalKey: "portalFields.billingReference", label: "Referencia de Facturación", type: "text", required: true }
-        ],
-        fiscalFields: [
-          { key: "fiscalProfile.rfc", label: "RFC", required: true }
-        ],
-        stepsJson: JSON.stringify([
-          { action: "navigate", url: portalUrl },
-          { action: "fill", selector: "input[placeholder*='referencia'], input[name*='referencia'], input[id*='referencia']", value: "{{portalFields.billingReference}}" },
-          { action: "fill", selector: "input[placeholder*='rfc'], input[name*='rfc'], input[id*='rfc']", value: "{{fiscalProfile.rfc}}" },
-          { action: "click", selector: "button[type='submit'], input[type='submit'], button:has-text('Continuar')" }
-        ]),
-        warnings: ["Usando fallback por fallo en Playwright: " + playwrightErr.message]
-      };
+      browser = null;
+      console.warn("Playwright Discovery failed, using Gemini-only fallback:", playwrightErr.message);
+      
+      // Gemini-only fallback: Ask AI to infer the portal structure from known merchant info
+      try {
+        const ai = getGeminiClient(customKey);
+        const fallbackPrompt = `Necesito crear un conector para automatizar la facturación electrónica CFDI del comercio mexicano '${nombreEmisor}' (RFC: ${rfcEmisor}).
+        El portal de facturación está en: ${portalUrl}
+        
+        Basado en tu conocimiento de portales de facturación mexicanos similares, genera el extractionContract y stepsJson más probable para este tipo de comercio.
+        Los portales mexicanos de facturación típicamente solicitan: número de ticket/folio, fecha, total, RFC del cliente, Razón Social, Código Postal, Régimen Fiscal y Uso CFDI.
+        Genera selectores genéricos pero funcionales.`;
+        
+        const fallbackResponse = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: fallbackPrompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                requiredPortalFields: {
+                  type: "ARRAY",
+                  items: {
+                    type: "OBJECT",
+                    properties: {
+                      key: { type: "STRING" },
+                      canonicalKey: { type: "STRING" },
+                      label: { type: "STRING" },
+                      type: { type: "STRING" },
+                      required: { type: "BOOLEAN" },
+                      userEditable: { type: "BOOLEAN" }
+                    },
+                    required: ["key", "canonicalKey", "label", "type", "required"]
+                  }
+                },
+                fiscalFields: {
+                  type: "ARRAY",
+                  items: {
+                    type: "OBJECT",
+                    properties: {
+                      key: { type: "STRING" },
+                      label: { type: "STRING" },
+                      required: { type: "BOOLEAN" }
+                    }
+                  }
+                },
+                stepsJson: { type: "STRING" },
+                warnings: { type: "ARRAY", items: { type: "STRING" } }
+              },
+              required: ["requiredPortalFields", "fiscalFields", "stepsJson", "warnings"]
+            }
+          }
+        });
+        discoverResult = JSON.parse(fallbackResponse.text || "{}");
+        if (discoverResult.warnings) {
+          discoverResult.warnings.push("Generado sin Playwright (fallo de carga): " + playwrightErr.message);
+        }
+      } catch (geminiErr: any) {
+        console.warn("Gemini-only fallback also failed:", geminiErr.message);
+        // Last resort hardcoded fallback
+        discoverResult = {
+          requiredPortalFields: [
+            { key: "portalFields.billingReference", canonicalKey: "portalFields.billingReference", label: "Referencia de Facturación / Folio", type: "text", required: true, userEditable: true },
+            { key: "portalFields.fechaCompra", canonicalKey: "portalFields.fechaCompra", label: "Fecha de Compra", type: "date", required: false, userEditable: true },
+            { key: "portalFields.total", canonicalKey: "portalFields.total", label: "Total de la Compra", type: "number", required: false, userEditable: true }
+          ],
+          fiscalFields: [
+            { key: "fiscalProfile.rfc", label: "RFC", required: true },
+            { key: "fiscalProfile.razonSocial", label: "Razón Social", required: true },
+            { key: "fiscalProfile.codigoPostal", label: "Código Postal", required: true },
+            { key: "fiscalProfile.regimenFiscal", label: "Régimen Fiscal", required: true },
+            { key: "fiscalProfile.usoCFDI", label: "Uso CFDI", required: true },
+            { key: "fiscalProfile.email", label: "Correo Electrónico", required: true }
+          ],
+          stepsJson: JSON.stringify([
+            { action: "navigate", url: portalUrl },
+            { action: "fill", selector: "input[placeholder*='ticket'], input[name*='ticket'], input[id*='ticket'], input[placeholder*='folio'], input[name*='folio'], input[id*='folio'], input[placeholder*='referencia']", value: "{{portalFields.billingReference}}" },
+            { action: "fill", selector: "input[placeholder*='rfc'], input[name*='rfc'], input[id*='rfc']", value: "{{fiscalProfile.rfc}}" },
+            { action: "click", selector: "button[type='submit'], input[type='submit'], button:text('Buscar'), button:text('Continuar'), button:text('Facturar')" }
+          ]),
+          warnings: ["Generado sin Playwright y sin Gemini online. Usando plantilla genérica.", playwrightErr.message]
+        };
+      }
     }
 
     // 4. Save Connector to Firestore
