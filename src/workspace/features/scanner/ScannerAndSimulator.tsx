@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { FiscalProfile, Ticket, Connector, ExtractedTicketData } from "@/shared/types/types";
-import { analyzeTicket, runAutomation } from "@/services/api";
+import { analyzeTicket, runAutomation, getApiUrl } from "@/services/api";
 import { SAMPLE_TICKETS, drawMockTicketToDataUrl } from "@/shared/utils/ticket-drawer";
 import Logo from "@/shared/brand/Logo";
 import { 
@@ -2446,7 +2446,7 @@ export default function ScannerAndSimulator({
 
     try {
       const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : "";
-      const response = await fetch("/api/tickets/train-jit", {
+      const response = await fetch(getApiUrl("/api/tickets/train-jit"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2455,6 +2455,7 @@ export default function ScannerAndSimulator({
         },
         body: JSON.stringify({ ticketId, nombreEmisor: extractedData.nombreEmisor, rfcEmisor: extractedData.rfcEmisor })
       });
+
 
       if (!response.ok) {
         // Safely parse error — server may return HTML if it crashed
