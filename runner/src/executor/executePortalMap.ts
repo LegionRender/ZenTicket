@@ -303,6 +303,46 @@ export async function executePortalMap(
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
+        const targetTag = await locator.first().evaluate((el: any) => el.tagName);
+
+        // Ionic renders ion-select as a button plus a popover, not as a native <select>.
+        if (targetTag === "ION-SELECT") {
+          await locator.first().click();
+          const optionLabels: Record<string, string[]> = {
+            "626": ["Régimen Simplificado de Confianza", "Simplificado de Confianza"],
+            "601": ["General de Ley Personas Morales", "General de Ley"],
+            "603": ["Personas Morales con Fines no Lucrativos", "Fines no Lucrativos"],
+            "605": ["Sueldos y Salarios"],
+            "606": ["Arrendamiento"],
+            "608": ["Demás ingresos", "Intereses"],
+            "612": ["Personas Físicas con Actividades Empresariales", "Actividades Empresariales"],
+            "G01": ["Adquisición de mercancías"],
+            "G02": ["Devoluciones, descuentos o bonificaciones"],
+            "G03": ["Gastos en general"],
+            "I01": ["Construcciones"],
+            "S01": ["Sin efectos fiscales"],
+            "CP01": ["Pagos"]
+          };
+          const candidates = [value, ...(optionLabels[value] || [])];
+          const popover = page.locator("ion-popover:visible, ion-alert:visible").last();
+          await popover.waitFor({ state: "visible", timeout: step.timeout || 15000 });
+          let selected = false;
+          for (const candidate of candidates) {
+            const option = popover.locator("ion-item, ion-radio, button").filter({ hasText: candidate }).first();
+            if (await option.count()) {
+              await option.click();
+              selected = true;
+              break;
+            }
+          }
+          if (!selected) {
+            throw {
+              message: `No se encontró la opción '${value}' en el selector fiscal.`,
+              code: "PORTAL_CHANGED"
+            };
+          }
+          continue;
+        }
 
         // If it's a PrimeFaces dropdown container, wait for it to be enabled (i.e. not have .ui-state-disabled)
         const isPrimeFacesDropdown = await locator.first().evaluate((el: any) => el.classList.contains("ui-selectonemenu"));
