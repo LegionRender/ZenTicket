@@ -1169,7 +1169,10 @@ export default function ScannerAndSimulator({
       const rfcReceptorVal = fiscalProfile?.rfc || "";
       const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfcReceptorVal);
 
-      if (hasCritFields) {
+      const isTrainingRequired = ocrResult.status === "training_required" || ocrResult.status === "connector_not_ready";
+      if (isTrainingRequired) {
+        setActiveStep("extracted");
+      } else if (hasCritFields) {
         setActiveStep("automating");
         setTimeout(() => {
           handleTriggerAutomation(foundConnector, tId, ocrResult);
@@ -1707,7 +1710,10 @@ export default function ScannerAndSimulator({
       const rfcReceptorVal = fiscalProfile?.rfc || "";
       const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfcReceptorVal);
 
-      if (hasCritFields) {
+      const isTrainingRequired = ocrResult.status === "training_required" || ocrResult.status === "connector_not_ready";
+      if (isTrainingRequired) {
+        setActiveStep("extracted");
+      } else if (hasCritFields) {
         setActiveStep("automating");
         setTimeout(() => {
           handleTriggerAutomation(foundConnector, tId, ocrResult);
