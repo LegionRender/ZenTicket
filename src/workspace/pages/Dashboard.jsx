@@ -990,10 +990,15 @@ export const Dashboard = () => {
 
   const cleanUndefined = (obj) => {
     if (!obj || typeof obj !== "object") return obj;
+    if (obj instanceof Date) return obj; // Preserve Date objects
+    if (Array.isArray(obj)) {
+      return obj.map(item => cleanUndefined(item)).filter(item => item !== undefined);
+    }
     const clean = {};
     Object.keys(obj).forEach(key => {
-      if (obj[key] !== undefined) {
-        clean[key] = obj[key];
+      const val = obj[key];
+      if (val !== undefined) {
+        clean[key] = typeof val === "object" && val !== null ? cleanUndefined(val) : val;
       }
     });
     return clean;
