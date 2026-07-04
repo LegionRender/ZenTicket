@@ -2225,20 +2225,35 @@ app.post("/api/admin/discover-portal", async (req, res) => {
   }
 });
 app.post("/api/tickets/train-jit", async (req, res) => {
-  const { ticketId, nombreEmisor: bodyNombre, rfcEmisor: bodyRfc } = req.body;
+  const {
+    ticketId,
+    nombreEmisor: bodyNombre,
+    rfcEmisor: bodyRfc,
+    adminMode = false,
+    merchantName,
+    trainingId: requestedTrainingId
+  } = req.body || {};
   const customKey = req.headers["x-gemini-api-key"];
-  if (!ticketId) {
+  const trainingId = String(requestedTrainingId || ticketId || `portal-${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120);
+  if (!ticketId && !adminMode) {
     res.status(400).json({ error: "Falta el ticketId" });
+    return;
+  }
+  if (adminMode && !String(merchantName || bodyNombre || "").trim()) {
+    res.status(400).json({ error: "Falta el nombre de la empresa a entrenar." });
     return;
   }
   const updateProgress = async (progress, step, state = "in_progress") => {
     try {
       if (adminDb && typeof adminDb.collection === "function") {
-        await adminDb.collection("automation_trainings").doc(ticketId).set({
+        await adminDb.collection("automation_trainings").doc(trainingId).set({
           progress,
           step,
           status: step,
           state,
+          mode: adminMode ? "portal_admin" : "ticket_jit",
+          ticketId: ticketId || null,
+          merchantName: String(merchantName || bodyNombre || "").trim() || null,
           updatedAt: (/* @__PURE__ */ new Date()).toISOString()
         }, { merge: true });
       }
@@ -2253,21 +2268,37 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       return;
     }
     const decodedToken = await (0, import_auth.getAuth)().verifyIdToken(authHeader.slice(7));
+    const email = String(decodedToken.email || "").toLowerCase();
+    const isAdmin = email === "legionrender@gmail.com" || email === "ricardo@zenticket.mx" || email.includes("legionrender") || email.includes("ricardo");
+    if (adminMode && !isAdmin) {
+      res.status(403).json({ error: "Solo un administrador puede entrenar portales sin ticket." });
+      return;
+    }
     if (!adminDb || typeof adminDb.collection !== "function") {
       throw new Error("Firestore Admin SDK no inicializado");
     }
-    const ticketDoc = await adminDb.collection("tickets").doc(ticketId).get();
-    if (!ticketDoc.exists) {
-      throw new Error(`Ticket no encontrado (ID: ${ticketId}) en la base de datos Firestore: ${adminDb._databaseId || adminDb.databaseId || "unknown"}`);
+    let ticketData = {};
+    if (!adminMode) {
+      const ticketDoc = await adminDb.collection("tickets").doc(ticketId).get();
+      if (!ticketDoc.exists) {
+        throw new Error(`Ticket no encontrado (ID: ${ticketId}) en la base de datos Firestore: ${adminDb._databaseId || adminDb.databaseId || "unknown"}`);
+      }
+      ticketData = ticketDoc.data();
+      if (ticketData.userId !== decodedToken.uid) {
+        res.status(403).json({ error: "No tienes permiso para entrenar este ticket." });
+        return;
+      }
     }
-    const ticketData = ticketDoc.data();
-    if (ticketData.userId !== decodedToken.uid) {
-      res.status(403).json({ error: "No tienes permiso para entrenar este ticket." });
-      return;
-    }
-    const nombreEmisor = bodyNombre || ticketData.nombreEmisor || "Comercio por identificar";
-    const rfcEmisor = bodyRfc || ticketData.rfcEmisor || "XAXX010101000";
+    const nombreEmisor = String(merchantName || bodyNombre || ticketData.nombreEmisor || "Comercio por identificar").trim();
+    const rfcEmisor = bodyRfc || ticketData.rfcEmisor || "";
     const imageBase64 = ticketData.imageUrl || "";
+    await adminDb.collection("automation_trainings").doc(trainingId).set({
+      userId: decodedToken.uid,
+      merchantName: nombreEmisor,
+      mode: adminMode ? "portal_admin" : "ticket_jit",
+      ticketId: ticketId || null,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString()
+    }, { merge: true });
     await updateProgress(15, "Buscando portal de facturaci\xF3n en base a DNS y B\xFAsqueda de Google...");
     let portalUrl = "";
     const portalCandidates = [];
@@ -2601,12 +2632,14 @@ ${searchText}`,
       rfc: rfcEmisor,
       aliases: [nombreEmisor],
       portalUrl,
-      status: "real_validation",
+      status: adminMode ? "trained_needs_validation" : "real_validation",
       runnerAvailable: true,
       extractionContract: contract,
       fieldsJson: JSON.stringify(fields),
       flowJson: discoverResult.stepsJson,
       userId: decodedToken.uid,
+      learnedFrom: adminMode ? "portal_admin" : "automatizacion_ticket",
+      trainingId,
       createdAt: (/* @__PURE__ */ new Date()).toISOString(),
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
@@ -2647,6 +2680,25 @@ ${searchText}`,
       createdAt: (/* @__PURE__ */ new Date()).toISOString()
     };
     await adminDb.collection("portal_maps").doc(`map-${connectorId}`).set(portalMapData);
+    if (adminMode) {
+      await updateProgress(100, "Portal entrenado y agregado a la Biblioteca de conectores.", "completed");
+      res.json({
+        success: true,
+        mode: "portal_admin",
+        trainingId,
+        connectorId,
+        connector: newConnector,
+        portalMap: portalMapData,
+        discovery: {
+          portalUrl,
+          requiredPortalFields: discoverResult.requiredPortalFields,
+          fiscalFields: discoverResult.fiscalFields,
+          stepsJson: discoverResult.stepsJson,
+          warnings: discoverResult.warnings || []
+        }
+      });
+      return;
+    }
     await updateProgress(85, "Re-analizando el ticket para extraer los campos del portal...");
     let ocrResultData = {};
     try {

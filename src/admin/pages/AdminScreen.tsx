@@ -144,6 +144,7 @@ export default function AdminScreen({
   const [ocrJobs, setOcrJobs] = useState<any[]>([]);
   const [ocrAlerts, setOcrAlerts] = useState<any[]>([]);
   const [selectedConnId, setSelectedConnId] = useState("");
+  const [trainingMerchantName, setTrainingMerchantName] = useState("");
   const [officialUrl, setOfficialUrl] = useState("");
   const [htmlContent, setHtmlContent] = useState("");
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
@@ -357,8 +358,9 @@ export default function AdminScreen({
 
 
   const handleStartDiscovery = async () => {
-    if (!officialUrl.trim() || !officialUrl.startsWith("http")) {
-      toast.error("Proporciona una URL válida del portal (http:// o https://).", "URL Requerida");
+    const merchantName = trainingMerchantName.trim();
+    if (!merchantName) {
+      toast.error("Escribe el nombre de la empresa que deseas entrenar.", "Empresa Requerida");
       return;
     }
     setDiscoveryLoading(true);
@@ -366,18 +368,38 @@ export default function AdminScreen({
     setReviewContractChecked(false);
     setReviewStepsChecked(false);
     try {
-      const res = await fetch("/api/admin/discover-portal", {
+      const currentUser = auth.currentUser;
+      if (!currentUser) throw new Error("Debes iniciar sesión como administrador.");
+      const idToken = await currentUser.getIdToken();
+      const trainingId = `portal-${merchantName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+      const res = await fetch("/api/tickets/train-jit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ officialBillingUrl: officialUrl.trim() })
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          adminMode: true,
+          merchantName,
+          nombreEmisor: merchantName,
+          trainingId
+        })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Fallo en descubrimiento");
-      setDiscoveryResult(data);
-      toast.success("Descubrimiento de portal por Playwright finalizado con éxito.", "Discovery Completado");
+      setDiscoveryResult({
+        ...data,
+        suggestedExtractionContract: {
+          requiredPortalFields: data.discovery?.requiredPortalFields || [],
+          fiscalFields: data.discovery?.fiscalFields || []
+        },
+        suggestedStepsJson: data.discovery?.stepsJson || "[]",
+        warnings: data.discovery?.warnings || []
+      });
+      toast.success("El portal fue entrenado y agregado a la Biblioteca de conectores.", "Entrenamiento Completado");
     } catch (e: any) {
       console.error(e);
-      toast.error("Error durante el descubrimiento: " + e.message, "Error");
+      toast.error("Error durante el entrenamiento: " + e.message, "Error");
     } finally {
       setDiscoveryLoading(false);
     }
@@ -1531,90 +1553,45 @@ export default function AdminScreen({
                 <Brain className="w-6 h-6 stroke-[2.3]" />
               </div>
               <div className="text-left leading-tight">
-                <h3 className="text-base font-black text-slate-9 tracking-tight">Discovery de Portales Real</h3>
-                <p className="text-xs text-slate-450 mt-1">Inspecciona y mapea el DOM real del portal con Playwright + Gemini</p>
+                <h3 className="text-base font-black text-slate-9 tracking-tight">Entrenamiento de Portales</h3>
+                <p className="text-xs text-slate-450 mt-1">Investiga, inspecciona y prepara conectores JIT sin necesidad de un ticket</p>
               </div>
             </div>
 
             <div className="space-y-4">
               <div className="space-y-1 text-left">
                 <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-                  1. Comercio a entrenar
-                </label>
-                <select
-                  value={selectedConnId}
-                  onChange={(e) => {
-                    setSelectedConnId(e.target.value);
-                    const selectedConn = connectors.find(c => c.id === e.target.value);
-                    if (selectedConn && selectedConn.portalUrl) {
-                      setOfficialUrl(selectedConn.portalUrl);
-                    }
-                  }}
-                  className="w-full text-sm font-semibold bg-[#F1F3FE]/70 border border-slate-200/40 hover:bg-[#F1F3FE] focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-slate-800 focus:outline-none transition-all"
-                >
-                  <option value="">-- Selecciona un comercio --</option>
-                  {connectors
-                    .filter(c => c.status === "automation_pending_setup" || c.status === "mock_only")
-                    .map(c => (
-                      <option key={c.id} value={c.id}>{c.nombre} ({c.rfc || "Sin RFC"})</option>
-                    ))}
-                </select>
-              </div>
-
-              <div className="space-y-1 text-left">
-                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-                  2. URL oficial del portal
+                  Empresa a entrenar
                 </label>
                 <input
                   type="text"
-                  value={officialUrl}
-                  onChange={(e) => setOfficialUrl(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full text-sm font-medium bg-[#F1F3FE]/70 border border-slate-200/40 hover:bg-[#F1F3FE] focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-slate-800 placeholder-slate-400 focus:outline-none transition-all"
+                  value={trainingMerchantName}
+                  onChange={(e) => setTrainingMerchantName(e.target.value)}
+                  placeholder="Ej. OXXO, Walmart, Soriana, Cinemex..."
+                  className="w-full text-sm font-semibold bg-[#F1F3FE]/70 border border-slate-200/40 hover:bg-[#F1F3FE] focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3.5 text-slate-800 focus:outline-none transition-all"
                 />
               </div>
 
-              <div className="space-y-1 text-left">
-                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-                  3. Código HTML del portal (Auxiliar / Opcional)
-                </label>
-                <textarea
-                  value={htmlContent}
-                  onChange={(e) => setHtmlContent(e.target.value)}
-                  placeholder="Pega el código HTML del portal aquí para análisis directo..."
-                  rows={3}
-                  className="w-full text-xs font-mono bg-[#F1F3FE]/70 border border-slate-200/40 hover:bg-[#F1F3FE] focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 placeholder-slate-400 focus:outline-none transition-all"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+              <div>
                 <button
                   type="button"
-                  disabled={discoveryLoading || !officialUrl}
+                  disabled={discoveryLoading || !trainingMerchantName.trim()}
                   onClick={handleStartDiscovery}
                   className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-55 text-white font-black text-xs py-3.5 rounded-2xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#0B53F4]/15 active:scale-[0.98] select-none border-none outline-none"
                 >
                   {discoveryLoading ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 text-white" />
-                      <span>Descubriendo DOM...</span>
+                      <span>Entrenando portal...</span>
                     </>
                   ) : (
                     <>
                       <Sparkles className="w-3.5 h-3.5 text-white fill-white shrink-0" />
-                      <span>Descubrir Portal</span>
+                      <span>Investigar y entrenar portal</span>
                     </>
                   )}
                 </button>
 
-                <button
-                  type="button"
-                  disabled={discoveryLoading || !htmlContent}
-                  onClick={handleAnalyzeHtml}
-                  className="w-full bg-slate-100 hover:bg-slate-200 disabled:opacity-55 text-slate-700 font-black text-xs py-3.5 rounded-2xl transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98] select-none border-none outline-none"
-                >
-                  <span>Analizar HTML</span>
-                </button>
               </div>
 
               {discoveryResult && (
@@ -1659,38 +1636,10 @@ export default function AdminScreen({
                     </pre>
                   </div>
 
-                  <div className="border-t border-slate-200 pt-3 space-y-2">
-                    <span className="font-bold text-slate-600 block">Verificación y Aprobación Obligatoria:</span>
-                    <div className="space-y-2">
-                      <label className="flex items-start gap-2.5 cursor-pointer text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={reviewContractChecked}
-                          onChange={(e) => setReviewContractChecked(e.target.checked)}
-                          className="mt-0.5 w-4 h-4 text-[#0B53F4]"
-                        />
-                        <span className="leading-tight font-semibold text-[11.5px]">He revisado el contrato de extracción propuesto y confirmo que coincide con el portal oficial.</span>
-                      </label>
-                      
-                      <label className="flex items-start gap-2.5 cursor-pointer text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={reviewStepsChecked}
-                          onChange={(e) => setReviewStepsChecked(e.target.checked)}
-                          className="mt-0.5 w-4 h-4 text-[#0B53F4]"
-                        />
-                        <span className="leading-tight font-semibold text-[11.5px]">He revisado los pasos Playwright de navegación y confirmo que son lógicos y seguros.</span>
-                      </label>
-                    </div>
+                  <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-3 text-emerald-800">
+                    <span className="font-black block">Conector agregado a la Biblioteca</span>
+                    <span className="text-[11px]">Estado: requiere validación con un ticket real antes de promoverlo a producción.</span>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={handleSaveDiscovery}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3.5 rounded-2xl transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98] select-none border-none outline-none"
-                  >
-                    <span>Guardar y Habilitar como Pendiente</span>
-                  </button>
                 </div>
               )}
             </div>
