@@ -71,7 +71,7 @@ export async function collectDocuments(
       const extracted = extractZip(saveBuffer(tmpDir, "network-download.zip", capture.body), tmpDir);
       xmlPath ||= extracted.xmlPath;
       pdfPath ||= extracted.pdfPath;
-    } else if (capture.contentType.includes("xml") || capture.body.toString("utf8", 0, 200).includes("Comprobante")) {
+    } else if (/<(?:cfdi:)?Comprobante[\s>]/i.test(capture.body.toString("utf8"))) {
       xmlPath ||= saveBuffer(tmpDir, "network-cfdi.xml", capture.body);
     } else if (capture.contentType.includes("pdf") || capture.body.subarray(0, 4).toString() === "%PDF") {
       pdfPath ||= saveBuffer(tmpDir, "network-cfdi.pdf", capture.body);

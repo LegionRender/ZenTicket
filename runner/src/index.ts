@@ -16,7 +16,7 @@ import { saveExecutionMemory } from "./memory/executionMemory";
 const MAX_AUTO_RETRIES = 2;
 const AUTO_RECOVERABLE_CODES = new Set([
   "PORTAL_TIMEOUT", "RUNNER_TIMEOUT", "PORTAL_CHANGED", "SERVICE_DOWN",
-  "XML_NOT_DOWNLOADED", "TICKET_TOO_NEW"
+  "XML_NOT_DOWNLOADED"
 ]);
 
 export function shouldAutoRetry(errorCode: string, retryCount: number): boolean {
@@ -379,6 +379,25 @@ export async function processJob(jobId: string) {
 
     await createRunnerLog(jobId, ticketId, "ERROR", `Procesamiento fallido: ${errorMessage} (Código: ${errorCode})`);
     setActiveJobContext(null, null, null, null);
+
+    if (errorCode === "TICKET_TOO_NEW") {
+      const merchantSyncMessage = "El comercio todavía está validando este ticket. Podrás reintentarlo más tarde.";
+      await jobRef.update({
+        status: "waiting_merchant_sync",
+        lastError: merchantSyncMessage,
+        lastErrorTime: new Date().toISOString(),
+        lockedBy: null,
+        lockedAt: null,
+        updatedAt: new Date().toISOString()
+      });
+      await ticketRef.update({
+        status: "waiting_merchant_sync",
+        errorMsg: merchantSyncMessage,
+        reviewReasonCode: "TICKET_TOO_NEW",
+        updatedAt: new Date().toISOString()
+      });
+      return;
+    }
 
     const retryCount = Number(lockedJob.retryCount || 0);
     if (shouldAutoRetry(errorCode, retryCount)) {

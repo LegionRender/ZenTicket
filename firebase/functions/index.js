@@ -1447,11 +1447,18 @@ app.post("/api/tickets/train-jit", async (req, res) => {
     const portalCandidates = [];
     const addPortalCandidate = (candidate) => {
       const clean = String(candidate || "").trim().replace(/[.,;:!?]+$/, "");
-      if (/^https?:\/\//i.test(clean) && !portalCandidates.includes(clean)) portalCandidates.push(clean);
+      if (/^https?:\/\//i.test(clean) && !portalCandidates.includes(clean) && portalCandidates.length < 20) portalCandidates.push(clean);
     };
     const rawTicketText = `${ticketData.rawOcrText || ""}\n${ticketData.billingUrl || ""}`;
     for (const match of rawTicketText.matchAll(/(?:https?:\/\/|www\.)[^\s"'<>]+/gi)) {
       addPortalCandidate(match[0].startsWith("www.") ? `https://${match[0]}` : match[0]);
+    }
+    const brandDomainToken = nombreEmisor.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .split(/[^a-z0-9]+/).filter(token => token.length >= 4 && !["tienda", "tiendas", "cadena", "comercial", "grupo"].includes(token))
+      .sort((a, b) => b.length - a.length)[0];
+    if (brandDomainToken) {
+      addPortalCandidate(`https://www.${brandDomainToken}.com/`);
+      addPortalCandidate(`https://www.${brandDomainToken}.com.mx/`);
     }
     try {
       const keyToUse = customKey || optionalSecret(geminiPrimaryKey) || optionalSecret(geminiApiKey) || "";
@@ -1475,6 +1482,16 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       }
       const groundingChunks = searchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       for (const chunk of groundingChunks) addPortalCandidate(chunk?.web?.uri);
+      const officialResponse = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `Encuentra exclusivamente la página oficial de la empresa mexicana "${nombreEmisor}" que explique o permita facturar tickets. Prioriza el dominio corporativo oficial, aunque requiera iniciar sesión. No incluyas blogs, videos, directorios ni páginas de terceros.`,
+        config: { tools: [{ googleSearch: {} }] }
+      });
+      for (const match of String(officialResponse.text || "").matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
+        addPortalCandidate(match[0]);
+      }
+      const officialChunks = officialResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      for (const chunk of officialChunks) addPortalCandidate(chunk?.web?.uri);
 
       // Step C: If regex didn't find a URL, use a second AI call to extract it cleanly
       if (portalCandidates.length === 0 && searchText.length > 10) {
@@ -1517,15 +1534,30 @@ app.post("/api/tickets/train-jit", async (req, res) => {
           signal: AbortSignal.timeout(12000),
           headers: { "User-Agent": "Mozilla/5.0 ZenTicket-PortalDiscovery/1.0" }
         });
-        if (response.ok) {
+        if (response.ok || [401, 403].includes(response.status)) {
           const finalUrl = response.url || candidate;
-          const hostAndPath = new URL(finalUrl).hostname.toLowerCase() + new URL(finalUrl).pathname.toLowerCase();
+          const finalParsed = new URL(finalUrl);
+          const hostname = finalParsed.hostname.toLowerCase();
           let score = finalUrl.startsWith("https://") ? 30 : 0;
           if (/(factur|cfdi|autofactura)/i.test(finalUrl)) score += 25;
-          if (merchantTokens.some(token => hostAndPath.includes(token))) score += 20;
+          const merchantDomainMatch = merchantTokens.some(token => hostname.includes(token));
+          if (merchantDomainMatch) score += 20;
           score += 15;
           score += 10;
-          scoredCandidates.push({ url: finalUrl, reachable: true, score, reason: "verified_http" });
+          scoredCandidates.push({
+            url: finalUrl, reachable: true, score,
+            officialDomainMatch: merchantDomainMatch,
+            reason: response.ok ? "verified_http" : `protected_http_${response.status}`
+          });
+          const html = await response.text().catch(() => "");
+          for (const hrefMatch of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
+            try {
+              const linkedUrl = new URL(hrefMatch[1], finalUrl);
+              if (merchantTokens.some(token => linkedUrl.hostname.toLowerCase().includes(token))) {
+                addPortalCandidate(linkedUrl.href);
+              }
+            } catch (_linkError) {}
+          }
         }
       } catch (candidateError) {
         scoredCandidates.push({ url: candidate, reachable: false, score: 0, reason: candidateError.message });
@@ -1533,7 +1565,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       }
     }
     scoredCandidates.sort((a, b) => b.score - a.score);
-    portalUrl = scoredCandidates.find(candidate => candidate.reachable)?.url || "";
+    portalUrl = scoredCandidates.find(candidate => candidate.reachable && candidate.officialDomainMatch)?.url || "";
     await db.collection("automation_trainings").doc(trainingId).set({ portalCandidates: scoredCandidates }, { merge: true });
 
     // Never fabricate a billing URL: only a reachable search result may become a connector.
@@ -1627,7 +1659,10 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 12000 });
         await page.waitForTimeout(1500);
         const visiblePortalText = await page.locator("body").innerText().catch(() => "");
-        if (/para poder facturar.{0,120}necesitas iniciar sesi[oó]n|inicia sesi[oó]n o reg[ií]strate/i.test(visiblePortalText)) {
+        const visiblePasswordFields = await page.locator("input[type='password']:visible").count().catch(() => 0);
+        const visibleLoginControls = await page.getByRole("button", { name: /iniciar sesi[oó]n|ingresar|login/i }).count().catch(() => 0);
+        if (visiblePasswordFields > 0 || visibleLoginControls > 0 ||
+            /para poder facturar.{0,120}necesitas iniciar sesi[oó]n|inicia sesi[oó]n o reg[ií]strate|crear una cuenta para facturar/i.test(visiblePortalText)) {
           const authError = new Error("El portal oficial requiere una cuenta o sesión del comercio para facturar.");
           authError.code = "PORTAL_AUTH_REQUIRED";
           throw authError;
@@ -1740,7 +1775,9 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         }
       } catch (playwrightErr) {
         if (browser) { try { await browser.close(); } catch(_e) {} }
-        throw new Error(`Playwright no pudo verificar el portal: ${playwrightErr.message}`);
+        const verificationError = new Error(`Playwright no pudo verificar el portal: ${playwrightErr.message}`);
+        verificationError.code = playwrightErr.code;
+        throw verificationError;
       }
     } catch (discoveryErr) {
       const wrappedError = new Error(`No fue posible construir un conector verificable: ${discoveryErr.message}`);
@@ -1765,7 +1802,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       const normalized = rawSteps.map(raw => {
         const sourceType = raw.type || raw.action;
         const type = stepTypeAliases[sourceType] || sourceType;
-        return { ...raw, type };
+        return type === "goto" ? { ...raw, type, url: portalUrl } : { ...raw, type };
       });
       if (!normalized.some(step => step.type === "goto")) normalized.unshift({ type: "goto", url: portalUrl });
       for (const step of normalized) {
@@ -1780,6 +1817,14 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       return normalized;
     };
     let parsedSteps;
+    if (/\/(?:facturacion-)?(?:login|signin|sign-in|acceso|cuenta|registro)(?:[/?#]|$)/i.test(portalUrl)) {
+      const authError = new Error("El portal oficial requiere una cuenta o sesión del comercio para facturar.");
+      authError.code = "PORTAL_AUTH_REQUIRED";
+      throw authError;
+    }
+    if (!Array.isArray(discoverResult.requiredPortalFields) || discoverResult.requiredPortalFields.length === 0) {
+      throw new Error("El portal no expuso campos reales de ticket para construir un contrato verificable.");
+    }
     try {
       parsedSteps = normalizeAndValidateSteps(discoverResult.stepsJson);
       discoverResult.stepsJson = JSON.stringify(parsedSteps);
@@ -2045,6 +2090,17 @@ app.post("/api/tickets/train-jit", async (req, res) => {
   } catch (err) {
     console.error("JIT training failed:", err);
     await updateProgress(100, "Fallo durante el auto-entrenamiento: " + err.message, "failed");
+    if (ticketId && !adminMode && db && typeof db.collection === "function") {
+      const authRequired = err.code === "PORTAL_AUTH_REQUIRED";
+      await db.collection("tickets").doc(ticketId).set({
+        status: authRequired ? "connector_auth_required" : "training_required",
+        errorMsg: authRequired
+          ? "El portal oficial requiere una cuenta del comercio para continuar."
+          : "No se pudo verificar automáticamente el portal oficial de este comercio.",
+        reviewReasonCode: authRequired ? "PORTAL_AUTH_REQUIRED" : "PORTAL_NOT_FOUND",
+        updatedAt: new Date().toISOString()
+      }, { merge: true }).catch(() => null);
+    }
     const statusCode = err.code === "PORTAL_AUTH_REQUIRED" ? 409 : 500;
     res.status(statusCode).json({
       error: "Fallo durante el auto-entrenamiento: " + err.message,

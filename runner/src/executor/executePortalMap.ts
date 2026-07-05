@@ -1,10 +1,11 @@
 import { chromium, Dialog, Page } from "playwright";
 import { getStorage } from "firebase-admin/storage";
 import { getApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import { randomUUID } from "crypto";
 import { resolveValue } from "./resolveValue";
 import { normalizePortalSteps } from "./normalizePortalSteps";
 import { createRunnerLog } from "../logging/createRunnerLog";
@@ -93,15 +94,6 @@ async function checkCaptcha(page: Page, captchaSelectors: string[]): Promise<Cap
 }
 
 async function checkPortalError(page: Page, errorSelectors: string[]): Promise<string | null> {
-  try {
-    const hasPendingValidationMsg = await page.evaluate(() => 
-      document.body.innerText.includes("Ticket pendiente por validar")
-    );
-    if (hasPendingValidationMsg) {
-      return "TICKET_TOO_NEW";
-    }
-  } catch (e) {}
-
   for (const selector of errorSelectors) {
     try {
       const count = await page.locator(selector).count();
@@ -286,6 +278,7 @@ export async function executePortalMap(
   };
 
   let lastScreenshotPath = "";
+  let lastScreenshotUrl = "";
   let currentStepIdx = 0;
 
   const uploadErrorScreenshot = async (reason: string) => {
@@ -294,15 +287,81 @@ export async function executePortalMap(
       await page.screenshot({ path: screenshotPath, fullPage: true });
       const bucket = getStorage().bucket();
       const destPath = `users/${userId}/tickets/${ticketId}/runner-errors/${Date.now()}.png`;
+      const downloadToken = randomUUID();
       await bucket.upload(screenshotPath, {
         destination: destPath,
-        metadata: { contentType: "image/png" }
+        metadata: {
+          contentType: "image/png",
+          metadata: { firebaseStorageDownloadTokens: downloadToken }
+        }
       });
       lastScreenshotPath = destPath;
+      lastScreenshotUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(destPath)}?alt=media&token=${downloadToken}`;
       await createRunnerLog(jobId, ticketId, "ERROR", `Captura de error guardada en Storage: ${destPath}`, { screenshotPath: destPath });
     } catch (e: any) {
       await createRunnerLog(jobId, ticketId, "WARNING", `Fallo al capturar/guardar captura de pantalla de error: ${e.message}`);
     }
+  };
+
+  const waitForHumanCaptcha = async (): Promise<boolean> => {
+    const databaseId = "ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee";
+    const db = getFirestore(getApp(), databaseId);
+    const jobRef = db.collection("invoice_jobs").doc(jobId);
+    const ticketRef = db.collection("tickets").doc(ticketId);
+    const deleteCaptchaScreenshot = async () => {
+      if (!lastScreenshotPath) return;
+      await getStorage().bucket().file(lastScreenshotPath).delete({ ignoreNotFound: true }).catch(() => undefined);
+    };
+    const message = "El portal solicita el código de verificación mostrado. Captúralo para continuar.";
+    await jobRef.set({
+      status: "waiting_user_action",
+      waitingAction: "captcha",
+      captchaScreenshotPath: lastScreenshotPath,
+      captchaScreenshotUrl: lastScreenshotUrl,
+      captchaRequestedAt: new Date().toISOString(),
+      lockedBy: null,
+      lockedAt: null,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    await ticketRef.set({
+      status: "waiting_user_captcha",
+      jobId,
+      errorMsg: message,
+      reviewReasonCode: "CAPTCHA_DETECTED",
+      captchaScreenshotUrl: lastScreenshotUrl,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+
+    for (let waited = 0; waited < 240000; waited += 2000) {
+      await page.waitForTimeout(2000);
+      const latest = (await jobRef.get()).data() || {};
+      const solution = String(latest.captchaSolution || "").trim();
+      if (!solution) continue;
+      const captchaInput = page.locator("input[name*='captcha' i], input[id*='captcha' i]").first();
+      if (!await captchaInput.isVisible().catch(() => false)) return false;
+      await smartTypeIntoField(page, captchaInput, solution);
+      const submit = page.getByRole("button", { name: /^facturar$/i })
+        .or(page.locator("button:has-text('FACTURAR'), ion-button:has-text('FACTURAR')")).first();
+      await submit.click();
+      await jobRef.set({
+        status: "running",
+        waitingAction: FieldValue.delete(),
+        captchaSolution: FieldValue.delete(),
+        captchaScreenshotUrl: FieldValue.delete(),
+        lockedBy: "captcha-session",
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      await ticketRef.set({
+        status: "runner_processing",
+        captchaScreenshotUrl: FieldValue.delete(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      await deleteCaptchaScreenshot();
+      await page.waitForTimeout(3000);
+      return true;
+    }
+    await deleteCaptchaScreenshot();
+    return false;
   };
 
   try {
@@ -366,14 +425,16 @@ export async function executePortalMap(
       if (captcha) {
         await uploadErrorScreenshot("CAPTCHA_DETECTED");
         await createRunnerLog(jobId, ticketId, "WARNING", "CAPTCHA visible confirmado.", { captchaEvidence: captcha });
-        return {
-          success: false,
-          error: "Se detectó un CAPTCHA visible en el portal del comercio.",
-          errorCode: "CAPTCHA_DETECTED",
-          screenshotPath: lastScreenshotPath,
-          stepIndex: currentStepIdx,
-          maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
-        };
+        if (!await waitForHumanCaptcha()) {
+          return {
+            success: false,
+            error: "Se detectó un CAPTCHA visible en el portal del comercio.",
+            errorCode: "CAPTCHA_DETECTED",
+            screenshotPath: lastScreenshotPath,
+            stepIndex: currentStepIdx,
+            maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
+          };
+        }
       }
       const portalError = await checkPortalError(page, errorSelectors);
       if (portalError) {
@@ -582,7 +643,7 @@ export async function executePortalMap(
             const panel = document.getElementById(id + "_panel");
             if (panel) {
               const items = Array.from(panel.querySelectorAll("li.ui-selectonemenu-item"));
-              const targetItem: any = items[idx];
+              const targetItem: any = items.find((item: any) => norm(item.textContent || "").includes(targetNorm));
               if (targetItem) {
                 targetItem.click();
               }
@@ -593,6 +654,16 @@ export async function executePortalMap(
         try {
           await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
           await getLocator(step.selector, step.iframeSelector).first().click();
+          if (String(step.selector).includes("validarTicket")) {
+            await page.waitForTimeout(1200);
+            const pending = page.getByText("Ticket pendiente por validar", { exact: false }).first();
+            if (await pending.isVisible().catch(() => false)) {
+              throw {
+                code: "TICKET_TOO_NEW",
+                message: "El comercio todavía está validando este ticket. Podrás reintentarlo más tarde."
+              };
+            }
+          }
         } catch (primaryError) {
           const semanticText = step.buttonText || step.label || step.text;
           if (!semanticText) throw primaryError;
@@ -690,14 +761,17 @@ export async function executePortalMap(
     if (finalCaptcha) {
       await uploadErrorScreenshot("CAPTCHA_DETECTED");
       await createRunnerLog(jobId, ticketId, "WARNING", "CAPTCHA final visible confirmado.", { captchaEvidence: finalCaptcha });
-      return {
-        success: false,
-        error: "Se detectó un CAPTCHA final en el portal.",
-        errorCode: "CAPTCHA_DETECTED",
-        screenshotPath: lastScreenshotPath,
-        stepIndex: currentStepIdx,
-        maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
-      };
+      if (!await waitForHumanCaptcha()) {
+        return {
+          success: false,
+          error: "Se detectó un CAPTCHA final en el portal.",
+          errorCode: "CAPTCHA_DETECTED",
+          screenshotPath: lastScreenshotPath,
+          stepIndex: currentStepIdx,
+          maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
+        };
+      }
+      await page.waitForTimeout(5000);
     }
     let finalError: string | null = await checkPortalError(page, errorSelectors) ||
       await collectVisiblePortalErrors(page, errorSelectors);

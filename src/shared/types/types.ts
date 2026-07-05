@@ -110,6 +110,9 @@ export type TicketStatus =
   | "waiting_portal_result"
   | "sat_verifying"
   | "waiting_fiscal_profile"
+  | "waiting_user_captcha"
+  | "waiting_merchant_sync"
+  | "connector_auth_required"
   // Backwards compatibility
   | "extracted"
   | "processing"
@@ -129,6 +132,8 @@ export type InvoiceJobStatus =
   | "succeeded"
   | "failed"
   | "manual_review"
+  | "waiting_user_action"
+  | "waiting_merchant_sync"
   | "cancelled";
 
 export type ReviewReasonCode = 
@@ -154,6 +159,8 @@ export type ReviewReasonCode =
   | "SAT_VALIDATION_UNAVAILABLE"
   | "UNKNOWN_RUNNER_ERROR"
   | "RUNNER_TIMEOUT"
+  | "TICKET_TOO_NEW"
+  | "PORTAL_AUTH_REQUIRED"
   // Backwards compatibility
   | "CONNECTOR_SCHEMA_INVALID"
   | "USER_REQUESTED_REVIEW";
@@ -181,6 +188,7 @@ export interface Ticket {
   wasProcessedOffline?: boolean;
   correctionError?: any;
   reviewError?: any;
+  captchaScreenshotUrl?: string;
   automationEvents?: any[];
   processingMessage?: string;
   startedAt?: string;

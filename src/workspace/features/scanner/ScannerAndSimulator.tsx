@@ -393,6 +393,8 @@ export default function ScannerAndSimulator({
   const [liveTicket, setLiveTicket] = useState<any>(null);
   const [liveJob, setLiveJob] = useState<any>(null);
   const [inlineInputs, setInlineInputs] = useState<Record<string, string>>({});
+  const [captchaSolution, setCaptchaSolution] = useState("");
+  const [isSubmittingCaptcha, setIsSubmittingCaptcha] = useState(false);
   const [showTechnicalDebug, setShowTechnicalDebug] = useState(false);
   const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
   const isConnectorReady = matchingConnector?.status === "production_ready" && matchingConnector?.runnerAvailable === true;
@@ -831,6 +833,9 @@ export default function ScannerAndSimulator({
         }
         setIsEditing(false);
         setActiveStep("correction");
+      } else if (ticket.status === "waiting_merchant_sync" || ticket.status === "connector_auth_required") {
+        setIsAutomatingLoading(false);
+        setActiveStep("tracking");
       } else if ([
         "queued_for_runner",
         "runner_processing",
@@ -950,7 +955,7 @@ export default function ScannerAndSimulator({
       }
       setIsEditing(false);
       setActiveStep("correction");
-    } else if (tStatus === "waiting_user_captcha") {
+    } else if (tStatus === "waiting_user_captcha" || tStatus === "waiting_merchant_sync" || tStatus === "connector_auth_required") {
       setIsAutomatingLoading(false);
       setActiveStep("tracking");
     } else if (tStatus === "cfdi_validated" || tStatus === "completed" || tStatus === "invoice_obtained") {
@@ -2922,6 +2927,31 @@ export default function ScannerAndSimulator({
       console.error("Error saving inline inputs:", err);
       toast.error("Ocurrió un error al guardar los campos: " + err.message);
       setIsAutomatingLoading(false);
+    }
+  };
+
+  const handleSubmitCaptcha = async () => {
+    const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
+    const jobIdToUpdate = liveJob?.id || currentTicket?.jobId;
+    const solution = captchaSolution.trim();
+    if (!jobIdToUpdate || !solution) {
+      toast.error("Captura el código mostrado para continuar.");
+      return;
+    }
+    setIsSubmittingCaptcha(true);
+    try {
+      await updateDoc(doc(db, "invoice_jobs", jobIdToUpdate), {
+        captchaSolution: solution,
+        captchaSolutionAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      setCaptchaSolution("");
+      toast.success("Código enviado. Continuando con la facturación.");
+      setActiveStep("automating");
+    } catch (error: any) {
+      toast.error("No se pudo enviar el código. Inténtalo nuevamente.");
+    } finally {
+      setIsSubmittingCaptcha(false);
     }
   };
 
@@ -5378,15 +5408,54 @@ return list.map(n => {
 
           <div className="text-center space-y-3">
             <h3 className="text-lg font-black text-slate-900 font-display tracking-tight uppercase">
-              Facturación en proceso
+              {currentTicket?.status === "waiting_user_captcha" ? "Verificación requerida" : "Facturación en proceso"}
             </h3>
             <p className="text-sm font-bold text-[#0B53F4]">
-              El procesamiento continuará en segundo plano
+              {currentTicket?.status === "waiting_user_captcha"
+                ? "El portal necesita que captures el código mostrado"
+                : "El procesamiento continuará en segundo plano"}
             </p>
             <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed max-w-md mx-auto font-medium">
               Estamos revisando la información del ticket. Puedes consultar su avance desde <span className="font-bold text-slate-800 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-150">Mis tickets &gt; En proceso</span>.
             </p>
           </div>
+
+          {currentTicket?.status === "waiting_user_captcha" && (
+            <div className="w-full max-w-md space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left">
+              {(liveJob?.captchaScreenshotUrl || currentTicket?.captchaScreenshotUrl) && (
+                <img
+                  src={liveJob?.captchaScreenshotUrl || currentTicket?.captchaScreenshotUrl}
+                  alt="Código de verificación del portal"
+                  className="w-full max-h-64 object-contain rounded-xl border border-amber-200 bg-white"
+                />
+              )}
+              <label className="block text-[10px] font-black uppercase tracking-wider text-amber-800">
+                Código de verificación
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={captchaSolution}
+                  onChange={(event) => setCaptchaSolution(event.target.value)}
+                  placeholder="Ingresa el código"
+                  className="min-w-0 flex-1 rounded-xl border border-amber-300 bg-white px-3 py-3 text-sm font-bold text-slate-900 outline-none focus:border-[#0B53F4]"
+                />
+                <button
+                  type="button"
+                  onClick={handleSubmitCaptcha}
+                  disabled={isSubmittingCaptcha || !captchaSolution.trim()}
+                  className="rounded-xl bg-[#0B53F4] px-4 py-3 text-[10px] font-black uppercase tracking-wider text-white disabled:opacity-50"
+                >
+                  {isSubmittingCaptcha ? "Enviando…" : "Continuar"}
+                </button>
+              </div>
+              <p className="text-[11px] font-medium text-amber-800">
+                La sesión permanece abierta en la nube durante cuatro minutos.
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-col sm:flex-row gap-3 w-full max-w-md mx-auto pt-4 border-t border-slate-100">
             <button
