@@ -83,6 +83,7 @@ function getInvoiceCategoryStyles(category: string) {
 }
 import { useToast } from "@/shared/feedback/Toast";
 import { db, auth } from "@/services/firebase/firebase";
+import { getApiUrl } from "@/services/api";
 import { collection, limit, onSnapshot, query, orderBy, doc, getDoc, addDoc, updateDoc, where, getDocs } from "firebase/firestore";
 
 interface AdminScreenProps {
@@ -372,7 +373,7 @@ export default function AdminScreen({
       if (!currentUser) throw new Error("Debes iniciar sesión como administrador.");
       const idToken = await currentUser.getIdToken();
       const trainingId = `portal-${merchantName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
-      const res = await fetch("/api/tickets/train-jit", {
+      const res = await fetch(getApiUrl("/api/tickets/train-jit"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
