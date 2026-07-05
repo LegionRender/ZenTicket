@@ -1441,18 +1441,60 @@ app.post("/api/tickets/train-jit", async (req, res) => {
     }, { merge: true });
 
     // 2. Search for the portal URL via Search Grounding
-    await updateProgress(15, "Buscando portal de facturación en base a DNS y Búsqueda de Google...");
+    await updateProgress(15, "Revisando si el ticket incluye una dirección de facturación...");
     
     let portalUrl = "";
     const portalCandidates = [];
-    const addPortalCandidate = (candidate) => {
-      const clean = String(candidate || "").trim().replace(/[.,;:!?]+$/, "");
-      if (/^https?:\/\//i.test(clean) && !portalCandidates.includes(clean) && portalCandidates.length < 20) portalCandidates.push(clean);
+    const ticketPortalCandidates = new Set();
+    const addPortalCandidate = (candidate, source = "search") => {
+      let clean = String(candidate || "").trim()
+        .replace(/^[`"'[(<\s]+/, "")
+        .replace(/[`"')\]>\s.,;:!?]+$/, "");
+      if (!/^https?:\/\//i.test(clean) && /^(?:www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?$/i.test(clean)) {
+        clean = `https://${clean}`;
+      }
+      if (!/^https?:\/\//i.test(clean)) return "";
+      if (!portalCandidates.includes(clean) && portalCandidates.length < 20) portalCandidates.push(clean);
+      if (source === "ticket") ticketPortalCandidates.add(clean);
+      return clean;
     };
-    const rawTicketText = `${ticketData.rawOcrText || ""}\n${ticketData.billingUrl || ""}`;
-    for (const match of rawTicketText.matchAll(/(?:https?:\/\/|www\.)[^\s"'<>]+/gi)) {
-      addPortalCandidate(match[0].startsWith("www.") ? `https://${match[0]}` : match[0]);
+    const rawTicketText = `${ticketData.rawOcrText || ""}\n${ticketData.billingUrl || ""}\n${ticketData.extractedFields || ""}`;
+    for (const match of rawTicketText.matchAll(/(?:https?:\/\/|www\.)[^\s"'<>]+|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com\.mx|com|mx|net|org)(?:\/[^\s"'<>]*)?/gi)) {
+      addPortalCandidate(match[0], "ticket");
     }
+    if (!adminMode && imageBase64) {
+      try {
+        const keyToUse = customKey || optionalSecret(geminiPrimaryKey) || optionalSecret(geminiApiKey) || "";
+        const ticketUrlAi = new GoogleGenAI({ apiKey: keyToUse });
+        const rawImage = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
+        const mimeTypeMatch = imageBase64.match(/^data:([^;]+);base64,/i);
+        const ticketUrlResponse = await ticketUrlAi.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: [
+            { inlineData: { data: rawImage, mimeType: mimeTypeMatch?.[1] || "image/jpeg" } },
+            { text: "Lee únicamente las direcciones web impresas en este ticket. No infieras ni inventes dominios. Devuelve cada URL o dominio exactamente como aparece." }
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: { urls: { type: "ARRAY", items: { type: "STRING" } } },
+              required: ["urls"]
+            }
+          }
+        });
+        const ticketUrlResult = JSON.parse(ticketUrlResponse.text || "{}");
+        for (const url of ticketUrlResult.urls || []) addPortalCandidate(url, "ticket");
+      } catch (ticketUrlError) {
+        console.warn("Could not extract a billing URL directly from the ticket image:", ticketUrlError.message);
+      }
+    }
+    await updateProgress(
+      15,
+      ticketPortalCandidates.size > 0
+        ? "Verificando primero la dirección de facturación impresa en el ticket..."
+        : "El ticket no mostró una URL verificable. Buscando el portal oficial en internet..."
+    );
     const brandDomainToken = nombreEmisor.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
       .split(/[^a-z0-9]+/).filter(token => token.length >= 4 && !["tienda", "tiendas", "cadena", "comercial", "grupo"].includes(token))
       .sort((a, b) => b.length - a.length)[0];
@@ -1523,6 +1565,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         const parsedUrl = new URL(candidate);
         const suspicious = suspiciousHosts.test(parsedUrl.hostname) ||
           /^\d{1,3}(?:\.\d{1,3}){3}$/.test(parsedUrl.hostname) ||
+          /^(?:localhost|.+\.local)$/i.test(parsedUrl.hostname) ||
           /\.(?:ru|cn|tk)$/i.test(parsedUrl.hostname);
         if (suspicious) {
           scoredCandidates.push({ url: candidate, reachable: false, score: -50, reason: "suspicious_domain" });
@@ -1540,13 +1583,16 @@ app.post("/api/tickets/train-jit", async (req, res) => {
           const hostname = finalParsed.hostname.toLowerCase();
           let score = finalUrl.startsWith("https://") ? 30 : 0;
           if (/(factur|cfdi|autofactura)/i.test(finalUrl)) score += 25;
+          const printedOnTicket = ticketPortalCandidates.has(candidate);
           const merchantDomainMatch = merchantTokens.some(token => hostname.includes(token));
           if (merchantDomainMatch) score += 20;
+          if (printedOnTicket) score += 120;
           score += 15;
           score += 10;
           scoredCandidates.push({
             url: finalUrl, reachable: true, score,
-            officialDomainMatch: merchantDomainMatch,
+            officialDomainMatch: merchantDomainMatch || printedOnTicket,
+            source: printedOnTicket ? "ticket" : "search",
             reason: response.ok ? "verified_http" : `protected_http_${response.status}`
           });
           const html = await response.text().catch(() => "");
