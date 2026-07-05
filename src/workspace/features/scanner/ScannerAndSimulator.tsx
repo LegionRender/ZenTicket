@@ -405,6 +405,8 @@ export default function ScannerAndSimulator({
   const [isTrainingModel, setIsTrainingModel] = useState(false);
   const [trainingProgress, setTrainingProgress] = useState(0);
   const [trainingStatus, setTrainingStatus] = useState("");
+  const trainingStartedTicketIds = useRef<Set<string>>(new Set());
+  const trainingAttemptCounts = useRef<Map<string, number>>(new Map());
 
   // Helper validation function to check missing or bad critical fields
   const checkIsDataIncomplete = (data: ExtractedTicketData): boolean => {
@@ -1216,6 +1218,9 @@ export default function ScannerAndSimulator({
       const isTrainingRequired = ocrResult.status === "training_required" || ocrResult.status === "connector_not_ready";
       if (isTrainingRequired) {
         setActiveStep("extracted");
+        if (ocrResult.status === "training_required") {
+          void handleRunTraining(ocrResult, tId);
+        }
       } else if (hasCritFields) {
         setActiveStep("automating");
         setTimeout(() => {
@@ -1765,6 +1770,9 @@ export default function ScannerAndSimulator({
       const isTrainingRequired = ocrResult.status === "training_required" || ocrResult.status === "connector_not_ready";
       if (isTrainingRequired) {
         setActiveStep("extracted");
+        if (ocrResult.status === "training_required") {
+          void handleRunTraining(ocrResult, tId);
+        }
       } else if (hasCritFields) {
         setActiveStep("automating");
         setTimeout(() => {
@@ -2450,27 +2458,34 @@ export default function ScannerAndSimulator({
   };
 
   // Run real-time high-fidelity live AI training sync'd with Firestore /automation_trainings and backend train-jit route
-  const handleRunTraining = async () => {
-    if (!extractedData || !ticketId) {
-      toast.error("Datos de ticket insuficientes para iniciar el entrenamiento.");
+  const handleRunTraining = async (
+    trainingData: ExtractedTicketData | null = extractedData,
+    trainingTicketId: string | null = ticketId
+  ) => {
+    if (!trainingData || !trainingTicketId) {
+      console.warn("JIT training skipped because the ticket data is incomplete.");
       return;
     }
+    if (trainingStartedTicketIds.current.has(trainingTicketId)) return;
+    trainingStartedTicketIds.current.add(trainingTicketId);
+    const attempt = (trainingAttemptCounts.current.get(trainingTicketId) || 0) + 1;
+    trainingAttemptCounts.current.set(trainingTicketId, attempt);
 
     setIsTrainingModel(true);
     setTrainingProgress(5);
-    setTrainingStatus("Buscando portal de facturación en base a DNS y Búsqueda de Google...");
+    setTrainingStatus("Buscando el portal oficial del comercio...");
 
     const userEmail = auth.currentUser?.email || "legionrender@gmail.com";
-    const trainingDocRef = doc(db, "automation_trainings", ticketId);
+    const trainingDocRef = doc(db, "automation_trainings", trainingTicketId);
 
     const initialTrainingData = {
-      id: ticketId,
-      ticketId: ticketId,
+      id: trainingTicketId,
+      ticketId: trainingTicketId,
       userId: auth.currentUser?.uid || "guest",
       userEmail: userEmail,
-      storeName: extractedData.nombreEmisor,
-      company: extractedData.nombreEmisor, // Map brand to company so it shows in Admin section
-      totalAmount: extractedData.total,
+      storeName: trainingData.nombreEmisor,
+      company: trainingData.nombreEmisor,
+      totalAmount: trainingData.total,
       status: "Buscando portal del comercio...",
       progress: 5,
       step: "Buscando portal del comercio...",
@@ -2490,9 +2505,14 @@ export default function ScannerAndSimulator({
         if (data.progress !== undefined) {
           setTrainingProgress(data.progress);
         }
-        if (data.step !== undefined) {
-          setTrainingStatus(data.step);
-        }
+        const progress = Number(data.progress || 0);
+        setTrainingStatus(
+          progress < 20 ? "Buscando el portal oficial del comercio..."
+            : progress < 50 ? "Revisando el sitio de facturación..."
+              : progress < 75 ? "Identificando los datos que solicita..."
+                : progress < 95 ? "Preparando la información del ticket..."
+                  : "Iniciando la solicitud de factura..."
+        );
       }
     });
 
@@ -2505,7 +2525,11 @@ export default function ScannerAndSimulator({
           "Authorization": `Bearer ${idToken}`,
           "x-gemini-api-key": localStorage.getItem("personalGeminiKey") || fiscalProfile?.personalGeminiKey || ""
         },
-        body: JSON.stringify({ ticketId, nombreEmisor: extractedData.nombreEmisor, rfcEmisor: extractedData.rfcEmisor })
+        body: JSON.stringify({
+          ticketId: trainingTicketId,
+          nombreEmisor: trainingData.nombreEmisor,
+          rfcEmisor: trainingData.rfcEmisor
+        })
       });
 
 
@@ -2529,29 +2553,44 @@ export default function ScannerAndSimulator({
       // 1. Set newly trained connector
       setMatchingConnector(data.connector);
       setExtractedData({
-        ...extractedData,
+        ...trainingData,
         ...data.ocrResult,
         status: "extracted"
       });
       setIsConnectorNewlyLearned(true);
       setIsTrainingModel(false);
+      trainingAttemptCounts.current.delete(trainingTicketId);
 
       unsubscribe();
 
       // 2. Trigger immediate billing
-      toast.success("🧠 ¡Entrenamiento de IA completado! Mapeo finalizado con éxito.");
-      await handleTriggerAutomation(data.connector, ticketId, {
-        ...extractedData,
+      toast.success("El portal quedó preparado. Iniciamos la solicitud de tu factura.");
+      await handleTriggerAutomation(data.connector, trainingTicketId, {
+        ...trainingData,
         ...data.ocrResult,
         status: "extracted"
       });
     } catch (err: any) {
       console.error("Error during real-time JIT training:", err);
-      toast.error("El auto-entrenamiento falló: " + err.message);
-      setIsTrainingModel(false);
       unsubscribe();
+      if (attempt < 2) {
+        trainingStartedTicketIds.current.delete(trainingTicketId);
+        setTrainingStatus("La conexión se interrumpió. Reintentando automáticamente...");
+        window.setTimeout(() => {
+          void handleRunTraining(trainingData, trainingTicketId);
+        }, 5000);
+        return;
+      }
+      toast.error("No pudimos preparar el portal automáticamente. Guardamos el ticket para revisión.");
+      setIsTrainingModel(false);
     }
   };
+
+  useEffect(() => {
+    const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
+    if (currentTicket?.status !== "training_required" || !ticketId || !extractedData) return;
+    void handleRunTraining(extractedData, ticketId);
+  }, [liveTicket?.status, tickets, ticketId, extractedData]);
 
   const handleSaveEditedData = async () => {
     const cleanRef = sanitizeBillingReferenceForConnector(
@@ -4204,10 +4243,10 @@ return list.map(n => {
                   </div>
                   <div>
                     <h4 className="text-base font-black text-slate-800 tracking-tight">
-                      Preparando la solicitud...
+                      Preparando la automatización de este comercio
                     </h4>
                     <p className="text-xs text-slate-500 mt-1.5 max-w-sm mx-auto leading-relaxed">
-                      Estamos configurando el conector disponible para procesar tu ticket automáticamente.
+                      Este comercio aún no tenía automatización. Estamos localizando su portal y preparando los datos que solicita. Este primer proceso puede tardar algunos minutos; puedes salir de esta pantalla y consultar el avance en Mis tickets.
                     </p>
                   </div>
                 </div>
@@ -4237,12 +4276,12 @@ return list.map(n => {
                     </span>
                     <h4 className="text-lg font-black text-slate-800 tracking-tight leading-snug">
                       {currentTicket?.status === "training_required" 
-                        ? "Estamos entrenando a la IA para este comercio" 
+                        ? "Estamos preparando este comercio"
                         : "El conector de este comercio está en mantenimiento"}
                     </h4>
                     <p className="text-[12.5px] font-medium text-slate-500 leading-relaxed font-sans">
                       {currentTicket?.status === "training_required"
-                        ? `Hemos identificado el comercio como "${extractedData?.nombreEmisor || "Comercio Nuevo"}" (RFC: ${extractedData?.rfcEmisor || "N/A"}). Al no contar con un conector activo, nuestro equipo técnico ya fue notificado y está programando la automatización correspondiente.`
+                        ? `Este comercio aún no tenía automatización. Estamos localizando su portal y preparando los datos que solicita. Este primer proceso puede tardar algunos minutos; puedes salir de esta pantalla y consultar el avance en Mis tickets.`
                         : `El conector oficial para "${extractedData?.nombreEmisor || "este comercio"}" está experimentando ajustes o cambios en el portal del emisor. Estamos actualizando el flujo de automatización.`}
                     </p>
                   </div>
@@ -4258,20 +4297,14 @@ return list.map(n => {
                     <div>
                       <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block font-mono">Estado de IA</span>
                       <span className="font-extrabold text-amber-600 uppercase">
-                        {currentTicket?.status === "training_required" ? "Entrenamiento Requerido" : "No Listo / Cola de Espera"}
+                        {currentTicket?.status === "training_required" ? "Preparación automática" : "No listo / En espera"}
                       </span>
                     </div>
                   </div>
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-3 pt-3 border-t border-slate-100">
-                  <button
-                    onClick={handleRunTraining}
-                    className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-white bg-[#0B53F4] hover:bg-blue-600 px-6 py-4 rounded-xl transition duration-150 shadow-md shadow-[#0B53F4]/15 active:scale-[0.98] select-none cursor-pointer border-none font-sans"
-                  >
-                    🧠 Entrenar IA e intentar facturar
-                  </button>
-                  <a
+                  {currentTicket?.status === "connector_not_ready" && <a
                     href={(() => {
                       // Build a useful fallback URL for manual billing
                       const portalUrl = matchingConnector?.portalUrl || (extractedData as any)?.portalUrl;
@@ -4284,7 +4317,7 @@ return list.map(n => {
                     className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-[#0B53F4] bg-[#ebf1ff] hover:bg-[#ebf1ff]/85 px-6 py-4 rounded-xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-2xs font-sans text-center no-underline"
                   >
                     Facturar manualmente
-                  </a>
+                  </a>}
                   <button
                     onClick={resetAll}
                     className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-slate-500 bg-slate-100 hover:bg-slate-200 px-6 py-4 rounded-xl transition duration-150 active:scale-[0.98] select-none cursor-pointer border-none font-sans"

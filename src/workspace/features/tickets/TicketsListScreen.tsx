@@ -481,7 +481,7 @@ export default function TicketsListScreen({
       return "El portal está esperando el código de verificación mostrado en la captura.";
     }
     if (ticket.status === "training_required") {
-      return "Estamos entrenando a la IA para este comercio. Te notificaremos cuando esté listo.";
+      return "Este comercio aún no tenía automatización. Estamos localizando su portal y preparando los datos que solicita. El primer proceso puede tardar algunos minutos.";
     }
     if (ticket.status === "connector_not_ready") {
       return "El conector de este comercio está en mantenimiento técnico o ajustes.";
@@ -1945,7 +1945,7 @@ export default function TicketsListScreen({
                               </span>
                             ) : (t.status as string) === "training_required" ? (
                               <span className="bg-indigo-100 text-indigo-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
-                                Entrenando IA
+                                Preparando portal
                               </span>
                             ) : (t.status as string) === "connector_not_ready" ? (
                               <span className="bg-amber-100 text-amber-800 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
@@ -1990,7 +1990,7 @@ export default function TicketsListScreen({
                            </span>
                          ) : (t.status as string) === "training_required" ? (
                            <span className="bg-indigo-100 text-indigo-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                             Entrenando IA
+                             Preparando portal
                            </span>
                          ) : (t.status as string) === "connector_not_ready" ? (
                            <span className="bg-amber-100 text-amber-800 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none font-bold">
@@ -2044,7 +2044,7 @@ export default function TicketsListScreen({
                             : t.status === "requires_manual_review" || t.status === "review"
                               ? "Revisión Requerida:"
                               : (t.status as string) === "training_required"
-                                ? "Entrenando IA:"
+                                ? "Preparando portal:"
                                 : (t.status as string) === "connector_not_ready"
                                   ? "Conector en Ajustes:"
                                   : "Error de Automatización:"}

@@ -1581,21 +1581,31 @@ app.post("/api/tickets/train-jit", async (req, res) => {
           const finalUrl = response.url || candidate;
           const finalParsed = new URL(finalUrl);
           const hostname = finalParsed.hostname.toLowerCase();
+          const html = await response.text().catch(() => "");
+          const evidenceText = `${finalUrl} ${html.slice(0, 60000)}`.toLowerCase();
+          const negativeEvidence = /miopinion|encuesta|survey|descarga mi app|app store|play store|\/blocked(?:\?|\/)|\/blog\/|boxfactura|facturartickets|recuperafacturas|youtube\.com|sites\.google\.com|domain.{0,30}for sale|buy this domain|godaddy/i.test(evidenceText);
+          const billingHost = /(factur|cfdi|autofactura)/i.test(hostname);
+          const billingPath = /(factur|cfdi|autofactura)/i.test(finalParsed.pathname);
+          const billingContent = /obtener factura|emitir (?:tu )?factura|servicio de facturaci[oó]n|datos para facturar|ticket de carga/i.test(html);
           let score = finalUrl.startsWith("https://") ? 30 : 0;
-          if (/(factur|cfdi|autofactura)/i.test(finalUrl)) score += 25;
+          if (billingPath) score += 30;
+          if (billingHost) score += 100;
+          if (billingContent) score += 40;
           const printedOnTicket = ticketPortalCandidates.has(candidate);
           const merchantDomainMatch = merchantTokens.some(token => hostname.includes(token));
           if (merchantDomainMatch) score += 20;
-          if (printedOnTicket) score += 120;
+          if (printedOnTicket) score += 60;
+          if (negativeEvidence) score -= 180;
           score += 15;
           score += 10;
+          const verifiedBillingPortal = !negativeEvidence &&
+            (merchantDomainMatch || billingHost || (billingPath && billingContent) || (printedOnTicket && billingContent));
           scoredCandidates.push({
             url: finalUrl, reachable: true, score,
-            officialDomainMatch: merchantDomainMatch || printedOnTicket,
+            officialDomainMatch: verifiedBillingPortal,
             source: printedOnTicket ? "ticket" : "search",
             reason: response.ok ? "verified_http" : `protected_http_${response.status}`
           });
-          const html = await response.text().catch(() => "");
           for (const hrefMatch of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
             try {
               const linkedUrl = new URL(hrefMatch[1], finalUrl);
@@ -1713,6 +1723,25 @@ app.post("/api/tickets/train-jit", async (req, res) => {
           authError.code = "PORTAL_AUTH_REQUIRED";
           throw authError;
         }
+        const visibleDataFields = page.locator("input:not([type='hidden']):visible, select:visible, textarea:visible");
+        if (await visibleDataFields.count().catch(() => 0) === 0) {
+          const billingAction = page.locator("a:visible, button:visible")
+            .filter({ hasText: /obtener factura|facturar ahora|iniciar facturaci[oó]n|generar factura|solicitar factura/i })
+            .first();
+          if (await billingAction.isVisible().catch(() => false)) {
+            await billingAction.click();
+            await page.waitForTimeout(1200);
+            const confirmation = page.locator("button:visible, a:visible")
+              .filter({ hasText: /aceptar|continuar/i })
+              .or(page.locator("input[type='button'][value*='Aceptar' i]:visible, input[type='submit'][value*='Aceptar' i]:visible"))
+              .first();
+            if (await confirmation.isVisible().catch(() => false)) {
+              await confirmation.click();
+              await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => undefined);
+              await page.waitForTimeout(3000);
+            }
+          }
+        }
         portalMetadata = await page.evaluate(() => ({
           framework: document.querySelector("[ng-version]") ? "Angular" :
             document.querySelector("[data-reactroot], #root") ? "React" :
@@ -1731,7 +1760,12 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         const portalScreenshot = (await page.screenshot({ fullPage: true })).toString("base64");
 
         const discoveredInputs = await page.evaluate(() => {
-          return Array.from(document.querySelectorAll("input, select, textarea")).slice(0, 20).map(el => ({
+          return Array.from(document.querySelectorAll("input:not([type='hidden']), select, textarea"))
+            .filter(el => {
+              const rect = el.getBoundingClientRect();
+              const style = getComputedStyle(el);
+              return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+            }).slice(0, 20).map(el => ({
             id: el.id || "",
             name: el.name || "",
             type: el.getAttribute("type") || "",
@@ -1807,7 +1841,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
             }
           });
           const refined = JSON.parse(refineResponse.text || "{}");
-          if (refined.stepsJson) {
+          if (refined.stepsJson && Array.isArray(refined.requiredPortalFields) && refined.requiredPortalFields.length > 0) {
             discoverResult = {
               ...discoverResult,
               requiredPortalFields: refined.requiredPortalFields,
