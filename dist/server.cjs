@@ -2349,8 +2349,17 @@ ${searchText}`,
     } catch (err) {
       console.warn("Google Search Grounding failed, using keyword fallback:", err.message);
     }
+    const suspiciousHosts = /(?:bit\.ly|tinyurl\.com|goo\.gl|t\.co|shorturl|cutt\.ly)$/i;
+    const merchantTokens = nombreEmisor.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter((token) => token.length >= 4);
+    const scoredCandidates = [];
     for (const candidate of portalCandidates) {
       try {
+        const parsedUrl = new URL(candidate);
+        const suspicious = suspiciousHosts.test(parsedUrl.hostname) || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(parsedUrl.hostname) || /\.(?:ru|cn|tk)$/i.test(parsedUrl.hostname);
+        if (suspicious) {
+          scoredCandidates.push({ url: candidate, reachable: false, score: -50, reason: "suspicious_domain" });
+          continue;
+        }
         const response = await fetch(candidate, {
           method: "GET",
           redirect: "follow",
@@ -2358,24 +2367,41 @@ ${searchText}`,
           headers: { "User-Agent": "Mozilla/5.0 ZenTicket-PortalDiscovery/1.0" }
         });
         if (response.ok) {
-          portalUrl = response.url || candidate;
-          break;
+          const finalUrl = response.url || candidate;
+          const finalParsed = new URL(finalUrl);
+          const hostAndPath = finalParsed.hostname.toLowerCase() + finalParsed.pathname.toLowerCase();
+          let score = finalUrl.startsWith("https://") ? 30 : 0;
+          if (/(factur|cfdi|autofactura)/i.test(finalUrl)) score += 25;
+          if (merchantTokens.some((token) => hostAndPath.includes(token))) score += 20;
+          score += 15;
+          score += 10;
+          scoredCandidates.push({ url: finalUrl, reachable: true, score, reason: "verified_http" });
         }
       } catch (candidateError) {
+        scoredCandidates.push({ url: candidate, reachable: false, score: 0, reason: candidateError.message });
         console.info(`[JIT] Portal candidate rejected: ${candidate} (${candidateError.message})`);
       }
     }
+    scoredCandidates.sort((a, b) => b.score - a.score);
+    portalUrl = scoredCandidates.find((candidate) => candidate.reachable)?.url || "";
+    await adminDb.collection("automation_trainings").doc(trainingId).set({ portalCandidates: scoredCandidates }, { merge: true });
     if (!portalUrl) {
       throw new Error("No se pudo verificar un portal oficial de autofacturaci\xF3n para este comercio.");
     }
+    const portalDomain = new URL(portalUrl).hostname.toLowerCase();
+    const learningMemorySnap = await adminDb.collection("portal_learning_memory").where("domain", "==", portalDomain).get();
+    const learningMemory = learningMemorySnap.docs.map((doc) => doc.data());
+    await adminDb.collection("automation_trainings").doc(trainingId).set({ learningMemoryUsed: learningMemory }, { merge: true });
     await updateProgress(45, "Analizando el portal de facturaci\xF3n con IA para identificar los campos...");
     let discoverResult = null;
+    let portalMetadata = {};
     try {
       const ai = getGeminiClient(customKey);
       const discoveryPrompt = `Eres un experto en portales de facturaci\xF3n electr\xF3nica CFDI de M\xE9xico.
       
       Necesito crear un conector automatizado para el comercio: '${nombreEmisor}' (RFC: ${rfcEmisor}).
       Portal de facturaci\xF3n detectado: ${portalUrl}
+      Patrones operativos previos del mismo dominio: ${JSON.stringify(learningMemory).slice(0, 4e3)}
       
       Genera una propuesta provisional que despu\xE9s ser\xE1 reemplazada por el an\xE1lisis del DOM real. No inventes campos ni URLs:
       
@@ -2442,6 +2468,13 @@ ${searchText}`,
           authError.code = "PORTAL_AUTH_REQUIRED";
           throw authError;
         }
+        portalMetadata = await page.evaluate(() => ({
+          framework: document.querySelector("[ng-version]") ? "Angular" : document.querySelector("[data-reactroot], #root") ? "React" : document.querySelector("[data-v-app]") ? "Vue" : window.jQuery ? "jQuery" : "unknown",
+          iframes: Array.from(document.querySelectorAll("iframe")).filter((el) => el.getBoundingClientRect().width > 0).map((el) => ({ src: el.src, sandbox: el.getAttribute("sandbox") || "" })),
+          modals: Array.from(document.querySelectorAll("[role='dialog'], .modal.show, dialog[open]")).map((el) => ({ text: (el.textContent || "").trim().slice(0, 300) })),
+          datepickers: Array.from(document.querySelectorAll("input[type='date'], .flatpickr-input, [data-provide='datepicker']")).map((el) => ({ id: el.id || "", name: el.getAttribute("name") || "" })),
+          submitButtons: Array.from(document.querySelectorAll("button[type='submit'], input[type='submit']")).map((el) => ({ text: (el.textContent || el.getAttribute("value") || "").trim() }))
+        }));
         const portalDom = (await page.content()).substring(0, 5e4);
         const portalScreenshot = (await page.screenshot({ fullPage: true })).toString("base64");
         const discoveredInputs = await page.evaluate(() => {
@@ -2626,6 +2659,18 @@ ${searchText}`,
       required: f.required !== false,
       source: "ticket"
     }));
+    const connectorRef = adminDb.collection("connectors").doc(connectorId);
+    const existingConnectorDoc = await connectorRef.get();
+    const existingConnector = existingConnectorDoc.exists ? existingConnectorDoc.data() : null;
+    const connectorVersion = Number(existingConnector?.version || 0) + 1;
+    if (existingConnector) {
+      await connectorRef.collection("versions").doc(String(existingConnector.version || 1).padStart(4, "0")).set({
+        version: existingConnector.version || 1,
+        snapshotAt: (/* @__PURE__ */ new Date()).toISOString(),
+        reason: adminMode ? "Entrenamiento administrativo JIT" : "Reentrenamiento JIT por ticket",
+        connectorSnapshot: existingConnector
+      });
+    }
     const newConnector = {
       id: connectorId,
       nombre: nombreEmisor,
@@ -2640,10 +2685,15 @@ ${searchText}`,
       userId: decodedToken.uid,
       learnedFrom: adminMode ? "portal_admin" : "automatizacion_ticket",
       trainingId,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      version: connectorVersion,
+      successCount: existingConnector?.successCount || 0,
+      failureCount: existingConnector?.failureCount || 0,
+      totalExecutions: existingConnector?.totalExecutions || 0,
+      lastSuccessAt: existingConnector?.lastSuccessAt || null,
+      createdAt: existingConnector?.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
-    await adminDb.collection("connectors").doc(connectorId).set(newConnector);
+    await connectorRef.set(newConnector);
     const reqFieldsList = discoverResult.requiredPortalFields.map((f) => ({
       key: f.key,
       label: f.label,
@@ -2674,6 +2724,17 @@ ${searchText}`,
       successSelectorsJson: JSON.stringify([".success-msg", "#download-area"]),
       downloadRulesJson: JSON.stringify({ xmlRequired: true, pdfRequired: false }),
       stepsJson: discoverResult.stepsJson,
+      portalMetadata,
+      errorPatterns: discoverResult.errorPatterns || [
+        { textPattern: "ya fue facturado", category: "ALREADY_INVOICED", recoveryHint: "Buscar descarga o consulta de factura" },
+        { textPattern: "total incorrecto", category: "INVALID_TOTAL", recoveryHint: "Probar formatos num\xE9ricos alternativos" },
+        { textPattern: "servicio no disponible", category: "SERVICE_DOWN", recoveryHint: "Reintentar con espera exponencial" }
+      ],
+      downloadStrategy: discoverResult.downloadStrategy || { type: "networkIntercept" },
+      alreadyInvoicedPattern: discoverResult.alreadyInvoicedPattern || {
+        textPattern: "ya fue facturado",
+        recoverySelector: "text=/Consultar factura|Descargar|Recuperar|Obtener XML/i"
+      },
       isApproved: true,
       status: "approved",
       updatedAt: (/* @__PURE__ */ new Date()).toISOString(),

@@ -10,7 +10,46 @@ import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiX
 import { createRunnerLog, setActiveJobContext } from "./logging/createRunnerLog";
 import { validateJobContract } from "./validators/validateJobContract";
 import { verifySatCfdi } from "./validators/verifySatCfdi";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { saveExecutionMemory } from "./memory/executionMemory";
+
+const MAX_AUTO_RETRIES = 2;
+const AUTO_RECOVERABLE_CODES = new Set([
+  "PORTAL_TIMEOUT", "RUNNER_TIMEOUT", "PORTAL_CHANGED", "SERVICE_DOWN",
+  "XML_NOT_DOWNLOADED", "TICKET_TOO_NEW"
+]);
+
+export function shouldAutoRetry(errorCode: string, retryCount: number): boolean {
+  return AUTO_RECOVERABLE_CODES.has(errorCode) && retryCount < MAX_AUTO_RETRIES;
+}
+
+export interface BlockerClassification {
+  isHumanNeeded: boolean;
+  userMessage: string;
+  technicalCode: string;
+  severity: "info" | "warning" | "critical";
+}
+
+export function classifyBlocker(errorCode: string, _errorMessage = "", retryCount = 0): BlockerClassification {
+  const map: Record<string, Omit<BlockerClassification, "technicalCode">> = {
+    CAPTCHA_DETECTED: { isHumanNeeded: true, userMessage: "El portal del comercio solicita una verificación manual que no pudimos resolver automáticamente.", severity: "warning" },
+    PORTAL_NOT_FOUND: { isHumanNeeded: true, userMessage: "No pudimos encontrar el portal oficial de facturación de este comercio.", severity: "critical" },
+    ALREADY_INVOICED_NO_RECOVERY: { isHumanNeeded: true, userMessage: "El portal indica que este ticket ya fue facturado, pero no permitió descargar los archivos nuevamente.", severity: "info" },
+    PERIOD_EXPIRED: { isHumanNeeded: true, userMessage: "El periodo para facturar este ticket ya venció según el portal del comercio.", severity: "critical" },
+    INVALID_PORTAL_FIELD_VALUE: { isHumanNeeded: true, userMessage: "Necesitamos la referencia de facturación impresa en tu ticket para solicitar la factura.", severity: "warning" },
+    PORTAL_AUTH_REQUIRED: { isHumanNeeded: true, userMessage: "El portal oficial requiere una cuenta del comercio para facturar. No es posible automatizar este proceso.", severity: "critical" }
+  };
+  if ((errorCode === "PORTAL_TIMEOUT" || errorCode === "RUNNER_TIMEOUT") && retryCount >= MAX_AUTO_RETRIES) {
+    return { isHumanNeeded: true, userMessage: "El portal del comercio no está respondiendo. Intenta nuevamente más tarde.", technicalCode: errorCode, severity: "warning" };
+  }
+  const found = map[errorCode];
+  return found ? { ...found, technicalCode: errorCode } : {
+    isHumanNeeded: true,
+    userMessage: "No pudimos completar la solicitud en el portal del comercio. El caso requiere revisión.",
+    technicalCode: errorCode,
+    severity: "warning"
+  };
+}
 
 const workerId = `worker-node-${process.pid}`;
 const serviceAccountPath = path.join(__dirname, "../../serviceAccountKey.json");
@@ -324,6 +363,13 @@ export async function processJob(jobId: string) {
       invoiceId,
       updatedAt: new Date().toISOString()
     });
+    await db.collection("connectors").doc(lockedJob.connectorId).set({
+      totalExecutions: FieldValue.increment(1),
+      successCount: FieldValue.increment(1),
+      lastSuccessAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    await saveExecutionMemory(db, { ...connector, id: lockedJob.connectorId }, portalMap, result);
 
     await createRunnerLog(jobId, ticketId, "INFO", "Procesamiento finalizado exitosamente. Factura obtenida.");
     setActiveJobContext(null, null, null, null);
@@ -333,6 +379,29 @@ export async function processJob(jobId: string) {
 
     await createRunnerLog(jobId, ticketId, "ERROR", `Procesamiento fallido: ${errorMessage} (Código: ${errorCode})`);
     setActiveJobContext(null, null, null, null);
+
+    const retryCount = Number(lockedJob.retryCount || 0);
+    if (shouldAutoRetry(errorCode, retryCount)) {
+      await jobRef.update({
+        status: "pending",
+        retryCount: retryCount + 1,
+        lastRetryReason: errorCode,
+        lastError: errorMessage,
+        lockedBy: null,
+        lockedAt: null,
+        updatedAt: new Date().toISOString()
+      });
+      await ticketRef.update({
+        status: "queued_for_runner",
+        errorMsg: "El portal no respondió como esperábamos. Reintentaremos automáticamente.",
+        updatedAt: new Date().toISOString()
+      });
+      await createRunnerLog(jobId, ticketId, "WARNING", `Reintento automático ${retryCount + 1}/${MAX_AUTO_RETRIES} programado.`, {
+        retryCount: retryCount + 1,
+        errorCode
+      });
+      return;
+    }
 
     if (errorCode === "INVALID_PORTAL_FIELD_VALUE") {
       await jobRef.update({
@@ -391,6 +460,7 @@ export async function processJob(jobId: string) {
       return;
     }
 
+    const blocker = classifyBlocker(errorCode, errorMessage, retryCount);
     const isRejected = errorCode === "PORTAL_RETURNED_ERROR";
     const finalJobStatus = isRejected ? "manual_review" : "failed";
     const finalReviewReasonCode = isRejected ? "PORTAL_REJECTED_TICKET_DATA" : errorCode;
@@ -408,11 +478,11 @@ export async function processJob(jobId: string) {
 
     await ticketRef.update({
       status: "requires_manual_review",
-      errorMsg: errorMessage,
+      errorMsg: blocker.userMessage,
       reviewReasonCode: finalReviewReasonCode,
       reviewError: {
         reviewReasonCode: finalReviewReasonCode,
-        reviewReasonMessage: errorMessage,
+        reviewReasonMessage: blocker.userMessage,
         lastAutomationStep: "runner_processing",
         connectorAttempted: true,
         connectorId: lockedJob.connectorId,
@@ -423,6 +493,11 @@ export async function processJob(jobId: string) {
       },
       updatedAt: new Date().toISOString()
     });
+    await db.collection("connectors").doc(lockedJob.connectorId).set({
+      totalExecutions: FieldValue.increment(1),
+      failureCount: FieldValue.increment(1),
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
   }
 }
 
@@ -498,6 +573,23 @@ export const processInvoiceJob = onDocumentCreated(
   async (event: any) => {
     const job = event.data?.data();
     if (!event.params.jobId || job?.status !== "pending") return;
+    await processJob(event.params.jobId);
+  }
+);
+
+export const retryInvoiceJob = onDocumentUpdated(
+  {
+    document: "invoice_jobs/{jobId}",
+    database: databaseId,
+    region: "us-central1",
+    timeoutSeconds: 540,
+    memory: "2GiB",
+    retry: false
+  },
+  async (event: any) => {
+    const beforeStatus = event.data?.before?.data()?.status;
+    const after = event.data?.after?.data();
+    if (!event.params.jobId || after?.status !== "pending" || beforeStatus === "pending") return;
     await processJob(event.params.jobId);
   }
 );

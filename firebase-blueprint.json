@@ -107,6 +107,32 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "ticketId", "userId", "storeName", "status", "progress", "createdAt"]
+    },
+    "ConnectorVersion": {
+      "title": "ConnectorVersion",
+      "description": "Immutable snapshot of a connector before JIT retraining",
+      "type": "object",
+      "properties": {
+        "version": { "type": "number" },
+        "snapshotAt": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string" },
+        "connectorSnapshot": { "type": "object" }
+      },
+      "required": ["version", "snapshotAt", "connectorSnapshot"]
+    },
+    "PortalLearningMemory": {
+      "title": "PortalLearningMemory",
+      "description": "Reusable operational pattern learned from successful portal executions",
+      "type": "object",
+      "properties": {
+        "domain": { "type": "string" },
+        "patternType": { "type": "string" },
+        "pattern": { "type": "object" },
+        "successCount": { "type": "number" },
+        "lastSeenAt": { "type": "string", "format": "date-time" },
+        "connectorId": { "type": "string" }
+      },
+      "required": ["domain", "patternType", "pattern", "lastSeenAt"]
     }
   },
   "firestore": {
@@ -121,6 +147,14 @@
     "connectors/{connectorId}": {
       "schema": "Connector",
       "description": "Invoicing portal web connectors and selectors"
+    },
+    "connectors/{connectorId}/versions/{versionId}": {
+      "schema": "ConnectorVersion",
+      "description": "Historical versions of a connector"
+    },
+    "portal_learning_memory/{patternId}": {
+      "schema": "PortalLearningMemory",
+      "description": "Reusable portal automation patterns"
     },
     "invoices/{invoiceId}": {
       "schema": "Invoice",

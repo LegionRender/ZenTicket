@@ -1,11 +1,15 @@
-import { chromium, Page } from "playwright";
+import { chromium, Dialog, Page } from "playwright";
 import { getStorage } from "firebase-admin/storage";
+import { getApp } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import { resolveValue } from "./resolveValue";
 import { normalizePortalSteps } from "./normalizePortalSteps";
 import { createRunnerLog } from "../logging/createRunnerLog";
+import { collectDocuments, setupNetworkSniffer } from "./documentSniffer";
+import { collectVisiblePortalErrors, diagnosePortalError } from "./portalDoctor";
 
 export interface ExecutionResult {
   success: boolean;
@@ -20,6 +24,7 @@ export interface ExecutionResult {
   screenshotPath?: string;
   stepIndex?: number;
   maskedReference?: string;
+  documentSource?: string;
 }
 
 function maskString(str: string): string {
@@ -156,6 +161,76 @@ async function waitForSelectorOrError(
   throw new Error(`Timeout de ${timeoutMs}ms excedido esperando al selector: ${selector}`);
 }
 
+async function smartTypeIntoField(page: Page, locator: any, value: string): Promise<void> {
+  const target = locator.first();
+  await target.click({ clickCount: 3 }).catch(() => target.click());
+  await page.keyboard.press("Backspace").catch(() => null);
+  await page.keyboard.type(value, { delay: 30 });
+  await target.evaluate((element: HTMLInputElement | HTMLTextAreaElement) => {
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    element.dispatchEvent(new Event("blur", { bubbles: true }));
+  });
+  const registered = await target.inputValue().catch(() => "");
+  if (registered !== value) {
+    await target.fill(value);
+    await target.evaluate((element: HTMLInputElement | HTMLTextAreaElement) => {
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      element.dispatchEvent(new Event("blur", { bubbles: true }));
+    });
+  }
+}
+
+async function handleDatePicker(page: Page, locator: any, value: string): Promise<void> {
+  const target = locator.first();
+  const type = await target.getAttribute("type").catch(() => "");
+  if (type === "date") {
+    await target.evaluate((element: HTMLInputElement, dateValue: string) => {
+      element.value = dateValue;
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    }, value);
+    return;
+  }
+  await smartTypeIntoField(page, locator, value);
+}
+
+async function dismissBlockingModal(page: Page): Promise<boolean> {
+  const modal = page.locator("dialog[open], .modal.show, .swal2-popup:visible, [role='dialog']:visible").first();
+  if (!await modal.count().catch(() => 0) || !await modal.isVisible().catch(() => false)) return false;
+  const button = modal.getByRole("button", { name: /aceptar|continuar|cerrar|entendido|ok|×/i }).first();
+  if (await button.count().catch(() => 0)) {
+    await button.click().catch(() => null);
+    return true;
+  }
+  return false;
+}
+
+async function tryRecoverExistingInvoice(page: Page): Promise<boolean> {
+  const recovery = page.getByRole("button", { name: /consultar factura|descargar|reenviar|ver factura|recuperar|historial|reimprimir|obtener xml/i })
+    .or(page.getByRole("link", { name: /consultar factura|descargar|reenviar|ver factura|recuperar|historial|reimprimir|obtener xml/i }))
+    .first();
+  if (!await recovery.count().catch(() => 0) || !await recovery.isVisible().catch(() => false)) return false;
+  await recovery.click().catch(() => null);
+  await page.waitForTimeout(3000);
+  return true;
+}
+
+async function tryAlternativeRoute(page: Page, connector: any): Promise<string | null> {
+  const alternatives = Array.isArray(connector?.alternativePortals) ? connector.alternativePortals : [];
+  for (const candidate of alternatives.slice(0, 5)) {
+    try {
+      await page.goto(candidate, { waitUntil: "domcontentloaded", timeout: 20000 });
+      const hasForm = await page.locator("form, input, select, textarea").count() > 0;
+      if (hasForm) return candidate;
+    } catch {
+      // Continue with the next configured official alternative.
+    }
+  }
+  return null;
+}
+
 export async function executePortalMap(
   jobId: string,
   ticketId: string,
@@ -189,16 +264,19 @@ export async function executePortalMap(
     viewport: { width: 1280, height: 800 }
   });
 
-  const page = await context.newPage();
+  let page = await context.newPage();
   const downloadedFiles: { filename: string; path: string }[] = [];
+  const networkSniffer = setupNetworkSniffer(page);
+  page.on("dialog", (dialog: Dialog) => dialog.accept().catch(() => null));
 
-  page.on("download", async (download: any) => {
-    const filename = download.suggestedFilename();
-    const savePath = path.join(tmpDir, filename);
-    await download.saveAs(savePath);
-    downloadedFiles.push({ filename, path: savePath });
-    await createRunnerLog(jobId, ticketId, "INFO", `Archivo descargado capturado: ${filename}`);
-  });
+  const attachDownloadListener = (targetPage: Page) => targetPage.on("download", async (download: any) => {
+      const filename = download.suggestedFilename();
+      const savePath = path.join(tmpDir, filename);
+      await download.saveAs(savePath);
+      downloadedFiles.push({ filename, path: savePath });
+      await createRunnerLog(jobId, ticketId, "INFO", `Archivo descargado capturado: ${filename}`);
+    });
+  attachDownloadListener(page);
 
   const getLocator = (selector: string, iframeSelector?: string) => {
     if (iframeSelector) {
@@ -232,6 +310,11 @@ export async function executePortalMap(
       currentStepIdx = i;
       const step = steps[i];
       await createRunnerLog(jobId, ticketId, "INFO", `Ejecutando paso ${i + 1}/${steps.length}: [${step.type}]`, { stepIndex: i, stepType: step.type });
+      if (await dismissBlockingModal(page)) {
+        await createRunnerLog(jobId, ticketId, "INFO", "Modal bloqueante cerrado automáticamente.", {
+          stepIndex: i, stepType: step.type, healingAttempt: 1, strategy: "dismiss_modal", success: true
+        });
+      }
 
       // Check if step requires missing fields
       if (step.type === "fill" || step.type === "select" || step.type === "assertText" || step.type === "evaluate") {
@@ -321,8 +404,33 @@ export async function executePortalMap(
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: step.timeout || 30000 });
       } else if (step.type === "fill") {
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
-        await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
-        const locator = getLocator(step.selector, step.iframeSelector);
+        let locator: any;
+        try {
+          await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
+          locator = getLocator(step.selector, step.iframeSelector);
+        } catch (primaryError) {
+          for (const frame of page.frames().filter((candidate: any) => candidate !== page.mainFrame())) {
+            const framed = frame.locator(step.selector).first();
+            if (await framed.isVisible().catch(() => false)) {
+              locator = framed;
+              await createRunnerLog(jobId, ticketId, "INFO", "Campo localizado dentro de un iframe.", {
+                stepIndex: i, stepType: step.type, healingAttempt: 3, strategy: "iframe_search", success: true
+              });
+              break;
+            }
+          }
+          if (locator) {
+            // Continue with the iframe locator.
+          } else {
+          const semantic = step.label || step.placeholder;
+          if (!semantic) throw primaryError;
+          locator = page.getByLabel(semantic, { exact: false }).or(page.getByPlaceholder(semantic, { exact: false }));
+          await locator.first().waitFor({ state: "visible", timeout: 10000 });
+          await createRunnerLog(jobId, ticketId, "INFO", "Campo reparado con búsqueda semántica.", {
+            stepIndex: i, stepType: step.type, healingAttempt: 2, strategy: "label_or_placeholder", success: true
+          });
+          }
+        }
         const target = locator.first();
         const fieldState = await target.evaluate((element: HTMLInputElement | HTMLTextAreaElement) => ({
           disabled: element.disabled,
@@ -343,7 +451,11 @@ export async function executePortalMap(
             selector: step.selector
           });
         } else {
-          await target.fill(value);
+          const isDate = step.transform === "portalDate" ||
+            await target.getAttribute("type").catch(() => "") === "date" ||
+            await target.evaluate((element: HTMLElement) => element.classList.contains("flatpickr-input")).catch(() => false);
+          if (isDate) await handleDatePicker(page, locator, value);
+          else await smartTypeIntoField(page, locator, value);
         }
       } else if (step.type === "evaluate") {
         const value = resolveValue(step.value, ticketData, fiscalProfile, connector, portalMap, step.transform);
@@ -478,9 +590,22 @@ export async function executePortalMap(
           }
         }, value);
       } else if (step.type === "click") {
-        await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
-        const locator = getLocator(step.selector, step.iframeSelector);
-        await locator.first().click();
+        try {
+          await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
+          await getLocator(step.selector, step.iframeSelector).first().click();
+        } catch (primaryError) {
+          const semanticText = step.buttonText || step.label || step.text;
+          if (!semanticText) throw primaryError;
+          await createRunnerLog(jobId, ticketId, "WARNING", "Selector principal no disponible; intentando localización semántica.", {
+            stepIndex: i, stepType: step.type, healingAttempt: 2, strategy: "semantic_text"
+          });
+          const alternative = page.getByRole("button", { name: semanticText, exact: false }).or(page.getByText(semanticText, { exact: false })).first();
+          await alternative.waitFor({ state: "visible", timeout: 10000 });
+          await alternative.click();
+          await createRunnerLog(jobId, ticketId, "INFO", "Paso reparado con localización semántica.", {
+            stepIndex: i, stepType: step.type, healingAttempt: 2, strategy: "semantic_text", success: true
+          });
+        }
       } else if (step.type === "check" || step.type === "radio") {
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
@@ -491,6 +616,24 @@ export async function executePortalMap(
         await page.waitForNavigation({ waitUntil: "load", timeout: step.timeout || 20000 }).catch(() => null);
       } else if (step.type === "waitForTimeout") {
         await page.waitForTimeout(step.delay || 2000);
+      } else if (step.type === "newTab") {
+        const existingPages = context.pages();
+        const nextPage = existingPages.length > 1
+          ? existingPages[existingPages.length - 1]
+          : await context.waitForEvent("page", { timeout: step.timeout || 15000 });
+        await nextPage.waitForLoadState("domcontentloaded").catch(() => null);
+        page = nextPage;
+        page.on("dialog", (dialog: Dialog) => dialog.accept().catch(() => null));
+        attachDownloadListener(page);
+      } else if (step.type === "acceptModal") {
+        const selector = step.selector || "dialog[open], .modal.show, .swal2-popup:visible, [role='dialog']:visible";
+        const modal = page.locator(selector).first();
+        if (await modal.count().catch(() => 0)) {
+          const action = modal.getByRole("button", { name: /aceptar|continuar|cerrar|entendido|ok|×/i }).first();
+          if (await action.count().catch(() => 0)) await action.click();
+        }
+      } else if (step.type === "sniffDownload") {
+        await page.waitForTimeout(step.timeout || 3000);
       } else if (step.type === "assertText") {
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
@@ -556,7 +699,8 @@ export async function executePortalMap(
         maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
       };
     }
-    const finalError = await checkPortalError(page, errorSelectors);
+    let finalError: string | null = await checkPortalError(page, errorSelectors) ||
+      await collectVisiblePortalErrors(page, errorSelectors);
     if (finalError) {
       await uploadErrorScreenshot("PORTAL_RETURNED_ERROR");
       let errorMsg = `Error final devuelto por el portal: ${finalError}`;
@@ -568,23 +712,45 @@ export async function executePortalMap(
         if (ticketData.portalFields?.fecha) {
           errorMsg = `El ticket es reciente (${ticketData.portalFields.fecha}). OXXO puede tardar hasta 24 horas en sincronizar. Reintentaremos automáticamente más tarde.`;
         }
+      } else {
+        const diagnosis = diagnosePortalError(finalError);
+        if (diagnosis.category === "ALREADY_INVOICED" && await tryRecoverExistingInvoice(page)) {
+          await createRunnerLog(jobId, ticketId, "INFO", "El portal indicó que ya estaba facturado; se activó la recuperación de archivos.");
+          finalError = null;
+        }
+        const codeByCategory: Record<string, string> = {
+          ALREADY_INVOICED: "ALREADY_INVOICED_NO_RECOVERY",
+          TICKET_NOT_FOUND: "TICKET_NOT_FOUND",
+          INVALID_TOTAL: "INVALID_TOTAL",
+          INVALID_DATE: "INVALID_DATE",
+          INVALID_RFC: "INVALID_RFC",
+          PERIOD_EXPIRED: "PERIOD_EXPIRED",
+          FIELD_REQUIRED: "FIELD_REQUIRED",
+          SERVICE_DOWN: "SERVICE_DOWN",
+          CAPTCHA: "CAPTCHA_DETECTED"
+        };
+        if (finalError) {
+          errorCode = codeByCategory[diagnosis.category] || errorCode;
+          errorMsg = diagnosis.userMessage;
+        }
       }
 
-      return {
-        success: false,
-        error: errorMsg,
-        errorCode: errorCode,
-        screenshotPath: lastScreenshotPath,
-        stepIndex: currentStepIdx,
-        maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
-      };
+      if (finalError) {
+        return {
+          success: false,
+          error: errorMsg,
+          errorCode: errorCode,
+          screenshotPath: lastScreenshotPath,
+          stepIndex: currentStepIdx,
+          maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
+        };
+      }
     }
 
-    // Process downloaded files
-    const xmlFile = downloadedFiles.find(f => f.filename.toLowerCase().endsWith(".xml"));
-    const pdfFile = downloadedFiles.find(f => f.filename.toLowerCase().endsWith(".pdf"));
+    // Process downloaded files and intercepted responses.
+    const documents = await collectDocuments(page, context, tmpDir, downloadedFiles, networkSniffer);
 
-    if (!xmlFile) {
+    if (!documents.xmlPath) {
       await uploadErrorScreenshot("XML_NOT_DOWNLOADED");
       return {
         success: false,
@@ -596,25 +762,54 @@ export async function executePortalMap(
       };
     }
 
-    const xmlContent = fs.readFileSync(xmlFile.path, "utf-8");
+    const xmlContent = fs.readFileSync(documents.xmlPath, "utf-8");
     let pdfHtml: string | undefined = undefined;
-    if (pdfFile) {
-      pdfHtml = `CFDI_PDF_DOCUMENT_BINARY_PLACEHOLDER [Filename: ${pdfFile.filename}]`;
+    if (documents.pdfPath) {
+      pdfHtml = `CFDI_PDF_DOCUMENT_BINARY_PLACEHOLDER [Filename: ${path.basename(documents.pdfPath)}]`;
     }
 
-    await createRunnerLog(jobId, ticketId, "INFO", `Navegación completada con éxito. XML extraído: ${xmlFile.filename}`);
+    await createRunnerLog(jobId, ticketId, "INFO", `Navegación completada con éxito. XML extraído mediante ${documents.source || "download"}.`);
 
     return {
       success: true,
       xmlContent,
       pdfHtml,
-      downloadedXmlPath: xmlFile.path,
-      downloadedPdfPath: pdfFile ? pdfFile.path : undefined
+      downloadedXmlPath: documents.xmlPath,
+      downloadedPdfPath: documents.pdfPath,
+      documentSource: documents.source
     };
 
   } catch (err: any) {
     console.error("Runner error during execution:", err);
     const code = err.code || (err.message?.includes("timeout") || err.message?.includes("Timeout") ? "PORTAL_TIMEOUT" : "PORTAL_CHANGED");
+    if (!ticketData.__alternativeRouteAttempted && ["PORTAL_CHANGED", "TICKET_NOT_FOUND"].includes(code)) {
+      const alternative = await tryAlternativeRoute(page, connector);
+      if (alternative) {
+        const databaseId = "ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee";
+        const db = getFirestore(getApp(), databaseId);
+        await db.collection("connectors").doc(connector.id || portalMap.connectorId).set({
+          portalUrl: alternative,
+          lastWorkingRoute: alternative,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        const domain = new URL(alternative).hostname.toLowerCase();
+        await db.collection("portal_learning_memory").doc(`${domain}-working-route`.replace(/[^a-z0-9_-]/g, "-")).set({
+          domain,
+          patternType: "working_route",
+          pattern: { url: alternative },
+          connectorId: connector.id || portalMap.connectorId,
+          successCount: 1,
+          lastSeenAt: new Date().toISOString(),
+          createdAt: new Date().toISOString()
+        }, { merge: true });
+        await createRunnerLog(jobId, ticketId, "WARNING", "Se encontró una ruta alternativa verificable; se reintentará el flujo.", {
+          strategy: "alternative_route", alternative
+        });
+        return executePortalMap(jobId, ticketId, portalMap, { ...connector, portalUrl: alternative }, {
+          ...ticketData, __alternativeRouteAttempted: true
+        }, fiscalProfile);
+      }
+    }
     await uploadErrorScreenshot(code);
     return {
       success: false,
@@ -625,6 +820,7 @@ export async function executePortalMap(
       maskedReference: maskString(ticketData.folio || ticketData.billingReference || "")
     };
   } finally {
+    networkSniffer.dispose();
     await context.close();
     await browser.close();
   }

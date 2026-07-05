@@ -57,6 +57,14 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid) || isAdmin();
       allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
     }
+    match /connectors/{connectorId}/versions/{versionId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /portal_learning_memory/{patternId} {
+      allow read, write: if isAdmin();
+    }
 
     // Invoices rules nested under users
     match /users/{userId}/invoices/{invoiceId} {

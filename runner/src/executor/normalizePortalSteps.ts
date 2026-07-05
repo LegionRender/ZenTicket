@@ -20,12 +20,19 @@ const STEP_TYPES: Record<string, string> = {
   extracttext: "extractText",
   conditional: "conditional",
   wait_for_download: "waitForDownload",
-  waitfordownload: "waitForDownload"
+  waitfordownload: "waitForDownload",
+  newTab: "newTab",
+  new_tab: "newTab",
+  acceptModal: "acceptModal",
+  accept_modal: "acceptModal",
+  dismissModal: "acceptModal",
+  sniffDownload: "sniffDownload",
+  sniff_download: "sniffDownload"
 };
 
 const SELECTOR_TYPES = new Set([
   "fill", "evaluate", "select", "click", "check", "radio",
-  "waitForSelector", "assertText", "extractText", "conditional"
+  "waitForSelector", "assertText", "extractText", "conditional", "acceptModal"
 ]);
 const VALUE_TYPES = new Set(["fill", "evaluate", "select", "assertText"]);
 
@@ -131,7 +138,7 @@ export function normalizePortalSteps(rawSteps: unknown, connector: any): any[] {
   if (!steps.some((step) => step.type === "goto")) {
     steps.unshift({ type: "goto", url: "{{connector.portalUrl}}" });
   }
-  if (!steps.some((step) => ["fill", "select", "click", "evaluate"].includes(step.type))) {
+  if (!steps.some((step) => ["fill", "select", "click", "evaluate", "acceptModal", "newTab", "sniffDownload"].includes(step.type))) {
     throw { message: "El portalMap no contiene interacciones ejecutables.", code: "CONNECTOR_SCHEMA_INVALID" };
   }
   return steps;
