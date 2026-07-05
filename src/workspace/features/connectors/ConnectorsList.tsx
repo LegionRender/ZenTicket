@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Connector, ConnectorField } from "@/shared/types/types";
 import { 
   Link2, Search, Cpu, CheckCircle, Database, HelpCircle, Loader2, X, 
-  Layers, Coffee, Utensils, Car, Home, ShoppingBag, ArrowRight, ChevronDown, ChevronRight
+  Layers, Coffee, Utensils, Car, Home, ShoppingBag, ChevronDown, ChevronRight
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -109,6 +109,44 @@ function getConnectorMethodInfo(connector: Connector): { label: string; colorCla
     colorClass: "bg-emerald-50 text-emerald-700 border-emerald-200/50",
     dotClass: "bg-emerald-500"
   };
+}
+
+function getConnectorFields(connector: Connector): ConnectorField[] {
+  try {
+    const parsed = JSON.parse(connector.fieldsJson || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function getNaturalAutomationStages(connector: Connector): string[] {
+  try {
+    const parsed = JSON.parse(connector.flowJson || "[]");
+    if (!Array.isArray(parsed)) return [];
+    const labels = parsed.map((step: any) => {
+      if (typeof step === "string") {
+        return step.replace(/^\s*\d+[.)-]?\s*/, "").trim();
+      }
+      switch (step?.type || step?.action) {
+        case "goto": return "Abrir el portal de facturación";
+        case "fill":
+        case "evaluate": return "Capturar los datos solicitados";
+        case "select":
+        case "check":
+        case "radio": return "Elegir las opciones fiscales";
+        case "click": return "Continuar con la solicitud";
+        case "waitForDownload": return "Descargar los archivos de la factura";
+        case "waitForNavigation":
+        case "waitForSelector":
+        case "waitForTimeout": return "Esperar la respuesta del portal";
+        default: return "";
+      }
+    }).filter(Boolean);
+    return labels.filter((label: string, index: number) => labels.indexOf(label) === index);
+  } catch {
+    return [];
+  }
 }
 
 export default function ConnectorsList({ connectors, onLearnConnector, isLoading }: ConnectorsListProps) {
@@ -329,8 +367,8 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
         ) : (
           <div className="space-y-4 relative z-10 flex-1">
             {displayedMainConnectors.map((connector) => {
-              const fields: ConnectorField[] = JSON.parse(connector.fieldsJson);
-              const steps: string[] = JSON.parse(connector.flowJson);
+              const fields = getConnectorFields(connector);
+              const steps = getNaturalAutomationStages(connector);
               const category = getConnectorCategory(connector.nombre);
               const methodInfo = getConnectorMethodInfo(connector);
               const connectorId = connector.id || connector.nombre;
@@ -473,7 +511,7 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
 
                             <div>
                               <h5 className="text-[9px] font-black text-slate-400 mb-1.5 uppercase tracking-wider font-mono font-bold">
-                                Flujo automático de automatización
+                                Acciones que puede realizar
                               </h5>
                               <ol className="text-[10px] text-slate-600 list-decimal pl-4.5 space-y-1 font-medium font-sans">
                                 {steps.map((step, idx) => (
@@ -521,37 +559,29 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
         <div className="mt-3.5 pt-3.5 border-t border-slate-100/80 relative z-10">
           <button
             type="button"
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => setIsModalOpen((open) => !open)}
             className="group w-full py-3.5 px-4.5 zt-btn-secondary-blue font-black text-[11px] uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition duration-150 cursor-pointer shadow-2xs"
           >
             <Layers className="w-4 h-4 group-hover:scale-105 transition stroke-[2.2]" />
-            <span>Ver Biblioteca Completa ({connectors.length})</span>
-            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform stroke-[2.2]" />
+            <span>{isModalOpen ? "Ocultar biblioteca completa" : `Ver biblioteca completa (${connectors.length})`}</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform stroke-[2.2] ${isModalOpen ? "rotate-180" : ""}`} />
           </button>
         </div>
       </div>
 
-      {/* IMMERSIVE SLIDE-OVER OR POPUP DIALOG MODAL (NOT ON MAIN SCREEN) */}
+      {/* Inline complete library keeps the workspace navigation available */}
       <AnimatePresence>
         {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            
-            {/* Dark blur overlay backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsModalOpen(false)}
-              className="absolute inset-0 bg-slate-900/35 backdrop-blur-md cursor-zoom-out"
-            />
-
-            {/* Modal Body Card */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              transition={{ type: "spring", damping: 25, stiffness: 350 }}
-              className="relative w-full max-w-2xl bg-white border border-slate-200 rounded-[32px] shadow-2xl p-6 md:p-8 flex flex-col max-h-[85vh] overflow-hidden z-10 text-left font-sans"
+          <motion.section
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            id="connector-library-full"
+            className="lg:col-span-3 w-full"
+          >
+            <div
+              className="w-full bg-white border border-slate-200 rounded-3xl shadow-sm p-5 md:p-8 flex flex-col text-left font-sans"
             >
               {/* Header section with Close */}
               <div className="flex items-start justify-between mb-4">
@@ -572,6 +602,7 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
+                  aria-label="Ocultar biblioteca completa"
                   className="p-2 text-slate-400 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-xl transition cursor-pointer"
                 >
                   <X className="w-5 h-5 stroke-[2.2]" />
@@ -626,8 +657,8 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
                   </div>
                 ) : (
                   modalFilteredConnectors.map((connector) => {
-                    const fields: ConnectorField[] = JSON.parse(connector.fieldsJson);
-                    const steps: string[] = JSON.parse(connector.flowJson);
+                    const fields = getConnectorFields(connector);
+                    const steps = getNaturalAutomationStages(connector);
                     const category = getConnectorCategory(connector.nombre);
                     const methodInfo = getConnectorMethodInfo(connector);
                     const connectorId = `modal-${connector.id || connector.nombre}`;
@@ -769,9 +800,6 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
                                           className="text-[9.5px] bg-[#FAF9FE] border border-slate-105 px-2 py-1.5 rounded-lg flex flex-col font-mono shadow-3xs"
                                         >
                                           <span className="font-bold text-[#0B53F4]">{f.name}</span>
-                                          <span className="text-[8px] text-slate-400 block truncate max-w-[170px] mt-0.5">
-                                            Selector: {f.selector}
-                                          </span>
                                         </div>
                                       ))}
                                     </div>
@@ -779,7 +807,7 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
 
                                   <div>
                                     <h5 className="text-[9.5px] font-black text-slate-400 mb-2 uppercase tracking-wider font-mono font-bold">
-                                      Flujo de automatización Playwright/SAT
+                                      Acciones que puede realizar
                                     </h5>
                                     <ol className="text-[10px] text-slate-600 list-decimal pl-4.5 space-y-1.5 leading-relaxed font-sans font-medium">
                                       {steps.map((s, idx) => (
@@ -800,12 +828,11 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
 
               {/* Footer metadata info */}
               <div className="mt-5 pt-3.5 border-t border-slate-100 flex justify-between items-center text-[10px] text-slate-400 font-extrabold select-none">
-                <span>Vía API Playwright Cloud</span>
+                <span>Automatización en la nube</span>
                 <span>Actualizado: 2026-06-08</span>
               </div>
-            </motion.div>
-
-          </div>
+            </div>
+          </motion.section>
         )}
       </AnimatePresence>
 

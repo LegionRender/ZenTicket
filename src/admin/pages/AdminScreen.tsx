@@ -1598,48 +1598,36 @@ export default function AdminScreen({
               {discoveryResult && (
                 <div className="border border-slate-150 rounded-2xl p-4 bg-slate-50 text-left space-y-4 text-xs font-sans">
                   <span className="block text-[10px] font-black text-[#0B53F4] uppercase tracking-wider font-mono">
-                    Resultado del Análisis IA
+                    Campos detectados
                   </span>
 
-                  {discoveryResult.screenshot && (
-                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-4xs bg-white">
-                      <span className="block text-[8.5px] uppercase font-black text-slate-400 p-2 border-b border-slate-100 bg-slate-50">Evidencia de Captura</span>
-                      <img src={discoveryResult.screenshot} alt="Visual" className="w-full max-h-40 object-cover" />
-                    </div>
-                  )}
-
-                  {discoveryResult.warnings && discoveryResult.warnings.length > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 space-y-1 text-[11px] leading-tight">
-                      <span className="font-bold block">Advertencias del portal:</span>
-                      <ul className="list-disc pl-4 space-y-0.5">
-                        {discoveryResult.warnings.map((w: string, idx: number) => (
-                          <li key={idx}>{w}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
                   <div className="space-y-2">
-                    <span className="font-bold text-slate-600 block">Campos Requeridos Sugeridos:</span>
+                    <span className="font-bold text-slate-700 block">Datos solicitados del ticket</span>
                     <div className="flex flex-wrap gap-1.5">
-                      {discoveryResult.suggestedExtractionContract.requiredPortalFields.map((f: any) => (
+                      {(discoveryResult.suggestedExtractionContract?.requiredPortalFields || []).map((f: any) => (
                         <span key={f.key} className="px-2.5 py-1 text-[10px] font-bold bg-white border border-slate-200 text-slate-700 rounded-lg shadow-4xs">
-                          {f.label} ({f.canonicalKey})
+                          {f.label || f.name || "Campo del ticket"}
                         </span>
                       ))}
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <span className="font-bold text-slate-600 block">Pasos de Navegación Playwright:</span>
-                    <pre className="p-3 bg-white border border-slate-200 rounded-xl text-[10px] font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap leading-relaxed shadow-4xs">
-                      {JSON.stringify(JSON.parse(discoveryResult.suggestedStepsJson), null, 2)}
-                    </pre>
-                  </div>
+                  {(discoveryResult.suggestedExtractionContract?.fiscalFields || []).length > 0 && (
+                    <div className="space-y-2">
+                      <span className="font-bold text-slate-700 block">Datos fiscales solicitados</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {discoveryResult.suggestedExtractionContract.fiscalFields.map((f: any) => (
+                          <span key={f.key} className="px-2.5 py-1 text-[10px] font-bold bg-white border border-slate-200 text-slate-700 rounded-lg shadow-4xs">
+                            {f.label || f.name || "Dato fiscal"}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-3 text-emerald-800">
                     <span className="font-black block">Conector agregado a la Biblioteca</span>
-                    <span className="text-[11px]">Estado: requiere validación con un ticket real antes de promoverlo a producción.</span>
+                    <span className="text-[11px]">Requiere validación con un ticket real antes de habilitarlo para todos los usuarios.</span>
                   </div>
                 </div>
               )}
