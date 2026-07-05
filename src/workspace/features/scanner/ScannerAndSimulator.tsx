@@ -968,6 +968,14 @@ export default function ScannerAndSimulator({
     }
   }, [ticketId, tickets, activeStep, liveTicket]);
 
+  useEffect(() => {
+    const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
+    if (currentTicket?.status !== "connector_auth_required") return;
+    setIsAutomatingLoading(false);
+    setIsEditing(false);
+    setActiveStep("tracking");
+  }, [ticketId, tickets, liveTicket]);
+
   // Loader timeout protection
   useEffect(() => {
     if (activeStep !== "automating" || !ticketId) return;
@@ -5401,38 +5409,63 @@ return list.map(n => {
 
       {/* CONTROLLED STATUS: EN SEGUIMIENTO */}
       {activeStep === "tracking" && (
-        <div id="tracking-panel" className="flex-1 flex flex-col justify-center items-center text-center p-7 sm:p-10 space-y-6 relative z-10 animate-fade-in_50 bg-white border border-slate-200 rounded-3xl shadow-[0_15px_35px_-10px_rgba(37,99,235,0.03)] font-sans max-w-xl mx-auto my-4">
-          <div className="w-16 h-16 bg-blue-50 border border-blue-150 rounded-2xl flex items-center justify-center text-[#0B53F4] mx-auto shadow-sm">
-            <Clock className="w-8 h-8 animate-pulse text-[#0B53F4]" />
+        <div id="tracking-panel" className="flex-1 min-w-0 w-full flex flex-col justify-center items-center text-center p-4 sm:p-10 space-y-6 relative z-10 animate-fade-in_50 bg-white border border-slate-200 rounded-3xl shadow-[0_15px_35px_-10px_rgba(37,99,235,0.03)] font-sans max-w-xl mx-auto my-4 overflow-hidden">
+          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto shadow-sm border ${
+            currentTicket?.status === "connector_auth_required"
+              ? "bg-amber-50 border-amber-200 text-amber-700"
+              : "bg-blue-50 border-blue-150 text-[#0B53F4]"
+          }`}>
+            {currentTicket?.status === "connector_auth_required"
+              ? <ShieldAlert className="w-8 h-8" />
+              : <Clock className="w-8 h-8 animate-pulse text-[#0B53F4]" />}
           </div>
 
           <div className="text-center space-y-3">
             <h3 className="text-lg font-black text-slate-900 font-display tracking-tight uppercase">
-              {currentTicket?.status === "waiting_user_captcha" ? "Verificación requerida" : "Facturación en proceso"}
+              {currentTicket?.status === "waiting_user_captcha"
+                ? "Verificación requerida"
+                : currentTicket?.status === "connector_auth_required"
+                  ? "Inicio de sesión requerido"
+                  : "Facturación en proceso"}
             </h3>
-            <p className="text-sm font-bold text-[#0B53F4]">
+            <p className={`text-sm font-bold ${currentTicket?.status === "connector_auth_required" ? "text-amber-700" : "text-[#0B53F4]"}`}>
               {currentTicket?.status === "waiting_user_captcha"
                 ? "El portal necesita que captures el código mostrado"
-                : "El procesamiento continuará en segundo plano"}
+                : currentTicket?.status === "connector_auth_required"
+                  ? "El portal oficial solo permite facturar desde una cuenta"
+                  : "El procesamiento continuará en segundo plano"}
             </p>
             <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed max-w-md mx-auto font-medium">
-              Estamos revisando la información del ticket. Puedes consultar su avance desde <span className="font-bold text-slate-800 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-150">Mis tickets &gt; En proceso</span>.
+              {currentTicket?.status === "connector_auth_required"
+                ? "No faltan datos del ticket. Este comercio exige iniciar sesión o crear una cuenta en su portal, por lo que ZenTicket no puede continuar sin autorización del usuario."
+                : <>Estamos revisando la información del ticket. Puedes consultar su avance desde <span className="font-bold text-slate-800 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-150">Mis tickets &gt; En proceso</span>.</>}
             </p>
           </div>
 
           {currentTicket?.status === "waiting_user_captcha" && (
-            <div className="w-full max-w-md space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left">
+            <div className="w-full min-w-0 max-w-md space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 sm:p-4 text-left overflow-hidden">
               {(liveJob?.captchaScreenshotUrl || currentTicket?.captchaScreenshotUrl) && (
-                <img
-                  src={liveJob?.captchaScreenshotUrl || currentTicket?.captchaScreenshotUrl}
-                  alt="Código de verificación del portal"
-                  className="w-full max-h-64 object-contain rounded-xl border border-amber-200 bg-white"
-                />
+                <a
+                  href={liveJob?.captchaScreenshotUrl || currentTicket?.captchaScreenshotUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block w-full rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B53F4]"
+                  aria-label="Abrir captura del portal en tamaño completo"
+                >
+                  <img
+                    src={liveJob?.captchaScreenshotUrl || currentTicket?.captchaScreenshotUrl}
+                    alt="Captura del portal con el código de verificación"
+                    className="block w-full max-h-72 object-contain rounded-xl border border-amber-200 bg-white"
+                  />
+                  <span className="mt-2 block text-center text-[11px] font-bold text-amber-800 underline underline-offset-2">
+                    Toca la imagen para ampliarla
+                  </span>
+                </a>
               )}
               <label className="block text-[10px] font-black uppercase tracking-wider text-amber-800">
                 Código de verificación
               </label>
-              <div className="flex gap-2">
+              <div className="flex min-w-0 flex-col gap-3 sm:flex-row">
                 <input
                   type="text"
                   inputMode="numeric"
@@ -5440,15 +5473,15 @@ return list.map(n => {
                   value={captchaSolution}
                   onChange={(event) => setCaptchaSolution(event.target.value)}
                   placeholder="Ingresa el código"
-                  className="min-w-0 flex-1 rounded-xl border border-amber-300 bg-white px-3 py-3 text-sm font-bold text-slate-900 outline-none focus:border-[#0B53F4]"
+                  className="min-h-12 min-w-0 w-full flex-1 rounded-xl border border-amber-300 bg-white px-4 py-3 text-base font-bold text-slate-900 outline-none focus:border-[#0B53F4] focus:ring-2 focus:ring-blue-100"
                 />
                 <button
                   type="button"
                   onClick={handleSubmitCaptcha}
                   disabled={isSubmittingCaptcha || !captchaSolution.trim()}
-                  className="rounded-xl bg-[#0B53F4] px-4 py-3 text-[10px] font-black uppercase tracking-wider text-white disabled:opacity-50"
+                  className="min-h-12 w-full sm:w-auto rounded-xl bg-[#0B53F4] px-5 py-3 text-xs font-black uppercase tracking-wider text-white disabled:opacity-50"
                 >
-                  {isSubmittingCaptcha ? "Enviando…" : "Continuar"}
+                  {isSubmittingCaptcha ? "Enviando…" : "Enviar código"}
                 </button>
               </div>
               <p className="text-[11px] font-medium text-amber-800">

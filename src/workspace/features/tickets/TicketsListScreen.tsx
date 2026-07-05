@@ -474,6 +474,12 @@ export default function TicketsListScreen({
 
   const getDetailedReasonMsg = (ticket: any): string => {
     if (!ticket) return "Error desconocido.";
+    if (ticket.status === "connector_auth_required") {
+      return "El portal oficial de este comercio exige iniciar sesión o crear una cuenta. No faltan datos del ticket; la facturación no puede continuar sin autorización del usuario.";
+    }
+    if (ticket.status === "waiting_user_captcha") {
+      return "El portal está esperando el código de verificación mostrado en la captura.";
+    }
     if (ticket.status === "training_required") {
       return "Estamos entrenando a la IA para este comercio. Te notificaremos cuando esté listo.";
     }
@@ -1929,6 +1935,10 @@ export default function TicketsListScreen({
                               <span className="bg-orange-100 text-orange-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
                                 Requiere corrección
                               </span>
+                            ) : (t.status as string) === "connector_auth_required" ? (
+                              <span className="bg-amber-100 text-amber-800 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
+                                Requiere cuenta
+                              </span>
                             ) : t.status === "requires_manual_review" || t.status === "review" ? (
                               <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
                                 En revisión
@@ -1970,6 +1980,10 @@ export default function TicketsListScreen({
                            <span className="bg-orange-100 text-orange-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
                              Requiere corrección
                            </span>
+                         ) : (t.status as string) === "connector_auth_required" ? (
+                           <span className="bg-amber-100 text-amber-800 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
+                             Requiere cuenta
+                           </span>
                          ) : t.status === "requires_manual_review" || t.status === "review" ? (
                            <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
                              En revisión
@@ -2006,10 +2020,12 @@ export default function TicketsListScreen({
                     </div>
 
                     {/* Escalation/Failure Reason Card Block */}
-                    {(t.status === "review" || t.status === "requires_manual_review" || t.status === "requires_user_correction" || (t.status as string) === "training_required" || (t.status as string) === "connector_not_ready" || isFailed) && (
+                    {(t.status === "review" || t.status === "requires_manual_review" || t.status === "requires_user_correction" || (t.status as string) === "connector_auth_required" || (t.status as string) === "waiting_user_captcha" || (t.status as string) === "training_required" || (t.status as string) === "connector_not_ready" || isFailed) && (
                       <div className={`text-[11px] p-3.5 rounded-2xl leading-relaxed font-sans border ${
                         t.status === "requires_user_correction"
                           ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30 dark:border-orange-500/40"
+                          : (t.status as string) === "connector_auth_required" || (t.status as string) === "waiting_user_captcha"
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 dark:border-amber-500/40"
                           : t.status === "requires_manual_review" || t.status === "review"
                             ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 dark:border-amber-500/40"
                             : (t.status as string) === "training_required"
@@ -2021,6 +2037,10 @@ export default function TicketsListScreen({
                         <span className="font-bold block uppercase text-[9px] mb-1 tracking-wider">
                           {t.status === "requires_user_correction"
                             ? "Requiere Corrección:"
+                            : (t.status as string) === "connector_auth_required"
+                              ? "Inicio de sesión requerido:"
+                              : (t.status as string) === "waiting_user_captcha"
+                                ? "Código de verificación requerido:"
                             : t.status === "requires_manual_review" || t.status === "review"
                               ? "Revisión Requerida:"
                               : (t.status as string) === "training_required"

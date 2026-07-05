@@ -343,6 +343,18 @@ export async function executePortalMap(
       const submit = page.getByRole("button", { name: /^facturar$/i })
         .or(page.locator("button:has-text('FACTURAR'), ion-button:has-text('FACTURAR')")).first();
       await submit.click();
+      const confirmation = page.locator(
+        "ion-alert:visible, ion-modal:visible, [role='dialog']:visible, .modal.show, .swal2-popup:visible"
+      ).filter({ hasText: /facturando|confirmar|emitir factura/i }).last();
+      if (await confirmation.waitFor({ state: "visible", timeout: 10000 }).then(() => true).catch(() => false)) {
+        const confirmButton = confirmation.getByRole("button", { name: /^(s[ií]|aceptar|confirmar|continuar)$/i })
+          .or(confirmation.locator("button:has-text('Sí'), button:has-text('SI'), .alert-button:has-text('Sí'), .alert-button:has-text('SI')"))
+          .first();
+        if (await confirmButton.isVisible().catch(() => false)) {
+          await confirmButton.click();
+          await createRunnerLog(jobId, ticketId, "INFO", "Confirmación de emisión aceptada después del CAPTCHA.");
+        }
+      }
       await jobRef.set({
         status: "running",
         waitingAction: FieldValue.delete(),
@@ -357,7 +369,7 @@ export async function executePortalMap(
         updatedAt: new Date().toISOString()
       }, { merge: true });
       await deleteCaptchaScreenshot();
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(5000);
       return true;
     }
     await deleteCaptchaScreenshot();
