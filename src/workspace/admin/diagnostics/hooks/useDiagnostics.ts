@@ -70,7 +70,8 @@ export const useDiagnostics = (initialFilters: DiagnosticsFilters = {}) => {
       }
     } catch (err: any) {
       if (err.message === "ADMIN_DIAGNOSTICS_API_RETURNED_HTML") {
-        setError(`Error al cargar diagnósticos: El frontend recibió HTML. URL: ${lastRequestDebug.requestedUrl} | Status: ${lastRequestDebug.status} | Content-Type: ${lastRequestDebug.contentType}`);
+        const currentOrigin = typeof window !== "undefined" ? window.location.origin : "N/A";
+        setError(`Error al cargar diagnósticos: El frontend recibió HTML. URL: ${lastRequestDebug.requestedUrl} | Origin: ${currentOrigin} | Status: ${lastRequestDebug.status} | Content-Type: ${lastRequestDebug.contentType}`);
       } else if (err.message === "ADMIN_DIAGNOSTICS_BY_USER_CONTRACT_MISSING_USERS") {
         setError("El endpoint view=by_user devolvió contrato de listado plano. Se esperaba users[].");
       } else {

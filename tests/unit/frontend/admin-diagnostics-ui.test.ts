@@ -244,7 +244,7 @@ describe("Admin Diagnostics UI & API Tests", () => {
     it("error de HTML muestra errorState, no emptyState", () => {
       const view = getRenderView({
         loading: false,
-        error: "Error al cargar diagnósticos: El frontend recibió HTML. URL: /api/admin/diagnostics | Status: 200 | Content-Type: text/html",
+        error: "Error al cargar diagnósticos: El frontend recibió HTML. URL: /api/admin/diagnostics | Origin: http://localhost:3000 | Status: 200 | Content-Type: text/html",
         activeTab: "by_user",
         users: [],
         items: []
