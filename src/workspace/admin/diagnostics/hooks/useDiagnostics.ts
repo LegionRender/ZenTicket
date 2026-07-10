@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { diagnosticsApi, DiagnosticsFilters } from "../services/diagnosticsApi";
+import { diagnosticsApi, DiagnosticsFilters, lastRequestDebug } from "../services/diagnosticsApi";
 
 export const useDiagnostics = (initialFilters: DiagnosticsFilters = {}) => {
   const [filters, setFilters] = useState<DiagnosticsFilters>({
@@ -70,7 +70,7 @@ export const useDiagnostics = (initialFilters: DiagnosticsFilters = {}) => {
       }
     } catch (err: any) {
       if (err.message === "ADMIN_DIAGNOSTICS_API_RETURNED_HTML") {
-        setError("El frontend está llamando al servidor incorrecto. Esperaba JSON del backend pero recibió HTML del dev server.");
+        setError(`Error al cargar diagnósticos: El frontend recibió HTML. URL: ${lastRequestDebug.requestedUrl} | Status: ${lastRequestDebug.status} | Content-Type: ${lastRequestDebug.contentType}`);
       } else if (err.message === "ADMIN_DIAGNOSTICS_BY_USER_CONTRACT_MISSING_USERS") {
         setError("El endpoint view=by_user devolvió contrato de listado plano. Se esperaba users[].");
       } else {

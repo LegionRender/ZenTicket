@@ -244,7 +244,7 @@ describe("Admin Diagnostics UI & API Tests", () => {
     it("error de HTML muestra errorState, no emptyState", () => {
       const view = getRenderView({
         loading: false,
-        error: "El frontend está llamando al servidor incorrecto. Esperaba JSON del backend pero recibió HTML del dev server.",
+        error: "Error al cargar diagnósticos: El frontend recibió HTML. URL: /api/admin/diagnostics | Status: 200 | Content-Type: text/html",
         activeTab: "by_user",
         users: [],
         items: []
