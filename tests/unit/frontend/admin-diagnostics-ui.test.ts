@@ -50,6 +50,7 @@ describe("Admin Diagnostics UI & API Tests", () => {
     }
     
     import.meta.env.VITE_API_BASE_URL = "";
+    import.meta.env.VITE_API_URL = "";
     const url = buildUrl("/api/admin/diagnostics");
     expect(url).toBe("/api/admin/diagnostics");
     
@@ -94,6 +95,9 @@ describe("Admin Diagnostics UI & API Tests", () => {
 
   it("getApiBaseUrl mapea puertos de desarrollo local al puerto 3000 del backend", () => {
     const originalWindow = global.window;
+    const originalApiUrl = import.meta.env.VITE_API_URL;
+    import.meta.env.VITE_API_URL = "";
+    import.meta.env.VITE_API_BASE_URL = "";
     
     // Test case 1: port 5173 (Vite default)
     global.window = {
@@ -123,6 +127,7 @@ describe("Admin Diagnostics UI & API Tests", () => {
     expect(getApiBaseUrl()).toBe("");
 
     global.window = originalWindow;
+    import.meta.env.VITE_API_URL = originalApiUrl;
   });
 
   it("error state muestra mensaje legible si backend no existe", async () => {
