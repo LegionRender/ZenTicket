@@ -16,7 +16,12 @@ export const isBypassForbidden = (): boolean => {
 // Middleware de Autenticación de Firebase para Billing
 export const authenticateFirebaseToken = async (req: any, res: any, next: any) => {
   const authHeader = req.headers.authorization;
-  const hasRealCredentials = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+  const hasRealCredentials = 
+    !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS) ||
+    process.env.NODE_ENV === "production" ||
+    process.env.NODE_ENV === "prod" ||
+    !!process.env.K_SERVICE ||
+    !!process.env.FUNCTION_NAME;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     // Modo desarrollo local con bypass habilitado

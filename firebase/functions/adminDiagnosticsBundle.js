@@ -17927,11 +17927,12 @@ var isBypassForbidden = () => {
 };
 var authenticateFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
+  const hasRealCredentials = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS) || process.env.NODE_ENV === "production" || process.env.NODE_ENV === "prod" || !!process.env.K_SERVICE || !!process.env.FUNCTION_NAME;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     if (process.env.DEV_BILLING_AUTH_BYPASS === "true") {
       if (isBypassForbidden()) {
         console.error("CRITICAL SECURITY WARNING: Blocked DEV_BILLING_AUTH_BYPASS execution in a non-local or production environment.");
-        res.status(401).json({ error: "AUTH_REQUIRED: Falta el token de autorizaci\xF3n o es inv\xE1lido" });
+        res.status(401).json({ error: "Falta el token de autorizaci\xF3n o es inv\xE1lido" });
         return;
       }
       const mockUid = req.headers["x-mock-user-id"];
@@ -17948,25 +17949,18 @@ var authenticateFirebaseToken = async (req, res, next) => {
         return;
       }
     }
-    res.status(401).json({ error: "AUTH_REQUIRED: Falta el token de autorizaci\xF3n o es inv\xE1lido" });
+    res.status(401).json({ error: "Falta el token de autorizaci\xF3n o es inv\xE1lido" });
     return;
   }
   const token = authHeader.split("Bearer ")[1];
   try {
-    const decodedToken = await (0, import_auth.getAuth)().verifyIdToken(token);
-    req.user = {
-      uid: decodedToken.uid,
-      email: decodedToken.email || "",
-      email_verified: decodedToken.email_verified === true,
-      claims: decodedToken,
-      role: decodedToken.role || (decodedToken.email && (decodedToken.email.toLowerCase().includes("ricardo") || decodedToken.email.toLowerCase().includes("legionrender")) ? "admin" : "user")
-    };
-    next();
-  } catch (error51) {
-    console.error("Error al verificar token de Firebase:", error51.message || error51);
-    const isFirebaseSetupError = error51.message && (error51.message.includes("credential") || error51.message.includes("projectId") || error51.message.includes("initialize") || error51.code === "app/no-app" || error51.code === "auth/invalid-credential");
-    if (isFirebaseSetupError) {
-      if (process.env.DEV_BILLING_AUTH_BYPASS === "true" && !isBypassForbidden()) {
+    if (!hasRealCredentials) {
+      if (process.env.DEV_BILLING_AUTH_BYPASS === "true") {
+        if (isBypassForbidden()) {
+          console.error("CRITICAL SECURITY WARNING: Blocked DEV_BILLING_AUTH_BYPASS execution in a non-local or production environment.");
+          res.status(401).json({ error: "Desarrollo local: Habilite DEV_BILLING_AUTH_BYPASS para pruebas" });
+          return;
+        }
         const mockUid = req.headers["x-mock-user-id"] || "mock-local-uid";
         const mockEmail = req.headers["x-mock-user-email"] || "mock@example.com";
         req.user = {
@@ -17979,34 +17973,34 @@ var authenticateFirebaseToken = async (req, res, next) => {
         next();
         return;
       }
-      const isProd = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "prod" || !!(process.env.VERCEL || process.env.RENDER || process.env.GAE_INSTANCE || process.env.K_SERVICE);
-      if (isProd) {
-        res.status(500).json({ error: "CONFIGURATION_ERROR: Error de configuraci\xF3n en el servidor de autenticaci\xF3n." });
-      } else {
-        res.status(401).json({ error: "Desarrollo local: Habilite DEV_BILLING_AUTH_BYPASS para pruebas" });
-      }
+      res.status(401).json({ error: "Desarrollo local: Habilite DEV_BILLING_AUTH_BYPASS para pruebas" });
       return;
     }
-    let errorMsg = "TOKEN_INVALID: El token de Firebase es inv\xE1lido o expirado.";
-    if (error51.code === "auth/id-token-expired") {
-      errorMsg = "TOKEN_EXPIRED: El token de Firebase es inv\xE1lido o expirado (ha expirado).";
-    } else if (error51.code === "auth/id-token-revoked") {
-      errorMsg = "TOKEN_REVOKED: El token de Firebase es inv\xE1lido o expirado (ha sido revocado).";
-    }
-    res.status(401).json({ error: errorMsg });
+    const decodedToken = await (0, import_auth.getAuth)().verifyIdToken(token);
+    req.user = {
+      uid: decodedToken.uid,
+      email: decodedToken.email || "",
+      email_verified: decodedToken.email_verified === true,
+      claims: decodedToken,
+      role: decodedToken.role || (decodedToken.email && (decodedToken.email.toLowerCase().includes("ricardo") || decodedToken.email.toLowerCase().includes("legionrender")) ? "admin" : "user")
+    };
+    next();
+  } catch (error51) {
+    console.error("Error al verificar token de Firebase:", error51.message);
+    res.status(401).json({ error: "Token de Firebase inv\xE1lido o expirado" });
   }
 };
 
 // server/middleware/admin.middleware.ts
 var requireAdmin = async (req, res, next) => {
   if (!req.user) {
-    res.status(401).json({ error: "AUTH_REQUIRED: Usuario no autenticado." });
+    res.status(401).json({ error: "Usuario no autenticado." });
     return;
   }
   const email3 = (req.user.email || "").toLowerCase();
   const isAdmin = email3 === "ricardo@zenticket.mx" || email3 === "legionrender@gmail.com" || req.user.role === "admin" || req.user.claims && req.user.claims.admin === true;
   if (!isAdmin) {
-    res.status(403).json({ error: "ADMIN_REQUIRED: Acceso denegado. Se requiere rol de administrador." });
+    res.status(403).json({ error: "Acceso denegado. Se requiere rol de administrador." });
     return;
   }
   next();
