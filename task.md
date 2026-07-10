@@ -1,29 +1,43 @@
-# Checklist de Tareas Completadas
+# Tareas — Fase UI-SYSTEM-01: Auditoría CSS, Unificación Visual Global y Soporte de Temas
 
-- [x] Mostrar la parte de métodos de pago en formato checkout inmediatamente desde el inicio (inicializando `checkoutPlanType` a `"personal"`).
-- [x] Subir y respaldar todas las modificaciones en el repositorio de GitHub.
-- [x] Resolver restricción de tokenización de Stripe mediante redirección directa a Stripe Checkout / Setup Session en producción.
-- [x] Corregir excepción runtime de Firebase Admin DocumentSnapshot `.exists` en el resolvedor de Stripe.
-- [x] Corregir redirección del pop-up en getSafeBaseUrl para usar el referer/origin del frontend.
-- [x] Remover Google Pay de las opciones en el frontend.
-- [x] Implementar deduplicación de tarjetas por marca y últimos 4 dígitos.
-- [x] Agregar botón de eliminación a la tarjeta predeterminada con desasociación en Stripe.
-- [x] Agregar botón 'Agregar otra tarjeta' visible afuera del acordeón cuando hay tarjetas vinculadas.
-- [x] Desactivar Stripe Link en los Checkout y Setup Sessions para ir directo al formulario de tarjeta (Omitido por incompatibilidad de versión de API de Stripe, manejado en dashboard / botón 'Pagar sin Link').
-- [x] Migrar el endpoint de checkout en producción para que cobre dinámicamente con price_data sin requerir IDs preconfigurados en Stripe.
-- [x] Corregir lógica de procesamiento de pagos y webhook en index.js.
-- [x] Agregar botón '¿Ya pagaste? Sincronizar estado' en el frontend y endpoint de sincronización manual en el backend.
-- [x] Implementar la lógica de límites duales (mes de duración o facturas consumidas), el estado 'Pagado' en badge y el aviso en la sección de suscripción.
-- [x] No separar tarjetas de crédito de las billeteras digitales: se unificó la visualización de tarjetas de crédito y billeteras en una cuadrícula única en el acordeón de métodos de pago, utilizando el formato visual homogéneo (logo/tarjeta a la izquierda y detalles a la derecha).
-- [x] Eliminar la cabecera/sección "Tus tarjetas vinculadas" / "Selecciona una tarjeta para la compra".
-- [x] Eliminar por completo la pantalla de checkout duplicada de la ventana modal "Gestionar Plan", haciendo que muestre únicamente la lista directa de planes.
-- [x] Unificar el diseño y comportamiento de todos los botones de menú de navegación (Landing page: móvil y escritorio; Dashboard: menú de navegación de escritorio), aplicando el estilo exacto del botón "Gestionar Plan" (`zt-btn-primary`, sin traslación hover lift `hover:transform-none`, sombra azul `shadow-md shadow-[#0B53F4]/15`, y reducción de escala al presionar `active:scale-[0.98]`).
-- [x] Guardar en localStorage el plan seleccionado al registrarse desde el Landing ("Crear cuenta gratis" y tabla de precios) para reflejarlo en "Mi Cuenta".
-- [x] Quitar métodos de pago no deseados: Spin by OXXO, Apple Pay y PayPal de la pasarela y del menú de agregar tarjetas/billeteras.
-- [x] Eliminar métodos duplicados labeled "Cuenta Vinculada", impidiendo su creación y filtrándolos de los datos de cuenta.
-- [x] Alinear la cuadrícula de los métodos de pago en una sola columna/apilado vertical (en acordeón de métodos de pago y agregar tarjeta).
-- [x] Rediseñar botones de métodos de pago para agrandar los logotipos en cajas cuadradas (`w-14 h-14`) y estilizar los títulos y subtítulos con tipografía clara.
-- [x] Corregir la estructura sintáctica y de tags del acordeón de métodos de pago en `ProfileForm.tsx`.
-- [x] Aplicar esquinas redondeadas estándar (`rounded-2xl`) a todas las opciones de pago (resolviendo el fallo de `rounded-2.5xl`).
-- [x] Cambiar el color de fondo de las opciones de pago y del Pago Predeterminado para que usen `bg-slate-50` (y `hover:bg-slate-100/70` en hover), igual que el botón que despliega el acordeón.
-- [x] Validar que el proyecto compile sin errores de TypeScript (`npx tsc --noEmit` y `npm run build`).
+- [x] Crear el script de auditoría de estilos `scripts/ui/audit_ui_styles.cjs`
+- [x] Ejecutar la auditoría y generar reportes en `reports/ui-style-audit.json` y `reports/ui-style-audit.md`
+- [x] Crear e integrar la hoja de tokens de diseño adaptativos `src/styles/zen-design-tokens.css` y vincular en `index.css`
+- [x] Crear la hoja de clases de componentes unificados `src/styles/zen-components.css` y vincular en `index.css`
+- [x] Implementar la persistencia de temas (localStorage y Firestore) en `ThemeProvider.tsx`, `themeStorage.ts` y `themeTokens.ts`
+- [x] Integrar `ThemeProvider` en `App.jsx` y en la configuración de apariencia de `ProfileForm.tsx`
+- [x] Refactorizar drawer de detalles de diagnósticos (`DiagnosticDetailDrawer.tsx`) y caja de resumen (`DiagnosticSummaryBox.tsx`)
+- [x] Refactorizar panel de evidencias (`DiagnosticEvidencePanel.tsx`) y acciones (`DiagnosticActions.tsx`)
+- [x] Refactorizar listado de diagnósticos (`DiagnosticsPage.tsx`), filtros (`DiagnosticFilters.tsx`), tablas (`DiagnosticsTable.tsx`) y tarjetas (`DiagnosticCard.tsx`)
+- [x] Refactorizar vista master-detail de usuarios (`UsersMasterDetail.tsx`) y cabecera de mis tickets (`TicketsListScreen.tsx`)
+- [x] Escribir y ejecutar pruebas unitarias para `themeStorage` y el manejo de temas en `tests/unit/frontend/theme-provider.test.ts`
+- [x] Ejecutar linter (`npm run lint`), compilación de tipos y suite de pruebas unitarias global (227/227 exitosas)
+- [x] Generar guías y reportes visuales en `docs/UI_AUDIT_REPORT.md` y `docs/ZENTICKET_STYLE_GUIDE.md`
+- [x] Documentar la entrega en `walkthrough.md`
+- [x] Crear helper `billingDocumentRelation.service.ts`
+- [x] Modificar `diagnostics.repository.ts` para retornar `_path` en `getAllInvoices`
+- [x] Modificar `diagnosticVisibility.service.ts` para aplicar las nuevas reglas de exclusión
+- [x] Modificar `adminDiagnostics.service.ts` para utilizar visibilidad canónica
+- [x] Modificar `billingStateHelpers.ts` para filtrar/agrupar en `buildUserTicketsView`
+- [x] Modificar `UsersMasterDetail.tsx` para separar y mostrar la sección Archivados / Legacy
+- [x] Modificar `DiagnosticDetailDrawer.tsx` y `DiagnosticActions.tsx` para vista simplificada de facturas raíz legacy
+- [x] Crear script de auditoría `scripts/diagnostics/audit_root_invoices_vs_user_view.cjs`
+- [x] Crear script de reconciliación `scripts/diagnostics/reconcile_root_invoices.cjs`
+- [x] Agregar pruebas unitarias obligatorias
+- [x] Ejecutar auditoría y dry-run de reconciliación para validación manual
+- [x] Ejecutar lint, build y test suites
+
+# Tareas — Fase 15D: Conexión segura de Gemini al Centro Admin
+- [x] Configurar variables de entorno y soporte en Express
+- [x] Crear Zod schema `connectorPatchProposal.schema.ts`
+- [x] Crear System Prompt `diagnostic-ai-prompt.ts`
+- [x] Crear servicio de presupuesto y caché `aiBudget.service.ts`
+- [x] Crear servicio `connectorLearning.service.ts`
+- [x] Crear servicio `diagnosticAi.service.ts`
+- [x] **Fase 3**: Identidad canónica y visualKey en billingStateHelpers.ts
+- [/] **Fase 4**: Selección determinista y coherente del job en adminDiagnostics.service.ts
+- [x] Actualizar controlador, router y Zod schemas en `server/`
+- [x] Integrar botón "Generar propuesta" y visualización en `DiagnosticDetailDrawer.tsx`
+- [x] Implementar listado y control en `ConnectorLearningPanel.tsx`
+- [x] Agregar suite de pruebas unitarias para validaciones, sanitizador, límites y propuestas
+- [x] Ejecutar auditoría y pruebas globales (lint, build, test)
