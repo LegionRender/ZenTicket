@@ -19,16 +19,14 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == "legionrender@gmail.com" ||
-        request.auth.token.email == "ricardo@zenticket.mx" ||
-        request.auth.token.email.matches(".*legionrender.*") ||
-        request.auth.token.email.matches(".*ricardo.*")
+        request.auth.token.email == "ricardo@zenticket.mx"
       );
     }
 
     // Fiscal Profiles rules
     // Path: fiscalProfiles/{userId}
     match /fiscalProfiles/{userId} {
-      allow read: if isSignedIn();
+      allow read: if isOwner(userId) || isAdmin();
       allow write: if isOwner(userId) || isAdmin();
     }
 
@@ -38,10 +36,17 @@ service cloud.firestore {
       allow read, write: if isOwner(userId) || isAdmin();
     }
 
+    // Subscriptions rules
+    // Path: subscriptions/{userId}
+    match /subscriptions/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isAdmin();
+    }
+
     // Tickets rules
     // Path: tickets/{ticketId}
     match /tickets/{ticketId} {
-      allow read: if isSignedIn();
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if (isSignedIn() && (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid)) || isAdmin();
       allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
@@ -51,20 +56,25 @@ service cloud.firestore {
     // Path: connectors/{connectorId}
     match /connectors/{connectorId} {
       allow read: if isSignedIn();
-      allow create: if (isSignedIn() && request.resource.data.userId == request.auth.uid) || isAdmin();
-      allow update: if (isSignedIn()
-        && resource.data.userId == request.auth.uid
-        && request.resource.data.userId == request.auth.uid) || isAdmin();
-      allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+      allow write: if isAdmin();
+    }
+    match /connectors/{connectorId}/versions/{versionId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
-    // Invoices rules
-    // Path: invoices/{invoiceId}
-    match /invoices/{invoiceId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if (isSignedIn() && (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid)) || isAdmin();
-      allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+    match /portal_learning_memory/{patternId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Invoices rules nested under users
+    match /users/{userId}/invoices/{invoiceId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
+    // Collection Group rules to allow admin audit queries
+    match /{path=**}/invoices/{invoiceId} {
+      allow read: if isAdmin();
     }
 
     // Automation Trainings rules
@@ -103,7 +113,8 @@ service cloud.firestore {
     // Invoice Jobs rules
     match /invoice_jobs/{jobId} {
       allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create, update: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if (isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid) || isAdmin();
       allow delete: if isAdmin();
     }
 

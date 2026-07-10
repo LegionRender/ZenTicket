@@ -1,4 +1,4 @@
-import { getApiUrl } from "./api-client";
+import { getApiUrl, fetchWithAuth } from "./api-client";
 
 export interface AnalyzeTicketParams {
   imageBase64: string;
@@ -85,13 +85,13 @@ export const analyzeTicket = async ({
   forceTargetedRetry,
   connectorId
 }: AnalyzeTicketParams): Promise<Response> => {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {};
   if (personalGeminiKey) {
     headers["x-gemini-api-key"] = personalGeminiKey;
   }
 
   try {
-    const response = await fetch(getApiUrl("/api/tickets/analyze"), {
+    const response = await fetchWithAuth("/api/tickets/analyze", {
       method: "POST",
       headers,
       body: JSON.stringify({

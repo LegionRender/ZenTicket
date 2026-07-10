@@ -10,19 +10,28 @@ export function validateJobContract(connector: any, ticketDataSnapshot: any): st
   const portalFields = ticketDataSnapshot?.portalFields || {};
   const missing: string[] = [];
   for (const field of fields) {
-    const key = String(field.canonicalKey || field.key || "").replace(/^portalFields\./, "");
-    if (!key) throw { message: "El extractionContract contiene una clave vacía.", code: "CONNECTOR_SCHEMA_INVALID" };
-    const value = portalFields[key];
+    const canonicalKey = String(field.canonicalKey || "").replace(/^portalFields\./, "");
+    const localKey = String(field.key || "").replace(/^portalFields\./, "");
+    if (!localKey && !canonicalKey) throw { message: "El extractionContract contiene una clave vacía.", code: "CONNECTOR_SCHEMA_INVALID" };
+    
+    // Check both canonicalKey and localKey
+    let value = portalFields[canonicalKey];
+    let foundKey = canonicalKey;
+    if (value === undefined && localKey) {
+      value = portalFields[localKey];
+      foundKey = localKey;
+    }
+
     const empty = value === undefined || value === null || String(value).trim() === "";
-    if (field.required !== false && empty) missing.push(`portalFields.${key}`);
+    if (field.required !== false && empty) missing.push(`portalFields.${canonicalKey || localKey}`);
     if (!empty && (UUID_PATTERN.test(String(value).trim()) || INTERNAL_ID_PATTERN.test(String(value).trim()))) {
-      throw { message: `Valor prohibido en portalFields.${key}.`, code: "INVALID_PORTAL_FIELD_VALUE" };
+      throw { message: `Valor prohibido en portalFields.${foundKey}.`, code: "INVALID_PORTAL_FIELD_VALUE" };
     }
     if (!empty && field.validationPattern) {
       try {
-        if (!new RegExp(field.validationPattern).test(String(value).trim())) missing.push(`portalFields.${key}`);
+        if (!new RegExp(field.validationPattern).test(String(value).trim())) missing.push(`portalFields.${foundKey}`);
       } catch {
-        throw { message: `validationPattern inválido para portalFields.${key}.`, code: "CONNECTOR_SCHEMA_INVALID" };
+        throw { message: `validationPattern inválido para portalFields.${foundKey}.`, code: "CONNECTOR_SCHEMA_INVALID" };
       }
     }
   }

@@ -19,8 +19,15 @@ export async function lockJob(jobId: string, workerId: string): Promise<any | nu
       const data = docSnap.data();
       if (!data) return null;
 
-      // Only lock if status is pending, validating_sat, or failed (retry) and not locked
-      if (data.status !== "pending" && data.status !== "failed" && data.status !== "validating_sat") {
+      // Only lock if status is pending, pending_local, validating_sat, or failed (retry) and not locked
+      if (
+        data.status !== "pending" &&
+        data.status !== "pending_local" &&
+        data.status !== "failed" &&
+        data.status !== "validating_sat" &&
+        data.status !== "invoice_recovery_pending" &&
+        data.status !== "invoice_recovery_retrying"
+      ) {
         return null;
       }
 
@@ -36,7 +43,7 @@ export async function lockJob(jobId: string, workerId: string): Promise<any | nu
       };
 
       transaction.update(jobRef, updateData);
-      return { id: docSnap.id, ...data, ...updateData };
+      return { id: docSnap.id, ...data, ...updateData, originalStatus: data.status };
     }) as any;
 
     if (lockedJob) {

@@ -32,6 +32,7 @@ RUN npm ci --only=production
 
 # Copy compiled files from the builder stage
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/runner/dist ./runner/dist
 
 # Expose the standard container entry port
 EXPOSE 3000

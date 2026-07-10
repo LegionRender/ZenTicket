@@ -13,7 +13,8 @@ import { auth, db } from "@/services/firebase/firebase";
 import { signOut, sendPasswordResetEmail, updatePassword, EmailAuthProvider, linkWithCredential } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { useToast } from "@/shared/feedback/Toast";
-import { getApiUrl } from "@/services/api/api-client";
+import { getApiUrl, fetchWithAuth } from "@/services/api/api-client";
+import { useTheme } from "@/app/providers/ThemeProvider";
 
 // Bank and payment method logos
 import santanderLogo from "@/assets/logos pagos/Banco_Santander_Logotipo.png";
@@ -106,18 +107,6 @@ const loadScript = (src: string): Promise<void> => {
 
 const digitalWallets: any[] = [];
 
-const fetchWithAuth = async (path: string, options: RequestInit = {}) => {
-  const token = auth.currentUser ? await auth.currentUser.getIdToken() : "";
-  const headers = {
-    ...options.headers,
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  };
-  return fetch(getApiUrl(path), {
-    ...options,
-    headers
-  });
-};
 
 export default function ProfileForm({ 
   initialProfile, 
@@ -163,7 +152,7 @@ export default function ProfileForm({
       return { bankName: "Banorte", bgColor: "from-red-900 via-zinc-850 to-neutral-950", logoColor: "text-red-300", label: "Banorte" };
     }
     if (/^4214|^4000|^5432|^5176|^5322/.test(clean)) {
-      return { bankName: "HSBC México", bgColor: "from-slate-850 via-zinc-700 to-zinc-900", logoColor: "text-rose-450", label: "HSBC" };
+      return { bankName: "HSBC México", bgColor: "from-slate-850 via-zinc-700 to-zinc-900", logoColor: "text-rose-500", label: "HSBC" };
     }
     if (/^5254/.test(clean)) {
       return { bankName: "Nu México", bgColor: "from-purple-900 via-fuchsia-800 to-purple-950", logoColor: "text-fuchsia-200", label: "Nu" };
@@ -400,6 +389,7 @@ export default function ProfileForm({
                    initialProfile.razonSocial === "CONSTRUCTORA LEGION DEL NORTE SA DE CV";
     return !isMock;
   });
+  const [isEditingUnlocked, setIsEditingUnlocked] = useState(false);
   const [personalGeminiKey, setPersonalGeminiKey] = useState(initialProfile?.personalGeminiKey || "");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -1631,15 +1621,7 @@ export default function ProfileForm({
             return;
           }
 
-          if (selectedCardForPlan === "paypal_wallet") {
-            await handleDigitalWalletPayment("PayPal");
-          } else if (selectedCardForPlan === "mercadopago_wallet") {
-            await handleDigitalWalletPayment("Mercado Pago");
-          } else if (selectedCardForPlan === "googlepay_wallet") {
-            await handleDigitalWalletPayment("Google Pay");
-          } else {
-            await handleDigitalWalletPayment("Stripe");
-          }
+          await handleDigitalWalletPayment("Stripe");
         }}
         className="px-6 py-2 bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-40 text-white text-xs font-black rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-sm shadow-[#0B53F4]/10 active:scale-95 shrink-0"
       >
@@ -1654,13 +1636,7 @@ export default function ProfileForm({
               ? "Activo" 
               : (checkoutPlanType === "gratuito" || isAdminUser)
                 ? "Activar Plan (Admin - Gratis)" 
-                : selectedCardForPlan === "googlepay_wallet"
-                  ? "Pagar con Google Pay"
-                  : selectedCardForPlan === "paypal_wallet"
-                    ? "Pagar con PayPal"
-                    : selectedCardForPlan === "mercadopago_wallet"
-                      ? "Pagar con Mercado Pago"
-                      : "Pagar"}
+                : "Pagar con Stripe"}
           </span>
         )}
       </button>
@@ -2118,9 +2094,7 @@ export default function ProfileForm({
   };
 
   // Apariencia states
-  const [themeChoice, setThemeChoice] = useState<"light" | "dark" | "system">(
-    () => (localStorage.getItem("zenticket_theme") as "light" | "dark" | "system") || "dark"
-  );
+  const { theme: themeChoice, setTheme: setThemeChoice } = useTheme();
   const [fontSizeChoice, setFontSizeChoice] = useState<"small" | "medium" | "large">(
     () => (localStorage.getItem("zenticket_font_size") as "small" | "medium" | "large") || "medium"
   );
@@ -2129,24 +2103,12 @@ export default function ProfileForm({
   );
 
   React.useEffect(() => {
-    // 1. Theme
-    let activeTheme = themeChoice;
-    if (themeChoice === "system") {
-      activeTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    }
-    document.documentElement.setAttribute("data-theme", activeTheme);
-    if (activeTheme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-
-    // 2. Font Size
+    // 1. Font Size
     document.documentElement.setAttribute("data-font-size", fontSizeChoice);
 
-    // 3. Border Radius
+    // 2. Border Radius
     document.documentElement.setAttribute("data-radius", borderRadiusChoice);
-  }, [themeChoice, fontSizeChoice, borderRadiusChoice]);
+  }, [fontSizeChoice, borderRadiusChoice]);
 
   React.useEffect(() => {
     if (initialProfile) {
@@ -2471,11 +2433,11 @@ export default function ProfileForm({
                 accept="application/pdf,image/*"
                 onChange={handleConstanciaUpload}
                 className="hidden"
-                disabled={hasSavedFiscalData}
+                disabled={hasSavedFiscalData && !isEditingUnlocked}
               />
               <button
                 type="button"
-                disabled={isParsingConstancia || hasSavedFiscalData}
+                disabled={isParsingConstancia || (hasSavedFiscalData && !isEditingUnlocked)}
                 onClick={() => constanciaInputRef.current?.click()}
                 className="w-full sm:w-auto px-5 py-3.5 bg-[#0B53F4] hover:bg-[#0747D1] disabled:bg-[#0B53F4]/40 disabled:opacity-50 text-white text-xs font-bold rounded-2xl uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:cursor-not-allowed"
               >
@@ -2505,7 +2467,7 @@ export default function ProfileForm({
               type="text"
               maxLength={13}
               value={rfc}
-              disabled={hasSavedFiscalData}
+              disabled={hasSavedFiscalData && !isEditingUnlocked}
               onChange={(e) => setRfc(e.target.value.toUpperCase())}
               placeholder="RFC de 12 o 13 dígitos"
               className="w-full text-sm font-mono bg-[#F8F9FE] disabled:bg-slate-50 disabled:text-slate-450 border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400 disabled:cursor-not-allowed"
@@ -2520,7 +2482,7 @@ export default function ProfileForm({
             <input
               type="text"
               value={razonSocial}
-              disabled={hasSavedFiscalData}
+              disabled={hasSavedFiscalData && !isEditingUnlocked}
               onChange={(e) => setRazonSocial(e.target.value)}
               placeholder="Tal como figura en constancia SAT"
               className="w-full text-sm font-medium bg-[#F8F9FE] disabled:bg-slate-50 disabled:text-slate-450 border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400 disabled:cursor-not-allowed"
@@ -2535,7 +2497,7 @@ export default function ProfileForm({
             <div className="relative">
               <select
                 value={regimenFiscal}
-                disabled={hasSavedFiscalData}
+                disabled={hasSavedFiscalData && !isEditingUnlocked}
                 onChange={(e) => setRegimenFiscal(e.target.value)}
                 className="w-full text-sm font-medium bg-[#F8F9FE] disabled:bg-slate-50 disabled:text-slate-450 border border-slate-200/70 focus:border-[#0B53F4] rounded-2xl px-4 py-3.5 text-slate-800 focus:outline-none transition-all cursor-pointer appearance-none disabled:cursor-not-allowed"
               >
@@ -2559,7 +2521,7 @@ export default function ProfileForm({
               type="text"
               maxLength={5}
               value={codigoPostal}
-              disabled={hasSavedFiscalData}
+              disabled={hasSavedFiscalData && !isEditingUnlocked}
               onChange={(e) => setCodigoPostal(e.target.value.replace(/\D/g, ""))}
               placeholder="02000"
               className="w-full text-sm font-mono bg-[#F8F9FE] disabled:bg-slate-50 disabled:text-slate-450 border border-slate-200/70 focus:border-[#0B53F4] focus:ring-1 focus:ring-[#0B53F4]/20 rounded-2xl px-4 py-3 text-slate-800 focus:outline-none transition-all placeholder-slate-400 disabled:cursor-not-allowed"
@@ -2574,7 +2536,7 @@ export default function ProfileForm({
             <div className="relative">
               <select
                 value={usoCFDI}
-                disabled={hasSavedFiscalData}
+                disabled={hasSavedFiscalData && !isEditingUnlocked}
                 onChange={(e) => setUsoCFDI(e.target.value)}
                 className="w-full text-sm font-medium bg-[#F8F9FE] disabled:bg-slate-50 disabled:text-slate-450 border border-slate-200/70 focus:border-[#0B53F4] rounded-2xl px-4 py-3.5 text-slate-800 focus:outline-none transition-all cursor-pointer appearance-none disabled:cursor-not-allowed"
               >
@@ -2604,16 +2566,30 @@ export default function ProfileForm({
         </div>
 
         {/* Botón Guardar Datos Fiscales */}
-        <div className="mb-8">
-          <button
-            type="button"
-            disabled={hasSavedFiscalData}
-            onClick={handleSaveFiscalOnly}
-            className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:bg-slate-300 disabled:text-slate-500 disabled:opacity-90 disabled:shadow-none text-white text-xs font-black py-4 rounded-2xl transition shadow-lg shadow-[#0B53F4]/15 cursor-pointer text-center flex items-center justify-center gap-2 active:scale-98 disabled:cursor-not-allowed"
-          >
-            <CheckCircle className="w-4 h-4 text-white disabled:text-slate-400" />
-            <span>{hasSavedFiscalData ? "DATOS FISCALES GUARDADOS Y CERTIFICADOS - NAVEGACION LIBRE Y ACCESIBLE" : "GUARDAR DATOS FISCALES"}</span>
-          </button>
+        <div className="mb-8 space-y-3">
+          {hasSavedFiscalData && !isEditingUnlocked ? (
+            <button
+              type="button"
+              onClick={() => setIsEditingUnlocked(true)}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-white text-xs font-black py-4 rounded-2xl transition shadow-lg cursor-pointer text-center flex items-center justify-center gap-2 active:scale-98"
+            >
+              <Pencil className="w-4 h-4 text-white" />
+              <span>MODIFICAR DATOS FISCALES</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={hasSavedFiscalData && !isEditingUnlocked}
+              onClick={async () => {
+                await handleSaveFiscalOnly();
+                setIsEditingUnlocked(false);
+              }}
+              className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:bg-slate-300 disabled:text-slate-500 disabled:opacity-90 disabled:shadow-none text-white text-xs font-black py-4 rounded-2xl transition shadow-lg shadow-[#0B53F4]/15 cursor-pointer text-center flex items-center justify-center gap-2 active:scale-98 disabled:cursor-not-allowed"
+            >
+              <CheckCircle className="w-4 h-4 text-white disabled:text-slate-400" />
+              <span>{hasSavedFiscalData ? "DATOS FISCALES GUARDADOS Y CERTIFICADOS - NAVEGACION LIBRE Y ACCESIBLE" : "GUARDAR DATOS FISCALES"}</span>
+            </button>
+          )}
         </div>
 
 
@@ -3440,7 +3416,7 @@ export default function ProfileForm({
                 <button
                   type="button"
                   onClick={() => {
-                    localStorage.setItem("zenticket_theme", themeChoice);
+                    setThemeChoice(themeChoice);
                     localStorage.setItem("zenticket_font_size", fontSizeChoice);
                     localStorage.setItem("zenticket_border_radius", borderRadiusChoice);
                     setActiveModal(null);

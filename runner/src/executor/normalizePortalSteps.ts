@@ -64,7 +64,18 @@ function normalizeTemplate(
   fiscalFields: Set<string>
 ): string {
   const text = String(value ?? "").trim();
-  if (!text || text.includes("{{")) return text;
+  if (!text) return text;
+  if (text.includes("{{")) {
+    return text.replace(/\{\{([^}]+)\}\}/g, (match, rawPath: string) => {
+      const path = rawPath.trim();
+      if (path.includes(".")) return `{{${path}}}`;
+      if (portalFields.has(path)) return `{{portalFields.${path}}}`;
+      if (fiscalFields.has(path) || FISCAL_KEY_ALIASES[path]) {
+        return `{{fiscalProfile.${FISCAL_KEY_ALIASES[path] || path}}}`;
+      }
+      return match;
+    });
+  }
   if (text === "portalUrl" || text === "billingUrl") return "{{connector.portalUrl}}";
   if (text === "entryUrl") return "{{portalMap.entryUrl}}";
   if (text.includes(".")) return text;
@@ -111,12 +122,23 @@ export function normalizePortalSteps(rawSteps: unknown, connector: any): any[] {
       if (!step.url) {
         throw { message: `Paso ${index + 1} no contiene URL.`, code: "CONNECTOR_SCHEMA_INVALID" };
       }
+      if (!step.url.includes("{{")) {
+        let parsedUrl: URL;
+        try {
+          parsedUrl = new URL(step.url);
+        } catch {
+          throw { message: `Paso ${index + 1} contiene una URL inválida.`, code: "CONNECTOR_SCHEMA_INVALID" };
+        }
+        if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+          throw { message: `Paso ${index + 1} usa un protocolo de navegación no permitido.`, code: "CONNECTOR_SCHEMA_INVALID" };
+        }
+      }
     } else if (VALUE_TYPES.has(normalizedType)) {
       step.value = normalizeTemplate(raw.value, portalFields, fiscalFields);
       if (!step.value) {
         throw { message: `Paso ${index + 1} no contiene un valor.`, code: "CONNECTOR_SCHEMA_INVALID" };
       }
-      const rawKey = String(raw.value || "").trim();
+      const rawKey = String(raw.value || "").trim().replace(/^\{\{(?:portalFields\.)?([^}]+)\}\}$/, "$1");
       const contractField = portalFields.get(rawKey);
       if (!step.transform && contractField?.type === "date") {
         step.transform = "portalDate";

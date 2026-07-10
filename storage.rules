@@ -1,0 +1,35 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper to check if user is signed in
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper to check if user owns the path
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Helper to check if user has admin privileges
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "legionrender@gmail.com" ||
+        request.auth.token.email == "ricardo@zenticket.mx" ||
+        request.auth.token.admin == true ||
+        request.auth.token.role == "admin"
+      );
+    }
+
+    // Match files in /users/{userId} path
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
+    // Match any other paths, deny by default
+    match /{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

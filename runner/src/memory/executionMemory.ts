@@ -14,7 +14,7 @@ export async function saveExecutionMemory(
   if (domain === "unknown") return;
   const patterns = [
     { type: "download_method", pattern: { method: result?.documentSource || "download" } },
-    { type: "step_count", pattern: { count: Array.isArray(portalMap?.normalizedSteps) ? portalMap.normalizedSteps.length : undefined } },
+    { type: "step_count", pattern: { count: Array.isArray(portalMap?.normalizedSteps) ? portalMap.normalizedSteps.length : (Array.isArray(portalMap?.steps) ? portalMap.steps.length : null) } },
     { type: "framework_detected", pattern: { framework: portalMap?.portalMetadata?.framework || "unknown" } }
   ];
   for (const item of patterns) {

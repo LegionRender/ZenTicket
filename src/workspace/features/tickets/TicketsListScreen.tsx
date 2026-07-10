@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Ticket, Invoice } from "@/shared/types/types";
-import { getConfigStatus, sendEmail } from "@/services/api";
+import { getConfigStatus, sendEmail, fetchWithAuth } from "@/services/api";
 import logoLight from "@/assets/logos/logo-light.png";
 import { 
   ChevronLeft, ChevronRight, Share2, FileText, Check, Download, ArrowLeft, 
@@ -9,6 +9,12 @@ import {
   ZoomOut, RotateCcw, X, ExternalLink, RefreshCw
 } from "lucide-react";
 import { useToast } from "@/shared/feedback/Toast";
+import { db } from "@/services/firebase/firebase";
+import { doc, updateDoc, onSnapshot } from "firebase/firestore";
+import { CaptchaFlowPanel } from "../scanner/CaptchaFlowPanel";
+import { getTicketTotal, getDetailedReasonMsg, getTicketVisualState, getInvoiceVisualState } from "@/workspace/utils/ticketHelpers";
+import { getBillingCanonicalState, getBillingVisualKey, dedupeBillingItems, resolveRelatedBillingDocs, normalizeSatValidationState, getBillingAlertStyle } from "@/workspace/utils/billingStateHelpers";
+import { normalizeBillingAttemptFields } from "@/shared/utils/normalizeFields";
 
 interface TicketsListScreenProps {
   tickets: Ticket[];
@@ -16,7 +22,7 @@ interface TicketsListScreenProps {
   fiscalProfile?: any;
   onTriggerSimulationInline: (ticket: Ticket) => void;
   currentUserEmail?: string | null;
-  onDeleteTicket?: (ticketId: string) => void;
+  onDeleteTicket?: (ticketId: string, invoiceId?: string) => void;
   onTabChange?: (tab: "capturar" | "tickets" | "conectores" | "historial" | "resumen" | "cuenta" | "admin") => void;
   newlyAddedTicketId?: string | null;
   onClearNewlyAddedTicketId?: () => void;
@@ -25,117 +31,29 @@ interface TicketsListScreenProps {
 }
 
 // ----------------------------------------------------
-// HIGH FIDELITY MOCK DATA SEEDING
+// HIGH FIDELITY BRAND ICONS RESOLVER
 // ----------------------------------------------------
 
-const MOCK_ACTIVE_TICKETS = [
-  {
-    id: "mock-active-1",
-    nombreEmisor: "Starbucks Santa Fe",
-    folio: "88219",
-    fechaCompra: "12 Oct",
-    total: 245.00,
-    status: "processing" as const
-  },
-  {
-    id: "mock-active-2",
-    nombreEmisor: "Gasolinera Pemex",
-    folio: "11029",
-    fechaCompra: "11 Oct",
-    total: 1200.50,
-    status: "processing" as const
+const renderAlertIcon = (iconName: string, className?: string) => {
+  switch (iconName) {
+    case "AlertCircle":
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      );
+    case "CheckCircle":
+      return <ShieldCheck className={className} />;
+    case "Clock":
+      return <Clock className={className} />;
+    default:
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      );
   }
-];
-
-const MOCK_EMITTED_INVOICES = [
-  {
-    id: "mock-inv-oxxo",
-    ticketId: "mock-active-oxxo",
-    nombreEmisor: "Oxxo",
-    rfcEmisor: "OXXO8605231N4",
-    nombreReceptor: "LEONARDO GOMEZ RENDER",
-    rfcReceptor: "GORL940812S1A",
-    folioFiscal: "F4A9D231-15BB-47AD-A12B-DF9E2184B1E5",
-    total: 145.00,
-    createdAt: "15/10/2023",
-    items: [
-      { description: "1x Coca-Cola Sin Azúcar 600ml", amount: 18.50, code: "50202306" },
-      { description: "1x Sándwich de Jamón y Queso", amount: 48.00, code: "50192500" },
-      { description: "1x Papas Sabritas Adobadas 42g", amount: 22.50, code: "50192100" },
-      { description: "1x Café Americano Andatti Med", amount: 56.00, code: "50201708" }
-    ],
-    xmlContent: `<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Version="4.0" Total="145.00" SubTotal="125.00"><cfdi:Emisor Rfc="OXXO8605231N4" Nombre="OXXO S.A. DE C.V."/><cfdi:Receptor Rfc="GORL940812S1A" Nombre="LEONARDO GOMEZ RENDER" UsoCFDI="G03"/></cfdi:Comprobante>`
-  },
-  {
-    id: "mock-inv-walmart",
-    ticketId: "mock-active-walmart",
-    nombreEmisor: "Walmart",
-    rfcEmisor: "WALM9203251A9",
-    nombreReceptor: "LEONARDO GOMEZ RENDER",
-    rfcReceptor: "GORL940812S1A",
-    folioFiscal: "A3B5F691-89CD-4A5D-B27D-5A8FCE46C89A",
-    total: 1112.30,
-    createdAt: "14/10/2023",
-    items: [
-      { description: "1x Detergente Líquido Ariel 4L", amount: 249.00, code: "47131801" },
-      { description: "1x Pañal Huggies All Around G", amount: 389.00, code: "53102305" },
-      { description: "1x Aceite Vegetal Capullo 840ml", amount: 54.50, code: "50151513" },
-      { description: "2x Arroz Súper Extra Morelos 1kg", amount: 68.00, code: "50221101" },
-      { description: "1x Pechuga de Pollo Premium 1.2kg", amount: 168.00, code: "50111515" },
-      { description: "1x Desodorante Rexona Clinical Men", amount: 95.00, code: "53131609" },
-      { description: "1x Sector Frutas y Verduras Frescas", amount: 88.80, code: "50401500" }
-    ],
-    xmlContent: `<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Version="4.0" Total="1112.30" SubTotal="958.88"><cfdi:Emisor Rfc="WALM9203251A9" Nombre="WAL COMPREHENSIVE S. DE R.L."/><cfdi:Receptor Rfc="GORL940812S1A" Nombre="LEONARDO GOMEZ RENDER" UsoCFDI="G03"/></cfdi:Comprobante>`
-  },
-  {
-    id: "mock-inv-farmacia",
-    ticketId: "mock-active-farmacia",
-    nombreEmisor: "Farmacia San Pablo",
-    rfcEmisor: "FSAP9203112A4",
-    nombreReceptor: "LEONARDO GOMEZ RENDER",
-    rfcReceptor: "GORL940812S1A",
-    folioFiscal: "D4E8F1A2-D6FE-437E-9CE1-6A2F1B8A4D2E",
-    total: 450.00,
-    createdAt: "12/10/2023",
-    items: [
-      { description: "1x Tempra Forte 650mg 24 Tabs", amount: 145.00, code: "51101500" },
-      { description: "1x Histiacil Jarabe Adulto 150ml", amount: 185.00, code: "51181503" },
-      { description: "1x Gasa Estéril Caja 10 pzas", amount: 120.00, code: "42141503" }
-    ],
-    xmlContent: `<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Version="4.0" Total="450.00" SubTotal="387.93"><cfdi:Emisor Rfc="FSAP9203112A4" Nombre="FARMACIA SAN PABLO S.A."/><cfdi:Receptor Rfc="GORL940812S1A" Nombre="LEONARDO GOMEZ RENDER" UsoCFDI="G03"/></cfdi:Comprobante>`
-  },
-  {
-    id: "mock-inv-pemex",
-    ticketId: "mock-active-pemex",
-    nombreEmisor: "Gasolinera Pemex",
-    rfcEmisor: "PEME8201249A2",
-    nombreReceptor: "LEONARDO GOMEZ RENDER",
-    rfcReceptor: "GORL940812S1A",
-    folioFiscal: "BE82C10E-5C13-4D90-A8EA-61E627B1390E",
-    total: 1200.50,
-    createdAt: "11/10/2023",
-    items: [
-      { description: "51.30L Gasolina Magna (Pemex Regular)", amount: 1200.50, code: "15101514" }
-    ],
-    xmlContent: `<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Version="4.0" Total="1200.50" SubTotal="1034.91"><cfdi:Emisor Rfc="PEME8201249A2" Nombre="COMBUSTIBLES PEMEX S.A."/><cfdi:Receptor Rfc="GORL940812S1A" Nombre="LEONARDO GOMEZ RENDER" UsoCFDI="G03"/></cfdi:Comprobante>`
-  },
-  {
-    id: "mock-inv-starbucks",
-    ticketId: "mock-active-starbucks",
-    nombreEmisor: "Starbucks",
-    rfcEmisor: "CSI020226MV4",
-    nombreReceptor: "LEONARDO GOMEZ RENDER",
-    rfcReceptor: "GORL940812S1A",
-    folioFiscal: "E5B9...4D22",
-    total: 225.00,
-    createdAt: "24/10/2023 14:22:10",
-    items: [
-      { description: "1x Latte Venti Caliente", amount: 105.00, code: "90101700" },
-      { description: "1x Panini Pavo", amount: 120.00, code: "90101700" }
-    ],
-    xmlContent: `<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Version="4.0" Total="225.00" SubTotal="193.97"><cfdi:Emisor Rfc="CSI020226MV4" Nombre="CAFÉ SIRENA S. DE R.L. DE C.V."/><cfdi:Receptor Rfc="GORL940812S1A" Nombre="LEONARDO GOMEZ RENDER" UsoCFDI="G03"/></cfdi:Comprobante>`
-  }
-];
+};
 
 // Helper to resolve icon style for brands matching the design aesthetics
 const getBrandBrandIcon = (nombre: string) => {
@@ -190,6 +108,24 @@ const validateXmlStructure = (xmlContent: string | null | undefined): boolean =>
   return !!(hasComprobante && hasEmisor && hasReceptor && hasTimbre);
 };
 
+const CAPTCHA_FLOW_STATUSES = new Set([
+  "blocked_by_captcha",
+  "waiting_human_verification",
+  "waiting_user_captcha",
+  "captcha_submitted",
+  "verifying_captcha",
+  "captcha_failed",
+  "captcha_timeout",
+]);
+
+const CAPTCHA_TERMINAL_STATUSES = new Set([
+  "captcha_resolved",
+  "completed",
+  "invoice_completed",
+  "failed_final",
+  "failed"
+]);
+
 export default function TicketsListScreen({
   tickets,
   invoices,
@@ -204,6 +140,23 @@ export default function TicketsListScreen({
   initialSubTab
 }: TicketsListScreenProps) {
   const toast = useToast();
+
+  const renderStatusBadge = (t: any) => {
+    const inv = invoices.find(i => i.ticketId === t.id || i.id === t.invoiceId);
+    const state = getBillingCanonicalState({ ticket: t, invoice: inv });
+    const hasSpinner = state.canonicalStatus === "active_processing" || 
+                       state.canonicalStatus === "waiting_user_captcha" || 
+                       state.canonicalStatus === "verifying_captcha" ||
+                       state.canonicalStatus === "invoice_recovery_pending" ||
+                       state.canonicalStatus === "queued";
+
+    return (
+      <span className={`${state.badgeTone} text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none flex items-center gap-1`}>
+        {hasSpinner && <RefreshCw className="w-2.5 h-2.5 animate-spin" />}
+        {state.badgeLabel}
+      </span>
+    );
+  };
   
   // Smoothly clear the newly added ID after 5 seconds to stop pulsing
   useEffect(() => {
@@ -214,6 +167,8 @@ export default function TicketsListScreen({
       return () => clearTimeout(timer);
     }
   }, [newlyAddedTicketId, onClearNewlyAddedTicketId]);
+
+
 
   // Filter inside list
   const [activeSubTab, setActiveSubTab] = useState<"en-seguimiento" | "cfdi-obtenidos">(initialSubTab || "en-seguimiento");
@@ -227,15 +182,137 @@ export default function TicketsListScreen({
 
   // Outer routing tabs: list or ver-pdf
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  const [selectedBillingItem, setSelectedBillingItem] = useState<any | null>(null);
   const [showXmlCode, setShowXmlCode] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [isValidatingSat, setIsValidatingSat] = useState<boolean>(false);
-  
+  const [viewCaptchaSolution, setViewCaptchaSolution] = useState("");
+  const [isSubmittingViewCaptcha, setIsSubmittingViewCaptcha] = useState(false);
+  const [activeJob, setActiveJob] = useState<any>(null);
+  const [captchaPanelLocked, setCaptchaPanelLocked] = useState(false);
+  const [isRetryingRecovery, setIsRetryingRecovery] = useState<string | null>(null);
+
+  const handleRetryRecovery = async (ticketId: string) => {
+    setIsRetryingRecovery(ticketId);
+    try {
+      const response = await fetchWithAuth(`/api/tickets/${ticketId}/retry-invoice-recovery`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || "Fallo al iniciar reintento");
+      }
+      toast.success("Se ha programado el reintento de recuperación de factura.", "RECUPERACIÓN EN COLA");
+    } catch (err: any) {
+      toast.error(err.message || "Error al solicitar reintento.");
+    } finally {
+      setIsRetryingRecovery(null);
+    }
+  };
+  useEffect(() => {
+    const activeInvoiceData = invoices.find(inv => inv.id === selectedInvoiceId);
+    const associatedTicket = tickets.find(t => t.id === selectedInvoiceId || t.jobId === selectedInvoiceId || t.id === activeInvoiceData?.ticketId);
+    const tStatus = associatedTicket?.status || "";
+    const jStatus = activeJob?.status || "";
+    const effectiveStatus = jStatus || tStatus;
+
+    const flowActive =
+      CAPTCHA_FLOW_STATUSES.has(effectiveStatus) ||
+      activeJob?.captchaFlowActive === true ||
+      (associatedTicket as any)?.captchaFlowActive === true ||
+      activeJob?.blockingReason === "captcha_detected";
+
+    if (flowActive) {
+      if (!captchaPanelLocked) {
+        console.debug("[CAPTCHA_UI_RENDER] TicketsList: Latching captcha panel. status:", effectiveStatus);
+        setCaptchaPanelLocked(true);
+      }
+    } else if (CAPTCHA_TERMINAL_STATUSES.has(effectiveStatus)) {
+      if (captchaPanelLocked) {
+        console.debug("[CAPTCHA_UI_RENDER] TicketsList: Unlocking captcha panel. status:", effectiveStatus);
+        setCaptchaPanelLocked(false);
+      }
+    }
+  }, [activeJob?.status, activeJob?.captchaFlowActive, activeJob?.blockingReason, selectedInvoiceId, tickets, invoices, captchaPanelLocked]);
+
+  // Real-time listener for the active ticket's job state
+  useEffect(() => {
+    const activeInvoiceData = invoices.find(inv => inv.id === selectedInvoiceId);
+    const associatedTicket = tickets.find(t => t.id === selectedInvoiceId || t.jobId === selectedInvoiceId || t.id === activeInvoiceData?.ticketId);
+    const jobKey = associatedTicket?.jobId;
+    
+    if (!jobKey) {
+      setActiveJob(null);
+      return;
+    }
+    const docRef = doc(db, "invoice_jobs", jobKey);
+    const unsubscribe = onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setActiveJob({ id: snapshot.id, ...snapshot.data() });
+      }
+    }, (err) => {
+      console.error("Error watching live job in list:", err);
+    });
+    return unsubscribe;
+  }, [selectedInvoiceId, tickets, invoices]);
+
   // Interactive inputs
   const [emailTo, setEmailTo] = useState(currentUserEmail || "legionrender@gmail.com");
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [ticketIdToDelete, setTicketIdToDelete] = useState<string | null>(null);
   const [smtpStatus, setSmtpStatus] = useState<{ smtpConfigured: boolean; smtpUser: string | null } | null>(null);
+
+  const onViewDetails = (item: any) => {
+    if (!item || !item.ticket) {
+      toast.error("No se pudo cargar la información del ticket.");
+      return;
+    }
+
+    const t = item.ticket;
+    const isDeleted = 
+      t.hiddenFromUser === true ||
+      !!t.deletedAt ||
+      t.status === "deleted" ||
+      t.linkedTicketDeleted === true ||
+      (item.job && item.job.linkedTicketDeleted === true);
+
+    if (isDeleted) {
+      toast.error("Error técnico: No se permite visualizar detalles de un ticket eliminado o inactivo.");
+      console.error("Acceso bloqueado a ticket eliminado:", t.id);
+      return;
+    }
+
+    setSelectedBillingItem(item);
+    setSelectedInvoiceId(item.invoice?.id || `inv-fallback-${t.id}`);
+  };
+
+  const handleSubmitViewCaptcha = async (associatedTicket: any) => {
+    const jobIdToUpdate = associatedTicket?.jobId;
+    const solution = viewCaptchaSolution.trim();
+    if (!jobIdToUpdate || !solution) {
+      toast.error("Por favor, ingresa el código CAPTCHA para continuar.");
+      return;
+    }
+    setIsSubmittingViewCaptcha(true);
+    try {
+      await updateDoc(doc(db, "invoice_jobs", jobIdToUpdate), {
+        status: "captcha_submitted",
+        captchaSolution: solution,
+        captchaSolutionAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      setViewCaptchaSolution("");
+      toast.success("Código enviado. Continuando con el proceso de facturación.");
+    } catch (error: any) {
+      console.error("Error submitting captcha:", error);
+      toast.error("No se pudo enviar el código. Inténtalo nuevamente.");
+    } finally {
+      setIsSubmittingViewCaptcha(false);
+    }
+  };
 
   // Retrieve SMTP setup status on load
   useEffect(() => {
@@ -297,38 +374,120 @@ export default function TicketsListScreen({
     }
   };
 
-  // Use strictly real user data here, with absolutely no simulation/mock data.
-  const inProgressList = tickets.filter(
-    (t) =>
-      t.status !== "completed" &&
-      t.status !== "cfdi_validated" &&
-      t.status !== "invoice_obtained"
+  // Filter out all hidden/deleted tickets and invoices first
+  const activeTickets = tickets.filter(t => 
+    t.hiddenFromUser !== true &&
+    !t.deletedAt &&
+    t.status !== "deleted"
   );
-  const emittedInvoicesList = invoices.filter(inv => {
-    const hasXml = !!inv.xmlContent && inv.xmlContent.trim().length > 0;
-    const hasStructure = hasXml && inv.xmlContent.includes("UUID=") && inv.xmlContent.includes("TimbreFiscalDigital");
 
-    const ticket = tickets.find(t => t.id === inv.ticketId);
-    const ticketStatus = ticket?.status || inv.status;
+  const activeInvoices = invoices.filter(inv =>
+    inv.hiddenFromUser !== true &&
+    inv.linkedTicketDeleted !== true
+  );
 
-    if (ticketStatus === "completed" || ticketStatus === "invoice_obtained" || ticketStatus === "cfdi_validated") {
-      return hasXml && hasStructure;
+  // Group/Pair tickets and invoices together to avoid duplicates
+  const realInvoices = activeInvoices.filter(inv => !inv.id?.startsWith("inv-fallback-"));
+  const syntheticInvoices = activeInvoices.filter(inv => inv.id?.startsWith("inv-fallback-"));
+  
+  const filteredInvoices = [...realInvoices];
+  syntheticInvoices.forEach(syn => {
+    const hasReal = realInvoices.some(real => 
+      real.ticketId === syn.ticketId || 
+      (syn.folioFiscal && real.folioFiscal === syn.folioFiscal)
+    );
+    const relatedTicket = activeTickets.find(t => t.id === syn.ticketId);
+    const ticketIsDeleted = relatedTicket && (
+      relatedTicket.hiddenFromUser === true ||
+      relatedTicket.deletedAt ||
+      relatedTicket.status === "deleted"
+    );
+
+    if (!hasReal && !ticketIsDeleted) {
+      filteredInvoices.push(syn);
     }
-
-    return hasXml && hasStructure;
   });
 
-  // Handle opening the details view
-  const activeInvoiceData = emittedInvoicesList.find(inv => inv.id === selectedInvoiceId);
+  const pairedItems: Array<{ ticket?: any; invoice?: any; job?: any }> = [];
+  const processedTicketIds = new Set<string>();
+  const processedInvoiceIds = new Set<string>();
+
+  filteredInvoices.forEach(inv => {
+    const resolved = resolveRelatedBillingDocs({
+      invoice: inv,
+      tickets: activeTickets,
+      invoices: filteredInvoices
+    });
+
+    if (resolved.ticket) processedTicketIds.add(resolved.ticket.id);
+    processedInvoiceIds.add(inv.id);
+
+    pairedItems.push(resolved);
+  });
+
+  activeTickets.forEach(t => {
+    if (processedTicketIds.has(t.id)) return;
+
+    const resolved = resolveRelatedBillingDocs({
+      ticket: t,
+      tickets: activeTickets,
+      invoices: filteredInvoices
+    });
+
+    if (resolved.ticket) processedTicketIds.add(resolved.ticket.id);
+    if (resolved.invoice) processedInvoiceIds.add(resolved.invoice.id);
+
+    pairedItems.push(resolved);
+  });
+
+  // Deduplicate globally using canonical helper
+  const dedupedItems = dedupeBillingItems(pairedItems);
+
+  const finalItems = dedupedItems.map(item => {
+    const canonicalState = getBillingCanonicalState({ ticket: item.ticket, invoice: item.invoice, job: item.job });
+    const visualKey = getBillingVisualKey({ ticket: item.ticket, invoice: item.invoice, job: item.job });
+    return { ...item, canonicalState, visualKey };
+  });
+
+  finalItems.sort((a, b) => {
+    const score = (x: typeof a) => {
+      if (x.canonicalState.shouldAppearInReady) return 3;
+      if (x.canonicalState.shouldAppearInProcess) return 2;
+      return 1;
+    };
+    return score(b) - score(a);
+  });
+
+  // Calculate lists:
+  const inProgressList = finalItems.filter(
+    (item) => item.canonicalState.shouldAppearInProcess || item.canonicalState.shouldAppearInAttention
+  );
+  
+  const emittedInvoicesList = finalItems.filter(
+    (item) => item.canonicalState.shouldAppearInReady
+  );
+
+  // Auto-open ticket details when newlyAddedTicketId is set from a notification click
+  useEffect(() => {
+    if (newlyAddedTicketId) {
+      const matchingItem = finalItems.find(
+        (item) => item.ticket?.id === newlyAddedTicketId || item.invoice?.ticketId === newlyAddedTicketId
+      );
+      if (matchingItem) {
+        onViewDetails(matchingItem);
+      }
+    }
+  }, [newlyAddedTicketId, finalItems]);
 
   // Trigger SAT verification when detail view is opened
   useEffect(() => {
-    if (!selectedInvoiceId || !activeInvoiceData || !activeInvoiceData.xmlContent) {
+    if (!selectedBillingItem || !selectedBillingItem.invoice || !selectedBillingItem.invoice.xmlContent) {
       setVerificationError(null);
       return;
     }
 
-    const associatedTicket = tickets.find(t => t.invoiceId === activeInvoiceData.folioFiscal || t.id === activeInvoiceData.ticketId);
+    const associatedTicket = selectedBillingItem.ticket;
+    const activeInvoiceData = selectedBillingItem.invoice;
     if (!associatedTicket) return;
 
     // SAT is disabled. We only perform local structural check.
@@ -344,10 +503,13 @@ export default function TicketsListScreen({
           throw new Error("El XML obtenido del portal del comercio no contiene la estructura básica obligatoria.");
         }
 
-        const res = await fetch("/api/cfdi/verify-sat", {
+        const res = await fetchWithAuth("/api/cfdi/verify-sat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ xmlContent: activeInvoiceData.xmlContent })
+          body: JSON.stringify({
+            xmlContent: activeInvoiceData.xmlContent,
+            ticketId: associatedTicket.id,
+            invoiceId: activeInvoiceData.id
+          })
         });
 
         if (!res.ok) {
@@ -356,109 +518,16 @@ export default function TicketsListScreen({
 
         const data = await res.json();
         if (data.status === "valid") {
-          if (associatedTicket.status !== "cfdi_validated" && onUpdateTicketInDb) {
-            const prevEvents = associatedTicket.automationEvents || [];
-            const newEvent = {
-              step: "cfdi_validated",
-              status: "success",
-              message: "Factura validada y registrada correctamente.",
-              timestamp: new Date().toISOString(),
-              reasonCode: null,
-              reviewReasonCode: null
-            };
-            await onUpdateTicketInDb(associatedTicket.id, {
-              status: "cfdi_validated",
-              errorMsg: "",
-              automationEvents: [...prevEvents, newEvent]
-            });
-          }
+          setVerificationError(null);
         } else if (data.status === "canceled") {
           const errMsg = "El XML obtenido se encuentra CANCELADO ante el SAT. Requiere revisión manual.";
           setVerificationError(errMsg);
-          if (associatedTicket.status !== "requires_manual_review" && onUpdateTicketInDb) {
-            const prevEvents = associatedTicket.automationEvents || [];
-            const newEvent = {
-              step: "sat_verifying",
-              status: "failed",
-              message: "El XML se encuentra cancelado ante el SAT.",
-              timestamp: new Date().toISOString(),
-              reasonCode: null,
-              reviewReasonCode: "SAT_CANCELED"
-            };
-            const reviewErr = {
-              reviewReasonCode: "SAT_CANCELED",
-              reviewReasonMessage: "El CFDI aparece cancelado ante el SAT.",
-              lastAutomationStep: "sat_verifying",
-              connectorAttempted: true,
-              connectorId: associatedTicket.connectorId || null,
-              connectorName: null,
-              portalErrorMessage: "SAT status: canceled"
-            };
-            await onUpdateTicketInDb(associatedTicket.id, {
-              status: "requires_manual_review",
-              errorMsg: "El XML se encuentra cancelado ante el SAT.",
-              reviewError: reviewErr as any,
-              automationEvents: [...prevEvents, newEvent]
-            });
-          }
         } else if (data.status === "error" || data.status === "timeout") {
           const errMsg = "No pudimos verificar el CFDI ante el SAT en este momento. Requiere revisión manual.";
           setVerificationError(errMsg);
-          if (associatedTicket.status !== "requires_manual_review" && onUpdateTicketInDb) {
-            const prevEvents = associatedTicket.automationEvents || [];
-            const newEvent = {
-              step: "sat_verifying",
-              status: "failed",
-              message: "No pudimos verificar el CFDI ante el SAT en este momento.",
-              timestamp: new Date().toISOString(),
-              reasonCode: null,
-              reviewReasonCode: "SAT_TIMEOUT"
-            };
-            const reviewErr = {
-              reviewReasonCode: "SAT_TIMEOUT",
-              reviewReasonMessage: "No pudimos verificar el CFDI ante el SAT en este momento.",
-              lastAutomationStep: "sat_verifying",
-              connectorAttempted: true,
-              connectorId: associatedTicket.connectorId || null,
-              connectorName: null,
-              portalErrorMessage: "SAT verification connection error or timeout"
-            };
-            await onUpdateTicketInDb(associatedTicket.id, {
-              status: "requires_manual_review",
-              errorMsg: errMsg,
-              reviewError: reviewErr as any,
-              automationEvents: [...prevEvents, newEvent]
-            });
-          }
         } else {
           const errMsg = "El XML obtenido no fue localizado en los controles del SAT. Requiere revisión manual.";
           setVerificationError(errMsg);
-          if (associatedTicket.status !== "requires_manual_review" && onUpdateTicketInDb) {
-            const prevEvents = associatedTicket.automationEvents || [];
-            const newEvent = {
-              step: "sat_verifying",
-              status: "failed",
-              message: "El XML no fue localizado en los controles del SAT.",
-              timestamp: new Date().toISOString(),
-              reasonCode: null,
-              reviewReasonCode: "SAT_NOT_FOUND"
-            };
-            const reviewErr = {
-              reviewReasonCode: "SAT_NOT_FOUND",
-              reviewReasonMessage: "El CFDI no fue localizado en los controles del SAT.",
-              lastAutomationStep: "sat_verifying",
-              connectorAttempted: true,
-              connectorId: associatedTicket.connectorId || null,
-              connectorName: null,
-              portalErrorMessage: "SAT status: not found"
-            };
-            await onUpdateTicketInDb(associatedTicket.id, {
-              status: "requires_manual_review",
-              errorMsg: "El XML no fue localizado en los controles del SAT.",
-              reviewError: reviewErr as any,
-              automationEvents: [...prevEvents, newEvent]
-            });
-          }
         }
       } catch (err: any) {
         console.error("SAT Verification failed client side:", err);
@@ -470,73 +539,45 @@ export default function TicketsListScreen({
     };
 
     runSatVerification();
-  }, [selectedInvoiceId, activeInvoiceData, tickets, onUpdateTicketInDb]);
-
-  const getDetailedReasonMsg = (ticket: any): string => {
-    if (!ticket) return "Error desconocido.";
-    if (ticket.status === "connector_auth_required") {
-      return "El portal oficial de este comercio exige iniciar sesión o crear una cuenta. No faltan datos del ticket; la facturación no puede continuar sin autorización del usuario.";
-    }
-    if (ticket.status === "waiting_user_captcha") {
-      return "El portal está esperando el código de verificación mostrado en la captura.";
-    }
-    if (ticket.status === "training_required") {
-      return "Este comercio aún no tenía automatización. Estamos localizando su portal y preparando los datos que solicita. El primer proceso puede tardar algunos minutos.";
-    }
-    if (ticket.status === "connector_not_ready") {
-      return "El conector de este comercio está en mantenimiento técnico o ajustes.";
-    }
-    const revErr = ticket.reviewError;
-    const corrErr = ticket.correctionError;
-
-    if (revErr) {
-      const code = revErr.reviewReasonCode;
-      if (code === "CONNECTOR_NOT_FOUND") return "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.";
-      if (code === "PORTAL_NO_XML") return "Este comercio requiere revisión manual o no entregó el XML/PDF en el proceso automatizado. ZenTicket no genera documentos sustitutos si el portal del comercio no entrega el XML.";
-      if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
-      if (code === "PORTAL_REJECTED_TOTAL") return "El portal no reconoció el total detectado.";
-      if (code === "SAT_NOT_FOUND") return "El CFDI no fue localizado en los controles del SAT.";
-      if (code === "SAT_CANCELED") return "El CFDI aparece cancelado ante el SAT.";
-      if (code === "SAT_TIMEOUT") return "No pudimos verificar el CFDI ante el SAT en este momento.";
-      if (code === "USER_REQUESTED_REVIEW") return "El usuario solicitó revisión manual del ticket.";
-      if (code === "CONNECTOR_TIMEOUT") return "El conector del comercio tardó más de lo esperado en responder.";
-      if (code === "PORTAL_ERROR") return revErr.reviewReasonMessage || "Ocurrió un error en el portal del comercio.";
-      if (code === "CONNECTOR_RUNNER_NOT_AVAILABLE") return "El conector está entrenado, pero el motor productivo de automatización aún no está disponible.";
-      if (code === "CONNECTOR_SCHEMA_INVALID") return "El conector tiene una configuración incompleta y requiere revisión técnica.";
-      if (code === "CONNECTOR_NOT_PRODUCTION_READY") return "El conector de este comercio está en validación técnica y no está listo para producción.";
-      if (code === "CONNECTOR_RESTRICTED") return "Este portal requiere credenciales especiales o permisos de acceso restringidos.";
-      if (code === "CONNECTOR_BROKEN") return "El conector de este portal se encuentra temporalmente fuera de servicio por mantenimiento.";
-      if (code === "PORTAL_FIELD_MAP_CHANGED") return "La estructura del portal oficial ha cambiado. Se ha programado un rediscovery técnico.";
-      if (code === "PORTAL_REQUIRES_LOGIN") return "El portal del comercio requiere iniciar sesión con cuenta de usuario.";
-      if (code === "PORTAL_REQUIRES_CAPTCHA") return "El portal oficial requiere resolver un CAPTCHA interactivo.";
-      if (code === "PORTAL_REQUIRES_EMAIL_VERIFICATION") return "El portal oficial requiere una verificación por correo electrónico.";
-      if (code === "PORTAL_NO_DOWNLOAD_LINKS") return "El portal oficial no proporcionó enlaces de descarga válidos.";
-    }
-
-    if (corrErr) {
-      const code = corrErr.reasonCode;
-      if (code === "MISSING_FOLIO") return "No detectamos el folio del ticket. Por favor ingrésalo.";
-      if (code === "MISSING_DATE") return "No detectamos la fecha del ticket. Por favor ingrésala.";
-      if (code === "MISSING_TOTAL") return "No detectamos el importe total. Por favor ingrésalo.";
-      if (code === "MISSING_MERCHANT") return "No detectamos un establecimiento válido.";
-      if (code === "PORTAL_REJECTED_RFC") return "El RFC del receptor no tiene un formato válido ante el SAT.";
-      if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
-    }
-
-    return ticket.errorMsg || "Este ticket requiere revisión manual de un agente.";
-  };
+  }, [selectedBillingItem]);
 
   // ----------------------------------------------------
   // THIRD VIEW SCREEN: VER PDF - DETALLE DE FACTURA
   // ----------------------------------------------------
-  if (activeInvoiceData) {
-    const associatedTicket = tickets.find(t => t.invoiceId === activeInvoiceData.folioFiscal || t.id === activeInvoiceData.ticketId);
-    const isXmlValid = validateXmlStructure(activeInvoiceData.xmlContent);
+  if (selectedBillingItem) {
+    const associatedTicket = selectedBillingItem.ticket || {};
+    const activeInvoiceData = selectedBillingItem.invoice || null;
+    
+    // Prohibir tickets eliminados o inactivos en el detalle
+    const isDeleted = 
+      associatedTicket.hiddenFromUser === true ||
+      !!associatedTicket.deletedAt ||
+      associatedTicket.status === "deleted" ||
+      associatedTicket.linkedTicketDeleted === true ||
+      (selectedBillingItem.job && selectedBillingItem.job.linkedTicketDeleted === true);
 
-    const ticketStatus = associatedTicket ? associatedTicket.status : "invoice_obtained";
-    const isFailed = ticketStatus === "failed";
-    const isManualReview = ticketStatus === "requires_manual_review";
-    const canRenderPdf = (ticketStatus === "invoice_obtained" || ticketStatus === "cfdi_validated" || ticketStatus === "completed") && isXmlValid && !verificationError && !isFailed && !isManualReview;
+    if (isDeleted) {
+      return (
+        <div className="max-w-xl mx-auto py-12 px-6 text-center animate-fade-in">
+          <div className="bg-rose-50 border border-rose-100 rounded-3xl p-8 text-left space-y-4">
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <h3 className="text-base font-extrabold text-rose-950">Acceso Denegado</h3>
+            <p className="text-xs text-rose-800 leading-normal font-medium font-sans">
+              Error técnico: No se permite visualizar detalles de un ticket eliminado o inactivo.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    const isXmlValid = activeInvoiceData ? validateXmlStructure(activeInvoiceData.xmlContent) : false;
+    const isMock = activeInvoiceData ? activeInvoiceData.id?.startsWith("mock-") : false;
+    const detailState = getBillingCanonicalState({ ticket: associatedTicket, invoice: activeInvoiceData });
+    const canRenderPdf = isMock || detailState.isValidInvoice;
 
     if (isValidatingSat) {
       return (
@@ -550,14 +591,18 @@ export default function TicketsListScreen({
     }
 
     if (!canRenderPdf) {
-      const displayMsg = (associatedTicket ? getDetailedReasonMsg(associatedTicket) : null) || verificationError || "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.";
+      const isCaptcha = detailState.canonicalStatus === "waiting_user_captcha";
+      const isProcessing = detailState.isActive || detailState.canonicalStatus === "invoice_recovery_pending";
+      
+      const displayMsg = detailState.message || "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.";
       return (
         <div className="max-w-xl mx-auto py-12 px-6 text-center animate-fade-in">
           <div className="flex items-center gap-3 mb-8">
             <button
-              type="button"
+               type="button"
               onClick={() => {
                 setSelectedInvoiceId(null);
+                setSelectedBillingItem(null);
                 setShowXmlCode(false);
               }}
               className="p-2 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] rounded-full cursor-pointer transition"
@@ -566,23 +611,196 @@ export default function TicketsListScreen({
             </button>
             <span className="text-sm font-black text-slate-800">Volver</span>
           </div>
-          <div className="bg-rose-50 border border-rose-100 rounded-3xl p-8 text-left space-y-4">
-            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center">
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
+          {captchaPanelLocked ? (
+            <div className="w-full flex justify-center">
+              <CaptchaFlowPanel
+                jobId={activeJob?.id || associatedTicket?.jobId || null}
+                ticketId={associatedTicket?.id || null}
+                source="tickets"
+                initialTicket={associatedTicket}
+              />
             </div>
-            <h3 className="text-base font-extrabold text-rose-950">Comprobante no disponible</h3>
-            <p className="text-xs text-rose-800 leading-normal font-medium">
-              {displayMsg}
-            </p>
-          </div>
+          ) : isProcessing ? (
+            <div className="bg-blue-50 border border-blue-100 rounded-3xl p-8 text-center space-y-6">
+              <div className="w-12 h-12 bg-blue-100 text-[#0B53F4] rounded-full flex items-center justify-center mx-auto">
+                <RefreshCw className="w-6 h-6 animate-spin" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-base font-extrabold text-blue-950">Facturación en Proceso</h3>
+                <p className="text-xs text-blue-800 leading-normal font-medium max-w-sm mx-auto">
+                  El robot está enviando los datos y resolviendo el CAPTCHA en el portal del comercio. El procesamiento continuará en segundo plano, por favor espera un momento...
+                </p>
+              </div>
+            </div>
+          ) : detailState.canonicalStatus === "already_invoiced_unverified" ? (() => {
+            const alertStyle = getBillingAlertStyle(detailState);
+            const iconBg = alertStyle.tone === "red" ? "zt-badge-error text-[var(--zt-error-text)]" :
+                           alertStyle.tone === "green" ? "zt-badge-ok text-[var(--zt-ok-text)]" :
+                           alertStyle.tone === "blue" ? "zt-badge-queue text-[var(--zt-queue-text)]" :
+                           "zt-badge-alert text-[var(--zt-alert-text)]";
+            const borderTopClass = alertStyle.tone === "red" ? "border-[var(--zt-error-border)]" :
+                                   alertStyle.tone === "green" ? "border-[var(--zt-ok-border)]" :
+                                   alertStyle.tone === "blue" ? "border-[var(--zt-queue-border)]" :
+                                   "border-[var(--zt-alert-border)]";
+            const gridBgBorder = alertStyle.tone === "red" ? "zt-card-error" :
+                                 alertStyle.tone === "green" ? "zt-card-ok" :
+                                 alertStyle.tone === "blue" ? "zt-card-queue" :
+                                 "zt-card-alert";
+            return (
+              <div className={`border rounded-3xl p-8 text-left space-y-6 animate-fade-in shadow-2xs font-sans ${alertStyle.bgClass} ${alertStyle.textClass}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${iconBg}`}>
+                    {renderAlertIcon(alertStyle.icon, "w-6 h-6")}
+                  </div>
+                  <div>
+                    <h3 className={`text-base font-extrabold font-display ${alertStyle.labelClass}`}>{detailState.badgeLabel}</h3>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${alertStyle.textClass}`}>Sin Comprobante Fiscal Recuperado</span>
+                  </div>
+                </div>
+
+                <div className={`space-y-4 pt-2 border-t ${borderTopClass}`}>
+                  <div>
+                    <h4 className={`text-xs font-black uppercase tracking-wider mb-1 font-sans ${alertStyle.labelClass}`}>Respuesta del Portal</h4>
+                    <p className="text-xs leading-relaxed font-sans">{displayMsg}</p>
+                  </div>
+
+                  <div className={`grid grid-cols-2 gap-4 p-4 rounded-2xl border ${gridBgBorder}`}>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Folio de venta</span>
+                      <span className="text-xs font-bold text-slate-800 font-mono">{normalizeBillingAttemptFields(associatedTicket as any, activeInvoiceData, fiscalProfile).folio || "S/D"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">ITU / ID Venta</span>
+                      <span className="text-xs font-bold text-slate-800 font-mono">{normalizeBillingAttemptFields(associatedTicket as any, activeInvoiceData, fiscalProfile).itu || "S/D"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Total del Ticket</span>
+                      <span className="text-xs font-bold text-slate-800 font-mono">${(normalizeBillingAttemptFields(associatedTicket as any, activeInvoiceData, fiscalProfile).total || detailState.displayTotal).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Fecha de compra</span>
+                      <span className="text-xs font-bold text-slate-800 font-mono">{normalizeBillingAttemptFields(associatedTicket as any, activeInvoiceData, fiscalProfile).fechaCompra || "S/D"}</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">RFC Receptor</span>
+                      <span className="text-xs font-bold text-slate-800 font-mono">{normalizeBillingAttemptFields(associatedTicket as any, activeInvoiceData, fiscalProfile).rfcReceptor || "S/D"}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className={`flex justify-between text-xs font-medium ${alertStyle.textClass}`}>
+                      <span>Intentos de recuperación realizados:</span>
+                      <span className="font-extrabold font-mono">{(associatedTicket as any)?.recoveryAttemptCount || 0} / {(associatedTicket as any)?.maxRecoveryAttempts || 3}</span>
+                    </div>
+                    <div className={`flex justify-between text-xs font-medium ${alertStyle.textClass}`}>
+                      <span>Rutas de recuperación intentadas:</span>
+                      <span className="font-extrabold font-mono">{(associatedTicket as any)?.recoveryPathsTried?.join(", ") || "Ninguna"}</span>
+                    </div>
+                    {(associatedTicket as any)?.lastRecoveryError && (
+                      <div className="text-[11px] text-rose-700 bg-rose-50/50 p-2.5 rounded-xl border border-rose-100 font-mono leading-relaxed">
+                        <strong>Último error:</strong> {(associatedTicket as any).lastRecoveryError}
+                      </div>
+                    )}
+                    <div className={`text-xs leading-relaxed ${alertStyle.textClass}`}>
+                      <strong>Próximo paso sugerido:</strong> {(associatedTicket as any)?.nextRecommendedAction || "El portal indica que ya existe una factura, pero no se encontró ruta de descarga XML. Reintentar recuperación o revisar manualmente en el portal del comercio."}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => handleRetryRecovery(associatedTicket?.id || "")}
+                    disabled={isRetryingRecovery === associatedTicket?.id}
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 font-extrabold text-[10.5px] uppercase tracking-wider rounded-xl bg-amber-500 hover:bg-amber-600 text-white cursor-pointer shadow-3xs transition disabled:opacity-50"
+                  >
+                    {isRetryingRecovery === associatedTicket?.id ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                    {isRetryingRecovery === associatedTicket?.id ? "Reintentando..." : "Reintentar recuperación"}
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = associatedTicket?.portalFields?.portalUrl || "https://www.google.com";
+                        window.open(url, "_blank");
+                      }}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center gap-1.5 py-2 px-3 font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Buscar en portal
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        toast.info("Por favor, edita los campos del ticket en el listado para corregir cualquier dato incorrecto.");
+                      }}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center gap-1.5 py-2 px-3 font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none"
+                    >
+                      Corregir campos
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        alert(JSON.stringify(associatedTicket || {}, null, 2));
+                      }}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center gap-1.5 py-2 px-3 font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none"
+                    >
+                      Detalles técnicos
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (onUpdateTicketInDb && associatedTicket?.id) {
+                          await onUpdateTicketInDb(associatedTicket.id, {
+                            status: "requires_manual_review",
+                            reviewReasonCode: "MANUAL_REVIEW_REQUESTED",
+                            errorMsg: "El usuario solicitó revisión manual para este ticket."
+                          });
+                          toast.success("Ticket marcado para revisión manual.");
+                          setSelectedInvoiceId(null);
+                          setSelectedBillingItem(null);
+                        }
+                      }}
+                      className="bg-rose-100 hover:bg-rose-200 text-rose-700 flex items-center justify-center gap-1.5 py-2 px-3 font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none"
+                    >
+                      Revisión manual
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })() : (() => {
+            const alertStyle = getBillingAlertStyle(detailState);
+            const iconBg = alertStyle.tone === "red" ? "zt-badge-error text-[var(--zt-error-text)]" :
+                           alertStyle.tone === "green" ? "zt-badge-ok text-[var(--zt-ok-text)]" :
+                           alertStyle.tone === "blue" ? "zt-badge-queue text-[var(--zt-queue-text)]" :
+                           "zt-badge-alert text-[var(--zt-alert-text)]";
+            return (
+              <div className={`border rounded-3xl p-8 text-left space-y-4 ${alertStyle.bgClass} ${alertStyle.textClass}`}>
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${iconBg}`}>
+                  {renderAlertIcon(alertStyle.icon, "w-6 h-6")}
+                </div>
+                <h3 className={`text-base font-extrabold ${alertStyle.labelClass}`}>{detailState.badgeLabel}</h3>
+                <p className="text-xs leading-normal font-medium font-sans">
+                  {displayMsg}
+                </p>
+              </div>
+            );
+          })()}
         </div>
       );
     }
 
-    const isMock = activeInvoiceData.id?.startsWith("mock-");
-    
     // Resolve dynamic currency and details
     const totalVal = activeInvoiceData.total || 0;
     const subtotalVal = totalVal / 1.16;
@@ -729,6 +947,7 @@ export default function TicketsListScreen({
               type="button"
               onClick={() => {
                 setSelectedInvoiceId(null);
+                setSelectedBillingItem(null);
                 setShowXmlCode(false);
               }}
               className="p-2 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] rounded-full cursor-pointer transition"
@@ -898,14 +1117,6 @@ export default function TicketsListScreen({
           <button
             type="button"
             onClick={() => {
-              const ticketStatus = associatedTicket ? associatedTicket.status : "";
-              if (ticketStatus !== "invoice_obtained" && ticketStatus !== "cfdi_validated" && ticketStatus !== "completed" || !activeInvoiceData.xmlContent) {
-                toast.error(
-                  "El PDF de la factura solo está disponible después de obtener el comprobante desde el portal del comercio. El XML es obligatorio.",
-                  "Descarga no disponible"
-                );
-                return;
-              }
               toast.info("Generando reporte PDF tamaño carta oficial...", "PDF");
               setTimeout(() => {
                 const printWindow = window.open("", "_blank");
@@ -1468,10 +1679,7 @@ export default function TicketsListScreen({
           <button
             type="button"
             onClick={() => {
-              const ticketStatus = associatedTicket ? associatedTicket.status : "invoice_obtained";
-              const isAllowed = ticketStatus === "cfdi_validated" || ticketStatus === "invoice_obtained" || ticketStatus === "completed";
-              
-              if (!isAllowed || !activeInvoiceData.xmlContent) {
+              if (!activeInvoiceData.xmlContent) {
                 toast.error(
                   "El XML aún no está disponible. ZenTicket debe obtenerlo primero desde el portal oficial del comercio.",
                   "Descarga no disponible"
@@ -1792,27 +2000,27 @@ export default function TicketsListScreen({
           {/* DYNAMIC SMTP CONFIGURATION NOTIFICATION */}
           <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800/80 select-none text-left">
             {smtpStatus?.smtpConfigured ? (
-              <div className="flex items-start gap-2 bg-emerald-500/10 border border-emerald-500/35 rounded-xl p-3 text-left text-emerald-700 dark:text-emerald-400">
-                <Check className="w-4 h-4 text-emerald-650 dark:text-emerald-400 shrink-0 mt-0.5" />
+              <div className="flex items-start gap-2 zt-status-ok rounded-xl p-3 text-left border">
+                <Check className="w-4 h-4 text-[var(--zt-ok-text)] shrink-0 mt-0.5" />
                 <div className="leading-tight">
                   <span className="text-[10.5px] font-extrabold block">
                     Servidor de Correo SMTP Activo
                   </span>
-                  <p className="text-[9.5px] text-emerald-650 dark:text-emerald-300 font-semibold block mt-0.5 leading-normal">
+                  <p className="text-[9.5px] text-[var(--zt-ok-text)] font-semibold block mt-0.5 leading-normal">
                     Credenciales configuradas para <strong>{smtpStatus.smtpUser}</strong>. El CFDI obtenido se enviará directamente a {emailTo}.
                   </p>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col gap-1.5 bg-amber-500/10 border border-amber-500/35 rounded-xl p-3 text-left text-amber-700 dark:text-amber-400">
+              <div className="flex flex-col gap-1.5 zt-status-alert rounded-xl p-3 text-left border">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-455 animate-pulse shrink-0" />
+                  <div className="w-2 h-2 rounded-full zt-dot-alert animate-pulse shrink-0" />
                   <span className="text-[10.5px] font-black">
                     Servidor SMTP Desconfigurado
                   </span>
                 </div>
-                <p className="text-[9.5px] text-amber-700 dark:text-amber-350 leading-normal font-semibold">
-                  Si deseas recibir los correos directamente en tu buzón personal o en el de tu contador, configura las claves <code className="bg-amber-500/20 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-800 dark:text-amber-350">SMTP_HOST</code>, <code className="bg-amber-500/20 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-800 dark:text-amber-350">SMTP_USER</code> y <code className="bg-amber-500/20 px-1 py-0.2 rounded font-mono text-[9px] font-black font-semibold text-amber-800 dark:text-amber-350">SMTP_PASS</code> en la pestaña <strong>Settings &gt; Secrets</strong> de AI Studio.
+                <p className="text-[9.5px] text-slate-400 dark:text-slate-500 leading-normal font-semibold">
+                  Si deseas recibir los correos directamente en tu buzón personal o en el de tu contador, configura las credenciales de correo SMTP en la pestaña de configuración del workspace.
                 </p>
               </div>
             )}
@@ -1835,20 +2043,20 @@ export default function TicketsListScreen({
   return (
     <div className="max-w-6xl mx-auto space-y-6 font-body text-left mt-2 relative select-none pb-24 animate-fade-in_50">
       
-      {/* Top title header matching Screenshots 1 & 2 */}
-      <div className="flex items-center gap-4 py-2 border-b border-[#1360f8] pb-3 relative">
-        <h1 className="font-display font-extrabold text-[28px] text-[#1360f8] tracking-tight">Mis Tickets</h1>
+      {/* Top title header */}
+      <div className="flex items-center gap-4 py-2 border-b border-[var(--zt-border-default)] pb-3 relative">
+        <h1 className="zt-title-page">Mis Tickets</h1>
       </div>
 
-      {/* SEGMENTED CONTROL TAB BAR FILTERS MATCHING IMAGE - Hidden on desktop screens */}
-      <div className="bg-[#F1F3FE] p-1.5 rounded-2xl border border-slate-100/70 shadow-inner flex w-full relative lg:hidden">
+      {/* SEGMENTED CONTROL TAB BAR FILTERS - Hidden on desktop screens */}
+      <div className="bg-[var(--zt-bg-surface-soft)] p-1.5 rounded-2xl border border-[var(--zt-border-default)] shadow-inner flex w-full relative lg:hidden">
         <button
           type="button"
           onClick={() => setActiveSubTab("en-seguimiento")}
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer ${
             activeSubTab === "en-seguimiento"
-              ? "bg-white text-[#0B53F4] shadow-[0_2px_10px_rgba(11,83,244,0.08)]"
-              : "text-slate-455 hover:text-slate-700"
+              ? "bg-[var(--zt-bg-surface)] text-[var(--zt-accent-secondary)] shadow-xs"
+              : "text-[var(--zt-text-muted)] hover:text-[var(--zt-text-primary)]"
           }`}
         >
           En proceso
@@ -1859,8 +2067,8 @@ export default function TicketsListScreen({
           onClick={() => setActiveSubTab("cfdi-obtenidos")}
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer ${
             activeSubTab === "cfdi-obtenidos"
-              ? "bg-white text-slate-800 shadow-[0_2px_10px_rgba(15,23,42,0.06)]"
-              : "text-slate-455 hover:text-slate-700"
+              ? "bg-[var(--zt-bg-surface)] text-[var(--zt-accent-secondary)] shadow-xs"
+              : "text-[var(--zt-text-muted)] hover:text-[var(--zt-text-primary)]"
           }`}
         >
           Listos
@@ -1889,29 +2097,24 @@ export default function TicketsListScreen({
                 <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">Puedes arrastrar otro ticket en la sección Captura para procesarlo.</p>
               </div>
             ) : (
-              inProgressList.map((t) => {
-                const isFailed = t.status === "failed";
-                const isProcessing = t.status === "processing";
-                const brand = getBrandBrandIcon(t.nombreEmisor || "");
+              inProgressList.map((item) => {
+                const t = item.ticket || {};
+                const state = item.canonicalState;
+                const isFailed = state.canonicalStatus === "failed_blocking" || state.canonicalStatus.startsWith("cfdi_");
+                const isProcessing = state.isActive;
+                const brand = getBrandBrandIcon(t.nombreEmisor || item.invoice?.nombreEmisor || "");
                 const isNewlyAdded = newlyAddedTicketId && t.id === newlyAddedTicketId;
+                const isTicketCaptcha = state.canonicalStatus === "waiting_user_captcha";
 
                 return (
                   <div 
-                    key={t.id}
+                    key={t.id || item.invoice?.id}
                     className={`rounded-3xl p-5 flex flex-col gap-4 relative overflow-hidden transition ${
                       isNewlyAdded
                         ? "border-2 border-[#0B53F4] shadow-[0_0_25px_rgba(11,83,244,0.08)] bg-blue-50/10 scale-[1.01] duration-300"
-                        : "bg-white border border-slate-200/50 shadow-[0_4px_20px_rgba(15,23,42,0.02)] hover:border-[#0B53F4]/20 hover:shadow-[0_4px_24px_rgba(11,83,244,0.04)]"
+                        : "bg-white border border-slate-200/55 rounded-3xl p-5 shadow-[0_4px_20px_rgba(15,23,42,0.02)] hover:border-[#0B53F4]/20 hover:shadow-[0_4px_24px_rgba(11,83,244,0.04)]"
                     }`}
                   >
-                    {/* Robot processing loader during active agent automation */}
-                    {isProcessing && t.id?.startsWith("user-") && (
-                      <div className="absolute inset-0 bg-white/95 flex flex-col justify-center items-center z-15 p-2 text-center space-y-1">
-                        <RefreshCw className="w-5 h-5 text-[#0B53F4] animate-spin" />
-                        <span className="font-extrabold text-[10px] text-[#0B53F4] uppercase tracking-wider">Conector SAT Activo</span>
-                      </div>
-                    )}
-
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                       <div className="flex items-center gap-3.5 min-w-0 w-full">
                         <div className={`w-10 h-10 ${brand.color} rounded-full flex items-center justify-center shrink-0`}>
@@ -1920,7 +2123,7 @@ export default function TicketsListScreen({
                         
                         <div className="text-left leading-tight min-w-0 flex-1">
                           <span className="text-sm font-black text-slate-800 block truncate max-w-[220px] sm:max-w-[170px] uppercase">
-                            {t.nombreEmisor || "Emisor"}
+                            {t.nombreEmisor || item.invoice?.nombreEmisor || "Emisor"}
                           </span>
                           
                           {/* Mobile status badge directly below name */}
@@ -1931,43 +2134,11 @@ export default function TicketsListScreen({
                                 RECIÉN AGREGADO
                               </span>
                             )}
-                            {t.status === "requires_user_correction" ? (
-                              <span className="bg-orange-100 text-orange-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
-                                Requiere corrección
-                              </span>
-                            ) : (t.status as string) === "connector_auth_required" ? (
-                              <span className="bg-amber-100 text-amber-800 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
-                                Requiere cuenta
-                              </span>
-                            ) : t.status === "requires_manual_review" || t.status === "review" ? (
-                              <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
-                                En revisión
-                              </span>
-                            ) : (t.status as string) === "training_required" ? (
-                              <span className="bg-indigo-100 text-indigo-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
-                                Preparando portal
-                              </span>
-                            ) : (t.status as string) === "connector_not_ready" ? (
-                              <span className="bg-amber-100 text-amber-800 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
-                                Conector no listo
-                              </span>
-                            ) : isFailed ? (
-                              <span className="bg-rose-100 text-rose-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
-                                No se pudo completar
-                              </span>
-                            ) : ["pending_portal_submission", "submitted_to_merchant", "waiting_portal_result", "sat_verifying", "merchant_cfdi_downloaded"].includes(t.status || "") ? (
-                              <span className="bg-blue-100 text-blue-700 text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none font-bold">
-                                Facturando
-                              </span>
-                            ) : (
-                              <span className="bg-[#FEF3C7] text-[#D97706] text-[9.5px] font-black px-2 py-1 rounded-lg uppercase tracking-wider leading-none">
-                                Procesando
-                              </span>
-                            )}
+                            {renderStatusBadge(t)}
                           </div>
                         </div>
                       </div>
-
+ 
                       {/* Desktop only active status state indicator badge */}
                       <div className="hidden sm:flex flex-col items-end gap-1.5 shrink-0">
                         {isNewlyAdded && (
@@ -1976,82 +2147,31 @@ export default function TicketsListScreen({
                             RECIÉN AGREGADO
                           </span>
                         )}
-                         {t.status === "requires_user_correction" ? (
-                           <span className="bg-orange-100 text-orange-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                             Requiere corrección
-                           </span>
-                         ) : (t.status as string) === "connector_auth_required" ? (
-                           <span className="bg-amber-100 text-amber-800 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                             Requiere cuenta
-                           </span>
-                         ) : t.status === "requires_manual_review" || t.status === "review" ? (
-                           <span className="bg-amber-100 text-amber-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                             En revisión
-                           </span>
-                         ) : (t.status as string) === "training_required" ? (
-                           <span className="bg-indigo-100 text-indigo-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                             Preparando portal
-                           </span>
-                         ) : (t.status as string) === "connector_not_ready" ? (
-                           <span className="bg-amber-100 text-amber-800 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none font-bold">
-                             Conector no listo
-                           </span>
-                         ) : isFailed ? (
-                           <span className="bg-rose-100 text-rose-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                             No se pudo completar
-                           </span>
-                         ) : ["pending_portal_submission", "submitted_to_merchant", "waiting_portal_result", "sat_verifying", "merchant_cfdi_downloaded"].includes(t.status || "") ? (
-                           <span className="bg-blue-100 text-blue-700 text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none font-bold">
-                             Facturando
-                           </span>
-                         ) : (
-                           <span className="bg-[#FEF3C7] text-[#D97706] text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none">
-                             Procesando
-                           </span>
-                         )}
+                         {renderStatusBadge(t)}
                       </div>
                     </div>
 
                     {/* Fila 2: Folio y fecha */}
                     <div className="text-left pt-1 border-t border-slate-100/60 sm:border-t-0 sm:pt-0 sm:-mt-1">
                       <span className="text-[11px] text-slate-500 block font-semibold font-mono">
-                        Ticket #{t.folio || "S/D"} • {t.fechaCompra || "S/F"}
+                        Ticket #{t.folio || "S/D"} • {t.fechaCompra || (item.invoice?.createdAt ? new Date(item.invoice.createdAt).toLocaleDateString("es-MX") : "S/F")}
                       </span>
                     </div>
 
                     {/* Escalation/Failure Reason Card Block */}
-                    {(t.status === "review" || t.status === "requires_manual_review" || t.status === "requires_user_correction" || (t.status as string) === "connector_auth_required" || (t.status as string) === "waiting_user_captcha" || (t.status as string) === "training_required" || (t.status as string) === "connector_not_ready" || isFailed) && (
-                      <div className={`text-[11px] p-3.5 rounded-2xl leading-relaxed font-sans border ${
-                        t.status === "requires_user_correction"
-                          ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30 dark:border-orange-500/40"
-                          : (t.status as string) === "connector_auth_required" || (t.status as string) === "waiting_user_captcha"
-                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 dark:border-amber-500/40"
-                          : t.status === "requires_manual_review" || t.status === "review"
-                            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 dark:border-amber-500/40"
-                            : (t.status as string) === "training_required"
-                              ? "bg-indigo-500/10 text-indigo-650 dark:text-indigo-400 border-indigo-500/30 dark:border-indigo-500/40"
-                              : (t.status as string) === "connector_not_ready"
-                                ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 dark:border-amber-500/40"
-                                : "bg-rose-500/10 text-rose-600 dark:text-rose-455 border-rose-500/30 dark:border-rose-500/40"
-                      }`}>
-                        <span className="font-bold block uppercase text-[9px] mb-1 tracking-wider">
-                          {t.status === "requires_user_correction"
-                            ? "Requiere Corrección:"
-                            : (t.status as string) === "connector_auth_required"
-                              ? "Inicio de sesión requerido:"
-                              : (t.status as string) === "waiting_user_captcha"
-                                ? "Código de verificación requerido:"
-                            : t.status === "requires_manual_review" || t.status === "review"
-                              ? "Revisión Requerida:"
-                              : (t.status as string) === "training_required"
-                                ? "Preparando portal:"
-                                : (t.status as string) === "connector_not_ready"
-                                  ? "Conector en Ajustes:"
-                                  : "Error de Automatización:"}
-                        </span>
-                        {getDetailedReasonMsg(t)}
-                      </div>
-                    )}
+                    {(() => {
+                      if (!state.shouldAppearInAttention) return null;
+
+                      const alertStyle = getBillingAlertStyle(state);
+                      return (
+                        <div className={`text-[11px] p-3.5 rounded-2xl leading-relaxed font-sans border ${alertStyle.bgClass} ${alertStyle.textClass}`}>
+                          <span className={`font-bold block uppercase text-[9px] mb-1 tracking-wider ${alertStyle.labelClass}`}>
+                            {state.badgeLabel}:
+                          </span>
+                          {state.message}
+                        </div>
+                      );
+                    })()}
 
                     {/* Divider line Inside Card */}
                     <div className="border-t border-slate-100 my-0.5" />
@@ -2059,19 +2179,19 @@ export default function TicketsListScreen({
                     {/* Lower cash amount indicator + interactive detail link */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 select-none pt-0.5">
                       <span className="text-lg font-black text-slate-800 font-mono text-left">
-                        ${(t.total || 0).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${state.displayTotal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
 
                       <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
                         {/* Trash Delete Option for Users */}
-                        {onDeleteTicket && (
-                          ticketIdToDelete === t.id ? (
+                        {onDeleteTicket && (t.id || item.invoice?.id) && (
+                          ticketIdToDelete === (t.id || item.invoice?.id) ? (
                             <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-lg text-[9px] font-bold animate-fade-in">
                               <span className="text-slate-550 mr-1">¿Eliminar?</span>
                               <button
                                 type="button"
                                 onClick={() => {
-                                  onDeleteTicket(t.id || "");
+                                  onDeleteTicket(t.id || "", item.invoice?.id || "");
                                   setTicketIdToDelete(null);
                                 }}
                                 className="px-1.5 py-0.5 bg-rose-600 text-white rounded font-bold cursor-pointer"
@@ -2089,7 +2209,7 @@ export default function TicketsListScreen({
                           ) : (
                             <button
                               type="button"
-                              onClick={() => setTicketIdToDelete(t.id || "")}
+                              onClick={() => setTicketIdToDelete(t.id || item.invoice?.id || "")}
                               className="p-1.5 text-slate-300 hover:text-[#0B53F4] rounded-lg bg-transparent cursor-pointer hover:bg-[#ebf1ff] transition"
                               title="Eliminar"
                             >
@@ -2098,16 +2218,52 @@ export default function TicketsListScreen({
                           )
                         )}
 
+                        {(state.canonicalStatus === "already_invoiced_unverified" ||
+                          state.canonicalStatus === "invoice_recovery_pending" ||
+                          t.errorCode === "TICKET_ALREADY_INVOICED" ||
+                          t.reviewReasonCode === "ALREADY_INVOICED_XML_NOT_RECOVERED") && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRetryRecovery(t.id);
+                              }}
+                              disabled={isRetryingRecovery === t.id}
+                              className="flex items-center gap-1 py-1.5 px-3 font-extrabold text-[10px] uppercase tracking-wider rounded-xl bg-amber-500 hover:bg-amber-600 text-white cursor-pointer shadow-3xs transition"
+                            >
+                              {isRetryingRecovery === t.id ? (
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <RefreshCw className="w-3.5 h-3.5" />
+                              )}
+                              Reintentar recuperación
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toast.info("Por favor, edita los campos del ticket en el listado para corregir cualquier dato incorrecto.");
+                              }}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center gap-1 py-1.5 px-3 font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none"
+                            >
+                              Corregir campos
+                            </button>
+                          </>
+                        )}
+
                         <button
                           type="button"
                           onClick={() => {
-                            onTriggerSimulationInline(t);
-                            const displayCode = t.shortCode || (t.id ? t.id.replace("ticket_i", "").toUpperCase() : "");
-                            toast.success(`ZenTicket está solicitando la factura en el portal oficial del comercio para el ticket #${displayCode}.`, "AUTOMATIZACIÓN DEL PORTAL");
+                            onViewDetails(item);
                           }}
-                          className="group flex items-center justify-between gap-1.5 py-1.5 px-3 zt-btn-secondary-blue font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none shrink-0"
+                          className={`group flex items-center justify-between gap-1.5 py-1.5 px-3 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none shrink-0 ${
+                            isTicketCaptcha
+                              ? "bg-amber-600 hover:bg-amber-700 text-white shadow-amber-200/50"
+                              : "zt-btn-secondary-blue"
+                          }`}
                         >
-                          <span>Ver detalles</span>
+                          <span>{isTicketCaptcha ? "Resolver CAPTCHA" : "Ver detalles"}</span>
                           <ChevronRight className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-all duration-150 transform group-hover:translate-x-0.5" />
                         </button>
                       </div>
@@ -2119,8 +2275,6 @@ export default function TicketsListScreen({
             )}
           </div>
         </div>
-
-        {/* COLUMN 2: CFDI OBTENIDOS (Visible on desktop OR when mobile has activeSubTab === "cfdi-obtenidos") */}
         <div className={`space-y-4 lg:col-span-6 ${activeSubTab === "cfdi-obtenidos" ? "block" : "hidden lg:block"}`}>
           <div className="px-1 text-left mb-2">
             <h2 className="font-display font-extrabold text-base text-slate-800 tracking-tight">
@@ -2136,7 +2290,8 @@ export default function TicketsListScreen({
                 <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">Los CFDI obtenidos y certificados por el SAT se guardarán aquí.</p>
               </div>
             ) : (
-              emittedInvoicesList.map((inv) => {
+              emittedInvoicesList.map((item) => {
+                const inv = item.invoice || {};
                 const brand = getBrandBrandIcon(inv.nombreEmisor || "");
                 const isMock = inv.id?.startsWith("mock-");
                 
@@ -2153,6 +2308,7 @@ export default function TicketsListScreen({
                 }
 
                 const isNewlyAdded = newlyAddedTicketId && (inv.ticketId === newlyAddedTicketId || inv.id === newlyAddedTicketId);
+                const invState = item.canonicalState;
 
                 return (
                   <div 
@@ -2176,6 +2332,11 @@ export default function TicketsListScreen({
                             <span className="text-sm font-black text-slate-800 block truncate uppercase tracking-tight" title={inv.nombreEmisor}>
                               {inv.nombreEmisor}
                             </span>
+                            {invState.canonicalStatus !== "cfdi_validated" && (
+                              <span className={`${invState.badgeTone} text-[8.5px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider leading-none shadow-3xs flex items-center shrink-0`}>
+                                {invState.badgeLabel}
+                              </span>
+                            )}
                             {isNewlyAdded && (
                               <span className="bg-emerald-50 text-emerald-700 text-[8.5px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider leading-none shadow-3xs flex items-center gap-0.5 animate-pulse shrink-0">
                                 <Sparkles className="w-2.5 h-2.5 fill-current" />
@@ -2184,46 +2345,68 @@ export default function TicketsListScreen({
                             )}
                           </div>
                           <span className="text-[13px] font-black font-mono text-[#0B53F4] tracking-tight block mt-1">
-                            ${inv.total.toLocaleString("es-MX", { minimumFractionDigits: 2 })} MXN
+                            ${invState.displayTotal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
                           </span>
                         </div>
                       </div>
 
                       {/* Compact right actions stacked block (Hidden on mobile to avoid squeezing) */}
                       <div className="hidden sm:flex flex-col gap-1.5 min-w-[124px] shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedInvoiceId(inv.id || null)}
-                          className="w-full zt-btn-secondary-blue font-black rounded-xl py-1.5 px-3 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer"
-                        >
-                          <FileText className="w-3.5 h-3.5 stroke-[2.2]" />
-                          Ver PDF
-                        </button>
+                        {invState.canViewPdf ? (
+                          <button
+                            type="button"
+                            onClick={() => onViewDetails(item)}
+                            className="w-full zt-btn-secondary-blue font-black rounded-xl py-1.5 px-3 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer"
+                          >
+                            <FileText className="w-3.5 h-3.5 stroke-[2.2]" />
+                            Ver PDF
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => onViewDetails(item)}
+                            className="w-full zt-btn-secondary-blue font-black rounded-xl py-1.5 px-3 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5 stroke-[2.2]" />
+                            Ver detalles
+                          </button>
+                        )}
                         
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const associatedT = tickets.find(t => t.id === inv.ticketId || t.invoiceId === inv.folioFiscal);
-                            const ticketStatus = associatedT ? associatedT.status : "invoice_obtained";
-                            const isAllowed = ticketStatus === "cfdi_validated" || ticketStatus === "invoice_obtained" || ticketStatus === "completed";
-                            
-                            if (!isAllowed || !inv.xmlContent) {
-                              toast.error(
-                                "El XML aún no está disponible. ZenTicket debe obtenerlo primero desde el portal oficial del comercio.",
-                                "Descarga no disponible"
-                              );
-                              return;
-                            }
-                            downloadFile(inv.xmlContent, `Factura_${inv.nombreEmisor}_${inv.folioFiscal?.substring(0,8)}.xml`, "text/xml");
-                          }}
-                          className="w-full zt-btn-secondary-blue font-black rounded-xl py-1.5 px-3 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer"
-                        >
-                          <Download className="w-3.5 h-3.5 stroke-[2.2]" />
-                          Descargar XML
-                        </button>
+                        {invState.canDownloadXml && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!inv.xmlContent) {
+                                toast.error(
+                                  "El XML aún no está disponible. ZenTicket debe obtenerlo primero desde el portal oficial del comercio.",
+                                  "Descarga no disponible"
+                                );
+                                  return;
+                              }
+                              downloadFile(inv.xmlContent, `Factura_${inv.nombreEmisor}_${inv.folioFiscal?.substring(0,8)}.xml`, "text/xml");
+                            }}
+                            className="w-full zt-btn-secondary-blue font-black rounded-xl py-1.5 px-3 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5 stroke-[2.2]" />
+                            Descargar XML
+                          </button>
+                        )}
                       </div>
 
                     </div>
+
+                    {/* Alert Box if invoice requires attention */}
+                    {invState.shouldAppearInAttention && (() => {
+                      const alertStyle = getBillingAlertStyle(invState);
+                      return (
+                        <div className={`text-[11px] p-3.5 rounded-2xl leading-relaxed font-sans border ${alertStyle.bgClass} ${alertStyle.textClass}`}>
+                          <span className={`font-bold block uppercase text-[9px] mb-1 tracking-wider ${alertStyle.labelClass}`}>
+                            {invState.badgeLabel}:
+                          </span>
+                          {invState.message}
+                        </div>
+                      );
+                    })()}
 
                     {/* Lower metadata footer details */}
                     <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-[10px] text-slate-400 font-bold select-none">
@@ -2233,36 +2416,45 @@ export default function TicketsListScreen({
 
                     {/* Mobile action buttons (Exclusively shown on mobile as a row underneath to guarantee full width and no truncation) */}
                     <div className="flex sm:hidden gap-2 mt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedInvoiceId(inv.id || null)}
-                        className="flex-1 zt-btn-secondary-blue font-black rounded-xl py-2.5 px-3.5 text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-2xs cursor-pointer min-h-[42px]"
-                      >
-                        <FileText className="w-4 h-4 stroke-[2.2]" />
-                        Ver PDF
-                      </button>
+                       {invState.canViewPdf ? (
+                        <button
+                          type="button"
+                          onClick={() => onViewDetails(item)}
+                          className="flex-1 zt-btn-secondary-blue font-black rounded-xl py-2.5 px-3.5 text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-2xs cursor-pointer min-h-[42px]"
+                        >
+                          <FileText className="w-4 h-4 stroke-[2.2]" />
+                          Ver PDF
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onViewDetails(item)}
+                          className="flex-1 zt-btn-secondary-blue font-black rounded-xl py-2.5 px-3.5 text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-2xs cursor-pointer min-h-[42px]"
+                        >
+                          <Eye className="w-4 h-4 stroke-[2.2]" />
+                          Ver detalles
+                        </button>
+                      )}
                       
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const associatedT = tickets.find(t => t.id === inv.ticketId || t.invoiceId === inv.folioFiscal);
-                          const ticketStatus = associatedT ? associatedT.status : "invoice_obtained";
-                          const isAllowed = ticketStatus === "cfdi_validated" || ticketStatus === "invoice_obtained" || ticketStatus === "completed";
-                          
-                          if (!isAllowed || !inv.xmlContent) {
-                            toast.error(
-                              "El XML aún no está disponible. ZenTicket debe obtenerlo primero desde el portal oficial del comercio.",
-                              "Descarga no disponible"
-                            );
-                            return;
-                          }
-                          downloadFile(inv.xmlContent, `Factura_${inv.nombreEmisor}_${inv.folioFiscal?.substring(0,8)}.xml`, "text/xml");
-                        }}
-                        className="flex-1 zt-btn-secondary-blue font-black rounded-xl py-2.5 px-3.5 text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-2xs cursor-pointer min-h-[42px]"
-                      >
-                        <Download className="w-4 h-4 stroke-[2.2]" />
-                        Descargar XML
-                      </button>
+                      {invState.canDownloadXml && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!inv.xmlContent) {
+                              toast.error(
+                                "El XML aún no está disponible. ZenTicket debe obtenerlo primero desde el portal oficial del comercio.",
+                                "Descarga no disponible"
+                              );
+                              return;
+                            }
+                            downloadFile(inv.xmlContent, `Factura_${inv.nombreEmisor}_${inv.folioFiscal?.substring(0,8)}.xml`, "text/xml");
+                          }}
+                          className="flex-1 zt-btn-secondary-blue font-black rounded-xl py-2.5 px-3.5 text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-2xs cursor-pointer min-h-[42px]"
+                        >
+                          <Download className="w-4 h-4 stroke-[2.2]" />
+                          Descargar XML
+                        </button>
+                      )}
                     </div>
 
                   </div>

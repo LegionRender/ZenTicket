@@ -83,8 +83,9 @@ function getInvoiceCategoryStyles(category: string) {
 }
 import { useToast } from "@/shared/feedback/Toast";
 import { db, auth } from "@/services/firebase/firebase";
-import { getApiUrl } from "@/services/api";
+import { getApiUrl, fetchWithAuth } from "@/services/api";
 import { collection, limit, onSnapshot, query, orderBy, doc, getDoc, addDoc, updateDoc, where, getDocs } from "firebase/firestore";
+import { DiagnosticsPage } from "./diagnostics/pages/DiagnosticsPage";
 
 interface AdminScreenProps {
   connectors: Connector[];
@@ -127,6 +128,7 @@ export default function AdminScreen({
   const [activeFilter, setActiveFilter] = useState<"todo" | "activos" | "sat" | "portales">("todo");
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(3);
+  const [adminActiveTab, setAdminActiveTab] = useState<"dashboard" | "diagnostics">("dashboard");
 
   useEffect(() => {
     setVisibleCount(3);
@@ -373,12 +375,8 @@ export default function AdminScreen({
       if (!currentUser) throw new Error("Debes iniciar sesión como administrador.");
       const idToken = await currentUser.getIdToken();
       const trainingId = `portal-${merchantName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
-      const res = await fetch(getApiUrl("/api/tickets/train-jit"), {
+      const res = await fetchWithAuth("/api/tickets/train-jit", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${idToken}`
-        },
         body: JSON.stringify({
           adminMode: true,
           merchantName,
@@ -416,9 +414,8 @@ export default function AdminScreen({
     setReviewContractChecked(false);
     setReviewStepsChecked(false);
     try {
-      const res = await fetch("/api/admin/analyze-html", {
+      const res = await fetchWithAuth("/api/admin/analyze-html", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ htmlContent: htmlContent.trim() })
       });
       const data = await res.json();
@@ -945,9 +942,31 @@ export default function AdminScreen({
           </div>
         </div>
       </div>
+      
+      {/* Tab Switcher */}
+      <div className="zt-nav-tabs-container">
+        <button
+          type="button"
+          onClick={() => setAdminActiveTab("dashboard")}
+          className={`zt-nav-tab ${adminActiveTab === "dashboard" ? "zt-nav-tab-active" : ""}`}
+        >
+          Dashboard General
+        </button>
+        <button
+          type="button"
+          onClick={() => setAdminActiveTab("diagnostics")}
+          className={`zt-nav-tab ${adminActiveTab === "diagnostics" ? "zt-nav-tab-active" : ""}`}
+        >
+          Diagnóstico de Facturación
+        </button>
+      </div>
 
-      {/* 2. SECTION TITLE */}
-      <div className="flex items-center justify-between px-1">
+      {adminActiveTab === "diagnostics" ? (
+        <DiagnosticsPage />
+      ) : (
+        <>
+          {/* 2. SECTION TITLE */}
+          <div className="flex items-center justify-between px-1">
         <h2 className="text-xl font-black text-slate-800 tracking-tight">Resumen del Negocio</h2>
         <button
           onClick={() => toast.info("Filtro temporal bloqueado a mes corriente para auditoría.", "Periodo Activo")}
@@ -2914,6 +2933,35 @@ export default function AdminScreen({
                                 <p className="text-[10.5px] text-slate-500 font-medium leading-relaxed max-w-[200px] truncate-3-lines" title={t.errorMsg}>
                                   {t.errorMsg}
                                 </p>
+                                {t.reviewError?.probableCause && (
+                                  <div className="mt-2 p-2 bg-slate-50 rounded-lg border border-slate-200 text-[10px] space-y-1 max-w-[250px]">
+                                    <div className="flex justify-between">
+                                      <span className="font-bold text-slate-400 uppercase text-[8px]">Módulo:</span>
+                                      <span className="font-mono text-slate-600">{t.reviewError.module}</span>
+                                    </div>
+                                    {t.reviewError.stepIndex !== undefined && t.reviewError.stepIndex !== null && (
+                                      <div className="flex justify-between">
+                                        <span className="font-bold text-slate-400 uppercase text-[8px]">Paso:</span>
+                                        <span className="font-mono text-slate-650">#{t.reviewError.stepIndex}</span>
+                                      </div>
+                                    )}
+                                    <div className="border-t border-slate-100 my-1"></div>
+                                    <div>
+                                      <span className="font-extrabold text-slate-500 block uppercase text-[8px]">Causa Probable:</span>
+                                      <span className="text-slate-600 font-medium leading-tight block">{t.reviewError.probableCause}</span>
+                                    </div>
+                                    <div className="mt-1">
+                                      <span className="font-extrabold text-emerald-600 block uppercase text-[8px]">Acción Recomendada:</span>
+                                      <span className="text-emerald-700 font-bold leading-tight block">{t.reviewError.recommendedAction}</span>
+                                    </div>
+                                    {t.reviewError.technicalMessage && (
+                                      <div className="mt-1 bg-rose-50/50 p-1 rounded font-mono text-[9px] text-rose-700 break-all select-all leading-normal max-h-16 overflow-y-auto">
+                                        <span className="font-bold block uppercase text-[7px] text-rose-500">Tech Log:</span>
+                                        {t.reviewError.technicalMessage}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <span className="text-slate-400 font-medium">Ninguno</span>
@@ -2977,7 +3025,8 @@ export default function AdminScreen({
           <span className="text-[9px] text-[#0B53F4]/70 block mt-1 font-black uppercase tracking-wider font-mono">MXN Localization</span>
         </div>
       </div>
-
-    </div>
+    </>
+  )}
+</div>
   );
 }

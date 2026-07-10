@@ -47,15 +47,41 @@ function extractZip(zipPath: string, tmpDir: string): SniffedDocument {
   return { xmlPath, pdfPath, source: "zip" };
 }
 
+
 export async function collectDocuments(
   page: Page,
   _context: BrowserContext,
   tmpDir: string,
   downloadedFiles: Array<{ filename: string; path: string }>,
-  sniffer: NetworkSniffer
+  sniffer: NetworkSniffer,
+  expectedTotal?: number,
+  emisorRfc?: string,
+  receptorRfc?: string
 ): Promise<SniffedDocument> {
   let xmlPath = downloadedFiles.find(f => f.filename.toLowerCase().endsWith(".xml"))?.path;
   let pdfPath = downloadedFiles.find(f => f.filename.toLowerCase().endsWith(".pdf"))?.path;
+
+  // Resolve PDF files that might have been downloaded with non-pdf extensions (like .aspx)
+  if (!pdfPath) {
+    const pdfFile = downloadedFiles.find(f => {
+      if (fs.existsSync(f.path)) {
+        try {
+          const fd = fs.openSync(f.path, "r");
+          const buffer = Buffer.alloc(4);
+          fs.readSync(fd, buffer, 0, 4, 0);
+          fs.closeSync(fd);
+          return buffer.toString() === "%PDF";
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    });
+    if (pdfFile) {
+      pdfPath = pdfFile.path;
+    }
+  }
+
   const zipFile = downloadedFiles.find(f => f.filename.toLowerCase().endsWith(".zip"));
   if (zipFile && (!xmlPath || !pdfPath)) {
     const extracted = extractZip(zipFile.path, tmpDir);
@@ -65,7 +91,16 @@ export async function collectDocuments(
   }
   if (xmlPath) return { xmlPath, pdfPath, source: "download" };
 
-  const captures = await Promise.all(sniffer.captures);
+  const captures = await Promise.all(
+    sniffer.captures.map(p =>
+      Promise.race([
+        p,
+        new Promise<{ contentType: string; body: Buffer; url: string } | null>(resolve =>
+          setTimeout(() => resolve(null), 3000)
+        )
+      ])
+    )
+  );
   for (const capture of captures.filter(Boolean) as Array<{ contentType: string; body: Buffer; url: string }>) {
     if (capture.contentType.includes("zip")) {
       const extracted = extractZip(saveBuffer(tmpDir, "network-download.zip", capture.body), tmpDir);
@@ -118,5 +153,9 @@ export async function collectDocuments(
     if (match[1].includes("xml")) xmlPath ||= saveBuffer(tmpDir, "base64-cfdi.xml", body);
     if (match[1].includes("pdf")) pdfPath ||= saveBuffer(tmpDir, "base64-cfdi.pdf", body);
   }
+
+
+
   return { xmlPath, pdfPath, source: xmlPath ? "base64" : undefined };
 }
+

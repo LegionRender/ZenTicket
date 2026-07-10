@@ -774,7 +774,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ user, fiscalProf
                     <div>
                       <h4 className="text-xs font-black text-amber-800 uppercase tracking-wider">Requiere Activación de Pago</h4>
                       <p className="text-[10.5px] text-amber-700 leading-relaxed font-semibold mt-0.5">
-                        Has seleccionado un plan de pago. Para poder automatizar tus solicitudes de facturas de comercios, deberás activar tu suscripción mediante Mercado Pago o PayPal en la pestaña de Cuenta una vez completes el registro.
+                        Has seleccionado un plan de pago. Para poder automatizar tus solicitudes de facturas de comercios, deberás activar tu suscripción mediante tarjeta o Stripe Link en la pestaña de Cuenta una vez completes el registro.
                       </p>
                     </div>
                   </div>

@@ -90,6 +90,13 @@ const getCategoryStyles = (category: string) => {
 };
 
 function getConnectorMethodInfo(connector: Connector): { label: string; colorClass: string; dotClass: string } {
+  if (connector.isProductionReady === false) {
+    return {
+      label: "En Desarrollo (JIT)",
+      colorClass: "bg-amber-50 text-amber-700 border-amber-200/50",
+      dotClass: "bg-amber-500 animate-pulse"
+    };
+  }
   if (connector.learnedFrom === "portal_admin") {
     return {
       label: "Entrenamiento IA",
@@ -238,7 +245,7 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
     c.rfc.toLowerCase().includes(searchQuery.toLowerCase())
   );
   
-  const displayedMainConnectors = mainFilteredConnectors.slice(0, visibleCount);
+  const displayedMainConnectors = searchQuery.trim() ? mainFilteredConnectors : mainFilteredConnectors.slice(0, visibleCount);
 
   // Modal connectors list filtered with separate sub-states to keep search completely distinct
   const modalFilteredConnectors = sortedGlobalList.filter((c) => {
@@ -531,7 +538,7 @@ export default function ConnectorsList({ connectors, onLearnConnector, isLoading
         )}
 
         {/* VIEW INLINE MORE CONNECTORS BUTTONS */}
-        {mainFilteredConnectors.length > 3 && (
+        {mainFilteredConnectors.length > 3 && !searchQuery.trim() && (
           <div className="mt-3.5 relative z-10 flex gap-2.5">
             {visibleCount < mainFilteredConnectors.length ? (
               <button

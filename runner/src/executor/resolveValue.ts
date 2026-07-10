@@ -6,7 +6,14 @@ function readPath(base: any, key: string): unknown {
 }
 
 function portalValue(ticketData: any, key: string): string {
-  const value = readPath(ticketData?.portalFields, key);
+  let value = readPath(ticketData?.portalFields, key);
+  if (value === undefined || value === null) {
+    if (key === "transactionId") {
+      value = readPath(ticketData?.portalFields, "transactionNumber");
+    } else if (key === "transactionNumber") {
+      value = readPath(ticketData?.portalFields, "transactionId");
+    }
+  }
   if (value === undefined || value === null) return "";
   const resolved = String(value);
   if (UUID_PATTERN.test(resolved.trim()) || INTERNAL_ID_PATTERN.test(resolved.trim())) {
@@ -16,7 +23,19 @@ function portalValue(ticketData: any, key: string): string {
 }
 
 function resolvePath(path: string, ticketData: any, fiscalProfile: any, connector: any, portalMap: any): string {
-  const [base, key, ...rest] = path.trim().split(".");
+  const parts = path.trim().split(".");
+  if (parts.length === 1) {
+    const flatKey = parts[0];
+    if (flatKey === "rfcOrMembershipId" || flatKey === "rfc") return String(fiscalProfile?.rfc ?? "");
+    if (flatKey === "zipCode" || flatKey === "codigoPostal") return String(fiscalProfile?.codigoPostal ?? "");
+    if (flatKey === "ticketNumber") return portalValue(ticketData, "ticketNumber");
+    if (flatKey === "transactionNumber" || flatKey === "transactionId") {
+      return portalValue(ticketData, "transactionNumber") || portalValue(ticketData, "transactionId");
+    }
+    if (flatKey === "total") return portalValue(ticketData, "total");
+  }
+
+  const [base, key, ...rest] = parts;
   if (!key || rest.length) return "";
 
   // The runner may only read merchant inputs from the immutable portalFields snapshot.
@@ -72,7 +91,7 @@ export function resolveValue(
     matched = true;
     return resolvePath(path, ticketData, fiscalProfile, connector, portalMap);
   });
-  if (!matched && template.includes(".")) {
+  if (!matched && /^(portalFields|ticket|fiscalProfile|connector|portalMap)\.[^.]+$/.test(template.trim())) {
     resolved = resolvePath(template, ticketData, fiscalProfile, connector, portalMap);
   }
 

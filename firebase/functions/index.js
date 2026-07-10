@@ -1444,6 +1444,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
     await updateProgress(15, "Revisando si el ticket incluye una dirección de facturación...");
     
     let portalUrl = "";
+    let verifiedPortalSelectors = [];
     const portalCandidates = [];
     const ticketPortalCandidates = new Set();
     const addPortalCandidate = (candidate, source = "search") => {
@@ -1723,13 +1724,24 @@ app.post("/api/tickets/train-jit", async (req, res) => {
           authError.code = "PORTAL_AUTH_REQUIRED";
           throw authError;
         }
-        const visibleDataFields = page.locator("input:not([type='hidden']):visible, select:visible, textarea:visible");
+        const visibleDataFields = page.locator(
+          "input:not([type='hidden']):not([type='button']):not([type='submit']):not([type='image']):not([type='reset']):visible, select:visible, textarea:visible"
+        );
         if (await visibleDataFields.count().catch(() => 0) === 0) {
+          const blockingConfirmation = page.locator("button:visible, a:visible")
+            .filter({ hasText: /aceptar|cerrar|entendido/i })
+            .or(page.locator("input[type='button'][value*='Aceptar' i]:visible, input[type='submit'][value*='Aceptar' i]:visible"))
+            .first();
+          if (await blockingConfirmation.isVisible().catch(() => false)) {
+            await blockingConfirmation.click({ force: true }).catch(() => undefined);
+            await page.waitForTimeout(500);
+          }
           const billingAction = page.locator("a:visible, button:visible")
             .filter({ hasText: /obtener factura|facturar ahora|iniciar facturaci[oó]n|generar factura|solicitar factura/i })
             .first();
           if (await billingAction.isVisible().catch(() => false)) {
-            await billingAction.click();
+            await billingAction.click({ force: true });
+            await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => undefined);
             await page.waitForTimeout(1200);
             const confirmation = page.locator("button:visible, a:visible")
               .filter({ hasText: /aceptar|continuar/i })
@@ -1741,6 +1753,9 @@ app.post("/api/tickets/train-jit", async (req, res) => {
               await page.waitForTimeout(3000);
             }
           }
+        }
+        if (await visibleDataFields.count().catch(() => 0) > 0) {
+          portalUrl = page.url();
         }
         portalMetadata = await page.evaluate(() => ({
           framework: document.querySelector("[ng-version]") ? "Angular" :
@@ -1760,7 +1775,9 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         const portalScreenshot = (await page.screenshot({ fullPage: true })).toString("base64");
 
         const discoveredInputs = await page.evaluate(() => {
-          return Array.from(document.querySelectorAll("input:not([type='hidden']), select, textarea"))
+          return Array.from(document.querySelectorAll(
+            "input:not([type='hidden']):not([type='button']):not([type='submit']):not([type='image']):not([type='reset']), select, textarea"
+          ))
             .filter(el => {
               const rect = el.getBoundingClientRect();
               const style = getComputedStyle(el);
@@ -1770,6 +1787,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
             name: el.name || "",
             type: el.getAttribute("type") || "",
             placeholder: el.getAttribute("placeholder") || "",
+            selector: el.id ? `#${CSS.escape(el.id)}` : el.name ? `[name="${CSS.escape(el.name)}"]` : "",
             labelText: (() => {
               if (el.id) {
                 const lbl = document.querySelector(`label[for="${el.id}"]`);
@@ -1780,6 +1798,21 @@ app.post("/api/tickets/train-jit", async (req, res) => {
             })()
           }));
         });
+        const discoveredActions = await page.evaluate(() => Array.from(
+          document.querySelectorAll("button, input[type='button'], input[type='submit'], a")
+        ).filter(el => {
+          const rect = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+        }).slice(0, 30).map(el => ({
+          selector: el.id ? `#${CSS.escape(el.id)}` :
+            el.getAttribute("name") ? `[name="${CSS.escape(el.getAttribute("name"))}"]` : "",
+          text: (el.textContent || el.getAttribute("value") || "").trim()
+        })).filter(item => item.selector));
+        verifiedPortalSelectors = [...new Set([
+          ...discoveredInputs.map(input => input.selector),
+          ...discoveredActions.map(action => action.selector)
+        ].filter(Boolean))];
         await browser.close();
         browser = null;
 
@@ -1797,10 +1830,18 @@ app.post("/api/tickets/train-jit", async (req, res) => {
               Inputs reales del portal:
               ${JSON.stringify(discoveredInputs, null, 2)}
 
+              Acciones reales del portal:
+              ${JSON.stringify(discoveredActions, null, 2)}
+
               DOM real del portal:
               ${portalDom}
 
-              Devuelve requiredPortalFields, fiscalFields y stepsJson. No agregues campos que no estén respaldados por el DOM. No automatices usuarios, contraseñas, CAPTCHA ni OTP.` }
+              Reglas obligatorias:
+              - Clasifica TODOS los inputs reales visibles de captura. RFC, razón social, código postal, régimen, uso CFDI y correo son fiscalFields; los demás son requiredPortalFields.
+              - En stepsJson usa exactamente el valor "selector" entregado en Inputs reales. No inventes selectores por nombres semánticos.
+              - Cada input de captura debe tener un paso fill o select antes del botón de continuación.
+              - No agregues campos que no estén respaldados por el DOM. No automatices usuarios, contraseñas, CAPTCHA ni OTP.
+              Devuelve requiredPortalFields, fiscalFields y stepsJson.` }
             ],
             config: {
               responseMimeType: "application/json",
@@ -1865,6 +1906,29 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       throw wrappedError;
     }
 
+    discoverResult.requiredPortalFields = (discoverResult.requiredPortalFields || []).map(field => {
+      const key = String(field.key || field.canonicalKey || "").replace(/^portalFields\./, "").trim();
+      return { ...field, key, canonicalKey: key };
+    });
+    const fiscalKeyAliases = {};
+    discoverResult.fiscalFields = (discoverResult.fiscalFields || []).map(field => {
+      const originalKey = String(field.key || "").replace(/^fiscalProfile\./, "").trim();
+      const semantic = `${originalKey} ${field.label || ""}`.toLowerCase();
+      const key = /rfc|membres/.test(semantic) ? "rfc" :
+        /postal|zip|c[oó]digo.?postal|^cp$/.test(semantic) ? "codigoPostal" :
+        /raz[oó]n|business|company/.test(semantic) ? "razonSocial" :
+        /r[eé]gimen|regime/.test(semantic) ? "regimenFiscal" :
+        /uso|cfdi/.test(semantic) ? "usoCFDI" :
+        /correo|email/.test(semantic) ? "correoElectronico" : originalKey;
+      if (originalKey) fiscalKeyAliases[originalKey] = key;
+      return { ...field, key };
+    });
+    if (typeof discoverResult.stepsJson === "string") {
+      for (const [originalKey, canonicalKey] of Object.entries(fiscalKeyAliases)) {
+        discoverResult.stepsJson = discoverResult.stepsJson.replaceAll(`{{${originalKey}}}`, `{{${canonicalKey}}}`);
+      }
+    }
+
     const supportedStepTypes = new Set(["goto", "fill", "evaluate", "select", "click", "check", "radio", "waitForSelector", "waitForNavigation", "waitForTimeout", "assertText", "extractText", "conditional", "waitForDownload"]);
     const stepTypeAliases = {
       navigate: "goto",
@@ -1880,8 +1944,11 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       const rawSteps = typeof source === "string" ? JSON.parse(source) : source;
       if (!Array.isArray(rawSteps) || rawSteps.length === 0) throw new Error("stepsJson vacío");
       const normalized = rawSteps.map(raw => {
-        const sourceType = raw.type || raw.action;
-        const type = stepTypeAliases[sourceType] || sourceType;
+        const sourceType = raw.type || raw.action || raw.stepType || raw.operation || "";
+        const inferredType = raw.url ? "goto" :
+          raw.selector && typeof raw.value === "string" ? "fill" :
+          raw.selector ? "click" : "";
+        const type = stepTypeAliases[sourceType] || sourceType || inferredType;
         return type === "goto" ? { ...raw, type, url: portalUrl } : { ...raw, type };
       });
       if (!normalized.some(step => step.type === "goto")) normalized.unshift({ type: "goto", url: portalUrl });
@@ -1889,6 +1956,9 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         if (!supportedStepTypes.has(step.type)) throw new Error(`tipo de paso no soportado: ${step.type || "vacío"}`);
         if (["fill", "evaluate", "select", "click", "check", "radio", "waitForSelector", "assertText", "extractText"].includes(step.type) && !step.selector) {
           throw new Error(`el paso ${step.type} no contiene selector`);
+        }
+        if (step.selector && verifiedPortalSelectors.length > 0 && !verifiedPortalSelectors.includes(step.selector)) {
+          throw new Error(`el selector no fue observado en el DOM real: ${step.selector}`);
         }
         if (["fill", "evaluate", "select", "assertText"].includes(step.type) && typeof step.value !== "string") {
           throw new Error(`el paso ${step.type} no contiene value`);
@@ -1917,6 +1987,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
           contents: `Repara este stepsJson sin inventar selectores nuevos. Usa exclusivamente estos tipos:
           ${[...supportedStepTypes].join(", ")}.
           Cada fill/select/evaluate/assertText requiere value; cada interacción con elemento requiere selector.
+          Selectores permitidos observados en el DOM: ${JSON.stringify(verifiedPortalSelectors)}
           Mapa inválido: ${JSON.stringify(discoverResult.stepsJson)}
           Error: ${stepError.message}`,
           config: {
@@ -1949,7 +2020,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       ]
     };
     const fields = discoverResult.requiredPortalFields.map(f => ({
-      key: f.canonicalKey,
+      key: f.key,
       name: f.label,
       selector: "input",
       type: f.type === "number" ? "number" : "text",
@@ -2076,6 +2147,9 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       const targetedPromptText = `Analiza la imagen del ticket de compra de la tienda: ${nombreEmisor}.
       Extrae únicamente los campos requeridos por el portal de facturación oficial:
       ${discoverResult.requiredPortalFields.map(f => `- Campo: ${f.label} (clave: ${f.key.replace(/^portalFields\./, "")})`).join("\n")}
+      Texto OCR previo del mismo ticket:
+      ${String(ticketData.rawOcrText || "").slice(0, 12000)}
+      Reglas: relaciona cada campo con su etiqueta o prefijo impreso. "Número de ticket" corresponde a TICKET o TC, no a terminal/TE, tienda/TDA, operación/OP ni transacción/TR. "# Transacción" corresponde a TRANSACCIÓN o TR. Elimina únicamente el prefijo y conserva todos los dígitos.
       También extrae el total de la compra (total) con decimales, la fecha de compra (fechaCompra) en formato YYYY-MM-DD, y el folio de venta (folio).`;
 
       const customProperties = {
@@ -2135,31 +2209,111 @@ app.post("/api/tickets/train-jit", async (req, res) => {
     const portalFields = {};
     discoverResult.requiredPortalFields.forEach(f => {
       const fieldKey = f.key.replace(/^portalFields\./, "");
-      portalFields[fieldKey] = ocrResultData[fieldKey] || "";
+      const rawValue = ocrResultData[fieldKey];
+      portalFields[fieldKey] = rawValue == null || /^(null|undefined)$/i.test(String(rawValue).trim()) ? "" : rawValue;
     });
+    const sourceOcrText = String(ticketData.rawOcrText || ocrResultData.rawOcrText || "");
+    const printedTicketNumber = sourceOcrText.match(/\bTC\s*#?\s*([0-9]{4,30})\b/i)?.[1];
+    const printedTransactionNumber = sourceOcrText.match(/\bTR\s*#?\s*([0-9]{1,12})\b/i)?.[1];
+    for (const field of discoverResult.requiredPortalFields) {
+      const fieldKey = String(field.key || "").replace(/^portalFields\./, "");
+      const semantic = `${fieldKey} ${field.label || ""}`.toLowerCase();
+      if (/ticket/.test(semantic) && printedTicketNumber) portalFields[fieldKey] = printedTicketNumber;
+      if (/transacci|transaction/.test(semantic) && printedTransactionNumber) portalFields[fieldKey] = printedTransactionNumber;
+    }
     portalFields.total = ocrResultData.total || ticketData.total || 0;
     if (!portalFields.billingReference) {
-      portalFields.billingReference = ocrResultData.billingReference || ocrResultData.folio || ticketData.folio || "";
+      const reference = ocrResultData.billingReference || ocrResultData.folio || ticketData.folio || "";
+      portalFields.billingReference = /^(null|undefined)$/i.test(String(reference).trim()) ? "" : reference;
     }
 
     const updatedFields = {
       status: "extracted",
-      nombreEmisor: ocrResultData.nombreEmisor || nombreEmisor,
-      rfcEmisor: ocrResultData.rfcEmisor || rfcEmisor,
+      nombreEmisor: nombreEmisor || ocrResultData.nombreEmisor,
+      rfcEmisor: rfcEmisor || ticketData.rfcEmisor || ocrResultData.rfcEmisor,
       total: ocrResultData.total || ticketData.total || 0,
-      folio: ocrResultData.folio || ticketData.folio || "",
+      folio: portalFields.billingReference || ticketData.folio || "",
       fechaCompra: ocrResultData.fechaCompra || ticketData.fechaCompra || "",
-      billingReference: ocrResultData.folio || ticketData.folio || "",
+      billingReference: portalFields.billingReference || ticketData.folio || "",
       portalFields: portalFields,
       connectorId: connectorId,
       updatedAt: new Date().toISOString()
     };
     await db.collection("tickets").doc(ticketId).update(updatedFields);
 
-    await updateProgress(100, "¡Configuración completada con éxito! Iniciando solicitud en el portal...", "completed");
+    const fiscalProfileDoc = await db.collection("fiscalProfiles").doc(decodedToken.uid).get();
+    const fiscalProfile = fiscalProfileDoc.exists ? fiscalProfileDoc.data() : {};
+    const fiscalProfileSnapshot = {
+      userId: decodedToken.uid,
+      rfc: String(fiscalProfile.rfc || "").trim(),
+      razonSocial: String(fiscalProfile.razonSocial || "").trim(),
+      regimenFiscal: String(fiscalProfile.regimenFiscal || "").trim(),
+      codigoPostal: String(fiscalProfile.codigoPostal || "").trim(),
+      usoCFDI: String(fiscalProfile.usoCFDI || fiscalProfile.cfdiUse || "").trim(),
+      correoElectronico: String(
+        fiscalProfile.correoElectronico || fiscalProfile.correoRecepcion || decodedToken.email || ""
+      ).trim(),
+      createdAt: fiscalProfile.createdAt || new Date().toISOString()
+    };
+    const missingFiscalFields = ["rfc", "razonSocial", "regimenFiscal", "codigoPostal", "usoCFDI", "correoElectronico"]
+      .filter(key => !fiscalProfileSnapshot[key]);
+    let invoiceJobId = null;
+    if (missingFiscalFields.length === 0) {
+      const existingJobs = await db.collection("invoice_jobs").where("ticketId", "==", ticketId).get();
+      const existingActiveJob = existingJobs.docs.find(doc =>
+        ["pending", "locked", "running", "waiting_user_action", "waiting_user_input"].includes(doc.data().status)
+      );
+      if (existingActiveJob) {
+        invoiceJobId = existingActiveJob.id;
+      } else {
+        const jobRef = await db.collection("invoice_jobs").add({
+          ticketId,
+          userId: decodedToken.uid,
+          status: "pending",
+          connectorId,
+          portalMapId: `map-${connectorId}`,
+          connectorStatusAtRun: newConnector.status,
+          ticketDataSnapshot: {
+            merchantName: updatedFields.nombreEmisor,
+            portalFields,
+            expectedTicketTotal: Number(updatedFields.total || 0),
+            rawOcrText: ocrResultData.rawOcrText || ticketData.rawOcrText || ""
+          },
+          fiscalProfileSnapshot,
+          attempts: 0,
+          maxAttempts: 3,
+          currentStepIndex: 0,
+          waitingForFields: [],
+          canResume: true,
+          lastCompletedStepIndex: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        invoiceJobId = jobRef.id;
+      }
+      await db.collection("tickets").doc(ticketId).update({
+        status: "queued_for_runner",
+        jobId: invoiceJobId,
+        reviewReasonCode: admin.firestore.FieldValue.delete(),
+        reviewError: admin.firestore.FieldValue.delete(),
+        errorMsg: admin.firestore.FieldValue.delete(),
+        updatedAt: new Date().toISOString()
+      });
+      await updateProgress(100, "Conector listo. La solicitud ya fue enviada al portal del comercio.", "completed");
+    } else {
+      await db.collection("tickets").doc(ticketId).update({
+        status: "waiting_fiscal_profile",
+        reviewReasonCode: "MISSING_FISCAL_PROFILE",
+        errorMsg: "Completa tus datos fiscales para continuar con la factura.",
+        missingFields: missingFiscalFields.map(key => `fiscalProfile.${key}`),
+        updatedAt: new Date().toISOString()
+      });
+      await updateProgress(100, "El portal está listo. Faltan datos fiscales del receptor para continuar.", "completed");
+    }
 
     res.json({
       success: true,
+      jobId: invoiceJobId,
       connector: newConnector,
       ocrResult: {
         ...ocrResultData,

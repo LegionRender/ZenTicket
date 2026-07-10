@@ -1,4 +1,4 @@
-import { getApiUrl } from "./api-client";
+import { getApiUrl, fetchWithAuth } from "./api-client";
 
 export interface ParseConstanciaParams {
   fileBase64: string;
@@ -27,13 +27,13 @@ export const parseConstancia = async ({
   mimeType,
   personalGeminiKey
 }: ParseConstanciaParams): Promise<Response> => {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {};
   if (personalGeminiKey) {
     headers["x-gemini-api-key"] = personalGeminiKey;
   }
 
   try {
-    return await fetch(getApiUrl("/api/fiscal/parse-constancia"), {
+    return await fetchWithAuth("/api/fiscal/parse-constancia", {
       method: "POST",
       headers,
       body: JSON.stringify({ file: fileBase64, mimeType }),
@@ -46,3 +46,4 @@ export const parseConstancia = async ({
     });
   }
 };
+

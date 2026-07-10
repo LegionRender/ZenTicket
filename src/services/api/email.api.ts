@@ -1,4 +1,4 @@
-import { getApiUrl } from "./api-client";
+import { getApiUrl, fetchWithAuth } from "./api-client";
 
 export interface SendEmailParams {
   to: string;
@@ -23,9 +23,8 @@ const createMockResponse = (data: any): Response => {
  */
 export const sendEmail = async ({ to, invoice }: SendEmailParams): Promise<Response> => {
   try {
-    const response = await fetch(getApiUrl("/api/email/send"), {
+    const response = await fetchWithAuth("/api/email/send", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ to, invoice }),
     });
 
@@ -45,3 +44,4 @@ export const sendEmail = async ({ to, invoice }: SendEmailParams): Promise<Respo
 
   return createMockResponse(mockData);
 };
+

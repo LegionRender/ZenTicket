@@ -12,7 +12,9 @@ import {
   query,
   where,
   onSnapshot,
-  deleteDoc
+  deleteDoc,
+  updateDoc,
+  serverTimestamp
 } from "firebase/firestore";
 import { toast } from "sonner";
 import {
@@ -37,12 +39,12 @@ import TicketsListScreen from "@/workspace/features/tickets/TicketsListScreen";
 import ConnectorsList from "@/workspace/features/connectors/ConnectorsList";
 import VaultScreen from "@/workspace/features/expenses/VaultScreen";
 import ProfileForm from "@/workspace/features/account/ProfileForm";
-import AdminScreen from "@/admin/pages/AdminScreen";
+import AdminScreen from "@/workspace/admin/AdminScreen";
 import Logo from "@/shared/brand/Logo";
-import { getApiUrl } from "@/services/api/api-client";
+import { getApiUrl, fetchWithAuth } from "@/services/api/api-client";
 import { ZenLogo } from "@/shared/brand/ZenLogo";
 import { OnboardingFlow } from "@/auth/components/OnboardingFlow";
-
+import { getBillingVisualKey } from "@/workspace/utils/billingStateHelpers";
 export const Dashboard = () => {
   const { user, logout } = useAuth();
 
@@ -59,32 +61,66 @@ export const Dashboard = () => {
 
   // Memoized auto-healing invoices list. Recreates invoice entries for completed tickets whose invoice document failed to write.
   const combinedInvoices = useMemo(() => {
-    const list = [...invoices];
-    const invoiceUuids = new Set(invoices.map(inv => inv.folioFiscal));
-    
+    const activeInvoices = invoices.filter(inv =>
+      inv.hiddenFromUser !== true &&
+      inv.linkedTicketDeleted !== true
+    );
+
+    const list = [...activeInvoices];
+    const representedKeys = new Set(activeInvoices.map(inv => getBillingVisualKey({ invoice: inv })));
+    const invoiceUuids = new Set(activeInvoices.map(inv => inv.folioFiscal));
+
+    // Also add keys of any active/non-deleted ticket that already has a real invoice matched to it
     tickets.forEach(t => {
+      if (t.hiddenFromUser === true || t.deletedAt || t.status === "deleted") return;
+      const matchedInv = activeInvoices.find(inv => 
+        inv.ticketId === t.id || 
+        (t.invoiceId && inv.folioFiscal === t.invoiceId) ||
+        (t.invoiceId && inv.id === t.invoiceId)
+      );
+      if (matchedInv) {
+        representedKeys.add(getBillingVisualKey({ ticket: t }));
+        representedKeys.add(getBillingVisualKey({ ticket: t, invoice: matchedInv }));
+      }
+    });
+
+    tickets.forEach(t => {
+      if (t.hiddenFromUser === true || t.deletedAt || t.status === "deleted") return;
+
       if (t.status === "completed" || t.status === "invoice_obtained" || t.status === "cfdi_validated" || t.status === "merchant_cfdi_downloaded") {
         const uuid = t.invoiceId;
-        if (uuid && !invoiceUuids.has(uuid)) {
-          list.push({
-            id: `inv-fallback-${t.id}`,
-            userId: t.userId,
-            ticketId: t.id || "",
-            folioFiscal: uuid,
-            rfcEmisor: t.rfcEmisor || "",
-            nombreEmisor: t.nombreEmisor || "Emisor SAT",
-            rfcReceptor: fiscalProfile?.rfc || "",
-            nombreReceptor: fiscalProfile?.razonSocial || "Público General",
-            total: t.total || 0,
-            createdAt: t.createdAt,
-            cost: t.cost || 2.50,
-            rawCost: t.rawCost || 0.0016,
-            connectorType: "existente",
-            invoiceNumber: list.length + 1,
-            xmlContent: "",
-            pdfHtml: ""
-          });
-        }
+        const ticketKey = getBillingVisualKey({ ticket: t });
+        
+        if (representedKeys.has(ticketKey)) return;
+        if (uuid && invoiceUuids.has(uuid)) return;
+
+        list.push({
+          id: `inv-fallback-${t.id}`,
+          userId: t.userId,
+          ticketId: t.id || "",
+          folioFiscal: uuid || "",
+          rfcEmisor: t.rfcEmisor || "",
+          nombreEmisor: t.nombreEmisor || "Emisor SAT",
+          rfcReceptor: fiscalProfile?.rfc || "",
+          nombreReceptor: fiscalProfile?.razonSocial || "Público General",
+          total: t.total || 0,
+          createdAt: t.createdAt,
+          cost: t.cost || 2.50,
+          rawCost: t.rawCost || 0.0016,
+          connectorType: "existente",
+          invoiceNumber: list.length + 1,
+          xmlContent: "",
+          pdfHtml: "",
+          synthetic: true,
+          sourceType: "synthetic_invoice",
+          isCfdiValidated: false,
+          validationStatus: "unverified",
+          shouldAppearInReady: false,
+          canViewPdf: false,
+          canDownloadXml: false
+        });
+
+        representedKeys.add(ticketKey);
       }
     });
     
@@ -720,149 +756,17 @@ export const Dashboard = () => {
     };
   }, [tickets, fiscalProfile, connectors, user]);
 
-  const recoverUserHistoryByMatchingDetails = async (targetEmail, targetPhone, targetRfc) => {
-    if (!user) return;
-
-    const emailToMatch = (targetEmail || "").trim().toLowerCase();
-    const phoneToMatch = (targetPhone || "").trim();
-    const rfcToMatch = (targetRfc || "").trim().toUpperCase();
-
-    const isMockRfc = rfcToMatch === "" || rfcToMatch === "CABE850101ABC" || rfcToMatch === "GOMD850101XYZ";
-    const isMockPhone = phoneToMatch === "" || phoneToMatch === "+52 55 1234 5678" || phoneToMatch === "5512345678";
-
-    if (!emailToMatch && isMockPhone && isMockRfc) {
-      return;
-    }
-
-    const matchedOldUserIds = new Set();
-    let recoveryToastId = null;
-
-    try {
-      // Query fiscal profiles to find any records with matching email, phone, or RFC belonging to another user
-      const qProfiles = query(collection(db, "fiscalProfiles"));
-      const snapProfiles = await getDocs(qProfiles);
-
-      snapProfiles.forEach(docSnap => {
-        const data = docSnap.data();
-        const oldUid = docSnap.id;
-        if (oldUid !== user.uid) {
-          const profileEmail = (data.correoElectronico || "").trim().toLowerCase();
-          const profileRecepcion = (data.correoRecepcion || "").trim().toLowerCase();
-          const profilePhone = (data.telefono || "").trim();
-          const profileRfc = (data.rfc || "").trim().toUpperCase();
-
-          const emailMatched = emailToMatch && (profileEmail === emailToMatch || profileRecepcion === emailToMatch);
-          const phoneMatched = !isMockPhone && phoneToMatch && (profilePhone === phoneToMatch);
-          const rfcMatched = !isMockRfc && rfcToMatch && (profileRfc === rfcToMatch);
-
-          if (emailMatched || phoneMatched || rfcMatched) {
-            matchedOldUserIds.add(oldUid);
-          }
-        }
-      });
-
-      if (matchedOldUserIds.size === 0) {
-        return;
-      }
-
-      recoveryToastId = toast.loading("Sincronizando y recuperando historial de cuenta detectado...");
-
-      let totalTicketsMigrated = 0;
-      let totalInvoicesMigrated = 0;
-      let totalConnectorsMigrated = 0;
-      let recoveredProfileData = null;
-
-      for (const oldUid of matchedOldUserIds) {
-        const oldProfileDoc = snapProfiles.docs.find(d => d.id === oldUid);
-        if (oldProfileDoc) {
-          recoveredProfileData = oldProfileDoc.data();
-        }
-
-        // Migrate tickets
-        try {
-          const qTickets = query(collection(db, "tickets"), where("userId", "==", oldUid));
-          const snapTickets = await getDocs(qTickets);
-          for (const tDoc of snapTickets.docs) {
-            await setDoc(doc(db, "tickets", tDoc.id), { userId: user.uid }, { merge: true });
-            totalTicketsMigrated++;
-          }
-        } catch (ticketErr) {
-          console.warn(`Could not migrate tickets for user ${oldUid}:`, ticketErr);
-        }
-
-        // Migrate invoices
-        try {
-          const qInvoices = query(collection(db, "users", oldUid, "invoices"));
-          const snapInvoices = await getDocs(qInvoices);
-          for (const iDoc of snapInvoices.docs) {
-            const data = iDoc.data();
-            await setDoc(doc(db, "users", user.uid, "invoices", iDoc.id), { ...data, userId: user.uid }, { merge: true });
-            await deleteDoc(doc(db, "users", oldUid, "invoices", iDoc.id));
-            totalInvoicesMigrated++;
-          }
-        } catch (invoiceErr) {
-          console.warn(`Could not migrate invoices for user ${oldUid}:`, invoiceErr);
-        }
-
-        // Migrate connectors
-        try {
-          const qConnectors = query(collection(db, "connectors"), where("userId", "==", oldUid));
-          const snapConnectors = await getDocs(qConnectors);
-          for (const cDoc of snapConnectors.docs) {
-            await setDoc(doc(db, "connectors", cDoc.id), { userId: user.uid }, { merge: true });
-            totalConnectorsMigrated++;
-          }
-        } catch (connErr) {
-          console.warn(`Could not migrate connectors for user ${oldUid}:`, connErr);
-        }
-
-        // Migrate automation trainings
-        try {
-          const qTrainings = query(collection(db, "automation_trainings"), where("userId", "==", oldUid));
-          const snapTrainings = await getDocs(qTrainings);
-          for (const trDoc of snapTrainings.docs) {
-            await setDoc(doc(db, "automation_trainings", trDoc.id), { userId: user.uid }, { merge: true });
-          }
-        } catch (trainErr) {
-          console.warn(`Could not migrate automation trainings for user ${oldUid}:`, trainErr);
-        }
-      }
-
-      if (recoveredProfileData) {
-        try {
-          const currentProfileRef = doc(db, "fiscalProfiles", user.uid);
-          await setDoc(currentProfileRef, {
-            ...recoveredProfileData,
-            userId: user.uid,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-        } catch (profileWriteErr) {
-          console.warn(`Could not merge profile data for user ${user.uid}:`, profileWriteErr);
-        }
-      }
-
-      toast.success(`🎉 ¡Memoria sincronizada! Recuperamos ${totalTicketsMigrated} tickets, ${totalInvoicesMigrated} CFDI y ${totalConnectorsMigrated} conectores de tu historial previo.`);
-    } catch (err) {
-      console.error("Error in historical recovery:", err);
-    } finally {
-      if (recoveryToastId) {
-        toast.dismiss(recoveryToastId);
-      }
-    }
-  };
+  // TODO: Si existe necesidad futura de recuperación de cuenta, implementar
+  // como proceso administrativo manual, auditado y no automático en el backend.
+  // Se desactiva por seguridad para evitar fugas y cruce de datos entre usuarios.
 
   useEffect(() => {
     if (user) {
       // Sync/Create Stripe Customer
       const syncStripeCustomer = async () => {
         try {
-          const token = await user.getIdToken();
-          await fetch(getApiUrl("/api/billing/sync-customer"), {
+          await fetchWithAuth("/api/billing/sync-customer", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`
-            },
             body: JSON.stringify({
               name: user.displayName || ""
             })
@@ -872,7 +776,6 @@ export const Dashboard = () => {
         }
       };
       syncStripeCustomer();
-      recoverUserHistoryByMatchingDetails(user.email, null, null);
     }
   }, [user]);
 
@@ -882,32 +785,28 @@ export const Dashboard = () => {
     if (!user) return;
     setProfileSaving(true);
     try {
-      await recoverUserHistoryByMatchingDetails(
-        profileData.correoElectronico || user.email,
-        profileData.telefono,
-        profileData.rfc
-      );
-
       const docRef = doc(db, "fiscalProfiles", user.uid);
+      
+      // Omit all subscription and Stripe system properties to prevent overwriting Stripe updates
+      const {
+        plan,
+        planStartDate,
+        paymentStatus,
+        autoRenew,
+        stripeCustomerId,
+        invoicesLimit,
+        ...allowedProfileData
+      } = profileData;
+
       const updatedProfile = {
-        ...profileData,
+        ...allowedProfileData,
         userId: user.uid,
-        onboardingCompleted: true, // Prevent kicking user out to OnboardingFlow upon save
+        onboardingCompleted: true,
         updatedAt: new Date().toISOString()
       };
       
       try {
         await setDoc(docRef, updatedProfile, { merge: true });
-        if (profileData.plan) {
-          const subRef = doc(db, "subscriptions", user.uid);
-          const planName = profileData.plan === "gratuito" ? "Plan Gratuito" : profileData.plan === "personal" ? "Plan Personal" : profileData.plan === "empresa" ? "Plan Empresa" : `Plan ${profileData.plan.charAt(0).toUpperCase() + profileData.plan.slice(1)}`;
-          await setDoc(subRef, {
-            planId: profileData.plan,
-            planName: planName,
-            status: profileData.plan === "gratuito" ? "inactive" : "subscription_active",
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-        }
       } catch (dbErr) {
         console.warn("Database save failed, saving locally:", dbErr);
         if (dbErr?.message?.includes("Quota") || dbErr?.message?.includes("quota") || dbErr?.code?.includes("resource-exhausted")) {
@@ -1007,24 +906,38 @@ export const Dashboard = () => {
   const onSaveTicketToDb = async (ticketData) => {
     if (!user) return "";
     try {
-      const gId = "ticket_" + Math.random().toString(36).substring(2, 11);
-      const cleanedTicketData = cleanUndefined(ticketData);
+      const clientRequestId = ticketData.clientRequestId || ticketData.id || "req_" + Math.random().toString(36).substring(2, 15);
+      const cleanedTicketData = {
+        ...cleanUndefined(ticketData),
+        clientRequestId
+      };
+
+      const response = await fetchWithAuth("/api/tickets", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Idempotency-Key": clientRequestId
+        },
+        body: JSON.stringify(cleanedTicketData)
+      });
+
+      if (!response.ok) {
+        let errorMsg = "Backend save endpoint failed";
+        try {
+          const errJson = await response.json();
+          if (errJson.error) errorMsg = errJson.error;
+        } catch (e) {}
+        throw new Error(errorMsg);
+      }
+
+      const resJson = await response.json();
+      const savedTicketId = resJson.id;
       const tkt = {
-        id: gId,
+        id: savedTicketId,
         ...cleanedTicketData,
         userId: user.uid,
         createdAt: ticketData.createdAt || new Date().toISOString()
       };
-
-      try {
-        const docRef = doc(db, "tickets", gId);
-        await setDoc(docRef, tkt);
-      } catch (dbErr) {
-        console.warn("Ticket DB save failed due to quota or validation, saving locally:", dbErr);
-        if (dbErr?.message?.includes("Quota") || dbErr?.message?.includes("quota") || dbErr?.code?.includes("resource-exhausted")) {
-          setIsQuotaExceeded(true);
-        }
-      }
 
       setTickets(prev => {
         if (prev.some(t => t.id === tkt.id)) {
@@ -1035,7 +948,7 @@ export const Dashboard = () => {
         return next;
       });
 
-      return tkt.id;
+      return savedTicketId;
     } catch (e) {
       console.error("Error saving ticket photo:", e);
       throw e;
@@ -1122,27 +1035,86 @@ export const Dashboard = () => {
     }
   };
 
-  const onDeleteTicket = async (ticketId) => {
+  const onDeleteTicket = async (ticketId, invoiceId = null) => {
     try {
-      try {
-        const docRef = doc(db, "tickets", ticketId);
-        await deleteDoc(docRef);
-      } catch (dbErr) {
-        console.warn("Delete DB call failed due to quota, deleting locally:", dbErr);
-        if (dbErr?.message?.includes("Quota") || dbErr?.message?.includes("quota") || dbErr?.code?.includes("resource-exhausted")) {
-          setIsQuotaExceeded(true);
+      if (ticketId) {
+        try {
+          const docRef = doc(db, "tickets", ticketId);
+          await updateDoc(docRef, {
+            hiddenFromUser: true,
+            deletedAt: serverTimestamp(),
+            deletedBy: user.uid,
+            status: "deleted"
+          });
+        } catch (dbErr) {
+          console.warn("Soft delete ticket DB call failed, updating locally:", dbErr);
+          if (dbErr?.message?.includes("Quota") || dbErr?.message?.includes("quota") || dbErr?.code?.includes("resource-exhausted")) {
+            setIsQuotaExceeded(true);
+          }
         }
       }
 
-      setTickets(prev => {
-        const next = prev.filter(t => t.id !== ticketId);
-        localStorage.setItem("local_tickets_" + user.uid, JSON.stringify(next));
-        return next;
-      });
-      toast.success("Ticket eliminado de su biblioteca.");
+      let targetInvId = invoiceId;
+      if (ticketId && !targetInvId) {
+        const ticketDoc = tickets.find(t => t.id === ticketId);
+        const relatedInv = invoices.find(inv => 
+          inv.ticketId === ticketId || 
+          (ticketDoc?.invoiceId && inv.folioFiscal === ticketDoc.invoiceId) ||
+          (ticketDoc?.invoiceId && inv.id === ticketDoc.invoiceId)
+        );
+        if (relatedInv) {
+          targetInvId = relatedInv.id;
+        }
+      }
+
+      if (targetInvId) {
+        try {
+          const invRef = doc(db, "users", user.uid, "invoices", targetInvId);
+          await updateDoc(invRef, {
+            hiddenFromUser: true,
+            linkedTicketDeleted: true,
+            updatedAt: serverTimestamp()
+          });
+        } catch (err) {
+          try {
+            const rootRef = doc(db, "invoices", targetInvId);
+            await updateDoc(rootRef, {
+              hiddenFromUser: true,
+              linkedTicketDeleted: true,
+              updatedAt: serverTimestamp()
+            });
+          } catch (rootErr) {
+            console.warn("Could not soft delete invoice in subcollection or root:", rootErr);
+          }
+        }
+      }
+
+      if (ticketId) {
+        setTickets(prev => {
+          const next = prev.map(t => 
+            t.id === ticketId 
+              ? { ...t, hiddenFromUser: true, status: "deleted", deletedAt: new Date().toISOString() } 
+              : t
+          );
+          localStorage.setItem("local_tickets_" + user.uid, JSON.stringify(next));
+          return next;
+        });
+      }
+
+      if (targetInvId) {
+        setInvoices(prev => 
+          prev.map(inv => 
+            inv.id === targetInvId 
+              ? { ...inv, hiddenFromUser: true, linkedTicketDeleted: true } 
+              : inv
+          )
+        );
+      }
+
+      toast.success("Elemento removido de su biblioteca.");
     } catch (e) {
-      console.error("Error deleting ticket:", e);
-      toast.error("No se pudo remover el ticket.");
+      console.error("Error deleting element:", e);
+      toast.error("No se pudo remover el elemento.");
     }
   };
 

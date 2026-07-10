@@ -5,12 +5,22 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "npm run build --prefix runner && vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "deploy:prod": "npm run build && npx firebase-tools deploy --only functions,hosting,firestore:rules",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:regression": "echo 'Ejecute checklists en tests/regression/'",
+    "test:security": "vitest run tests/unit/server",
+    "test:payments": "vitest run tests/integration/payments",
+    "test:firebase": "firebase emulators:exec \"vitest run tests/integration/firestore tests/integration/storage\"",
+    "test:firestore": "firebase emulators:exec \"vitest run tests/integration/firestore\"",
+    "test:storage": "firebase emulators:exec \"vitest run tests/integration/storage\""
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -52,16 +62,20 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@types/adm-zip": "^0.5.8",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^8.0.0",
+    "@types/supertest": "^7.2.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "firebase-tools": "^15.21.0",
+    "supertest": "^7.2.2",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "vitest": "^4.1.10"
   }
 }

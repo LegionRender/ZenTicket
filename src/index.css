@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
 @import "./styles/shared/tokens.css";
+@import "./styles/zen-design-tokens.css";
+@import "./styles/status-tokens.css";
+@import "./styles/zen-components.css";
 @import "./styles/shared/typography.css";
 @import "./styles/shared/reset.css";
 @import "./styles/shared/accessibility.css";

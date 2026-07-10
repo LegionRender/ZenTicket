@@ -119,7 +119,10 @@ export type TicketStatus =
   | "completed"
   | "review"
   | "requires_user_correction"
-  | "cancelled_by_user";
+  | "cancelled_by_user"
+  | "duplicate"
+  | "failed_blocking"
+  | "deleted";
 
 export type InvoiceJobStatus = 
   | "pending"
@@ -205,6 +208,14 @@ export interface Ticket {
   extractionState?: string;
   jobId?: string;
   extractionDiagnostics?: any;
+  wasAlreadyInvoiced?: boolean;
+  errorCode?: string;
+  expectedTicketTotal?: number;
+  amountPaid?: number;
+  ticketData?: any;
+  hiddenFromUser?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 export interface InvoiceJob {
@@ -293,4 +304,14 @@ export interface Invoice {
   cost?: number;
   rawCost?: number; // Raw model execution token-based cost
   connectorType?: "existente" | "nuevo";
+  hiddenFromUser?: boolean;
+  linkedTicketDeleted?: boolean;
+  synthetic?: boolean;
+  sourceType?: string;
+  isCfdiValidated?: boolean;
+  cfdiValidated?: boolean;
+  validationStatus?: string;
+  requiresManualReview?: boolean;
+  canViewPdf?: boolean;
+  canDownloadXml?: boolean;
 }

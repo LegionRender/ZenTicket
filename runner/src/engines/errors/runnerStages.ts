@@ -1,0 +1,93 @@
+export type RunnerStage =
+  | "job_polling"
+  | "job_lock"
+  | "connector_load"
+  | "portal_map_load"
+  | "browser_launch"
+  | "portal_navigation"
+  | "field_resolution"
+  | "field_injection"
+  | "captcha_detection"
+  | "captcha_waiting_user"
+  | "form_submission"
+  | "already_invoiced_detection"
+  | "existing_invoice_recovery"
+  | "xml_download"
+  | "pdf_download"
+  | "cfdi_parse"
+  | "cfdi_validation"
+  | "sat_verification"
+  | "storage_upload"
+  | "firestore_update"
+  | "job_retry_decision"
+  | "manual_review_assignment"
+  | "completed";
+
+export function mapErrorCodeToStage(code: string, currentStage?: RunnerStage): RunnerStage {
+  switch (code) {
+    case "CONNECTOR_NOT_FOUND":
+      return "connector_load";
+    case "PORTAL_MAP_NOT_FOUND":
+    case "PORTAL_MAP_NOT_APPROVED":
+    case "PORTAL_MAP_INVALID":
+    case "CONNECTOR_SCHEMA_INVALID":
+    case "JIT_FIELD_CONTRACT_MISMATCH":
+    case "JIT_PORTAL_FIELDS_NOT_DETECTED":
+    case "JIT_LOW_CONFIDENCE_FIELD_MAPPING":
+    case "JIT_GENERIC_TEMPLATE_USED":
+    case "JIT_REQUIRED_FIELD_MISSING":
+    case "JIT_UNVERIFIED_INJECTION_BLOCKED":
+    case "REQUIRED_FIELD_MISSING":
+    case "INVALID_FISCAL_PROFILE_DATA":
+    case "MISSING_FISCAL_PROFILE_DATA":
+    case "MISSING_REQUIRED_FIELDS":
+    case "MISSING_FISCAL_PROFILE":
+      return "portal_map_load";
+    case "PLAYWRIGHT_BROWSER_LAUNCH_FAILED":
+      return "browser_launch";
+    case "PORTAL_NAVIGATION_FAILED":
+    case "PORTAL_TIMEOUT":
+    case "PORTAL_AJAX_TIMEOUT":
+    case "PORTAL_SELECTOR_NOT_FOUND":
+    case "PORTAL_DROPDOWN_DISABLED":
+    case "PORTAL_PRIMEFACES_SELECTION_FAILED":
+    case "PRIMEFACES_DROPDOWN_ERROR":
+      return "portal_navigation";
+    case "CAPTCHA_DETECTED":
+    case "CAPTCHA_REQUIRED":
+      return "captcha_detection";
+    case "TICKET_ALREADY_INVOICED":
+      return "already_invoiced_detection";
+    case "EXISTING_INVOICE_RECOVERY_FAILED":
+      return "existing_invoice_recovery";
+    case "XML_NOT_DOWNLOADED":
+    case "CFDI_XML_NOT_DOWNLOADED":
+    case "CFDI_EMPTY_OR_HTML_RESPONSE":
+      return "xml_download";
+    case "PDF_NOT_DOWNLOADED":
+      return "pdf_download";
+    case "CFDI_INVALID_XML":
+    case "CFDI_XML_PARSE_FAILED":
+    case "CFDI_MISSING_TIMBRE":
+    case "CFDI_MISSING_UUID":
+    case "CFDI_UUID_MISSING":
+    case "CFDI_TOTAL_MISMATCH":
+    case "CFDI_RFC_RECEPTOR_MISMATCH":
+    case "CFDI_RFC_EMISOR_MISMATCH":
+    case "CFDI_VALIDATION_FAILED":
+      return "cfdi_validation";
+    case "CFDI_NOT_FOUND_IN_SAT":
+    case "SAT_VALIDATION_TIMEOUT":
+    case "SAT_VALIDATION_PENDING":
+    case "CFDI_CANCELLED_IN_SAT":
+    case "SAT_RFC_NOT_FOUND":
+    case "RFC_NOT_FOUND_IN_SAT":
+      return "sat_verification";
+    case "STORAGE_UPLOAD_FAILED":
+      return "storage_upload";
+    case "FIRESTORE_UPDATE_FAILED":
+      return "firestore_update";
+    default:
+      return currentStage || "portal_navigation";
+  }
+}

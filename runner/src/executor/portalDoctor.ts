@@ -16,12 +16,12 @@ export interface PortalDiagnosis {
 const PATTERNS: Array<{
   pattern: RegExp; category: PortalErrorCategory; recoverable: boolean; strategy?: string; message: string;
 }> = [
-  { pattern: /ya (?:fue|ha sido|est[aá]) facturad/i, category: "ALREADY_INVOICED", recoverable: true, strategy: "recover_existing_invoice", message: "El ticket ya fue facturado. Intentaremos recuperar sus archivos." },
+  { pattern: /ya (?:fue|ha sido|est[aá]) facturad|se emiti[oó] exitosamente|factura.*enviada|enviada.*correo/i, category: "ALREADY_INVOICED", recoverable: true, strategy: "recover_existing_invoice", message: "El ticket ya fue facturado. Intentaremos recuperar sus archivos." },
   { pattern: /no (?:se encontr|existe|hay registro)/i, category: "TICKET_NOT_FOUND", recoverable: false, message: "El portal no encontró el ticket con los datos proporcionados." },
   { pattern: /total.*(?:incorrecto|no coincide|inv[aá]lido)/i, category: "INVALID_TOTAL", recoverable: true, strategy: "retry_total_formats", message: "El portal no aceptó el formato del total. Intentaremos otra presentación." },
   { pattern: /fecha.*(?:inv[aá]lid|incorrec|fuera de rango)/i, category: "INVALID_DATE", recoverable: true, strategy: "retry_date_formats", message: "El portal no aceptó el formato de la fecha." },
   { pattern: /rfc.*(?:inv[aá]lido|incorrecto|no v[aá]lido)/i, category: "INVALID_RFC", recoverable: false, message: "El portal rechazó el RFC proporcionado." },
-  { pattern: /periodo.*(?:venci|expir|fuera)/i, category: "PERIOD_EXPIRED", recoverable: false, message: "El periodo permitido para facturar este ticket ya venció." },
+  { pattern: /periodo.*(?:venci|expir|fuera)|fuera.*mes|mes.*emisi[oó]n|mes.*activo|plazo.*(?:venci|expir|vencer)/i, category: "PERIOD_EXPIRED", recoverable: false, message: "El periodo permitido para facturar este ticket ya venció." },
   { pattern: /campo.*(?:obligatori|requerid|faltante)/i, category: "FIELD_REQUIRED", recoverable: true, strategy: "fill_required_field", message: "El portal solicita un dato adicional." },
   { pattern: /servicio.*(?:no disponible|temporalmente|mantenimiento)/i, category: "SERVICE_DOWN", recoverable: true, strategy: "reload_with_backoff", message: "El portal está temporalmente fuera de servicio." },
   { pattern: /verificaci[oó]n.*(?:manual|humana|captcha)|captcha/i, category: "CAPTCHA", recoverable: false, message: "El portal solicita una verificación humana." }
@@ -40,7 +40,7 @@ export function diagnosePortalError(errorText: string): PortalDiagnosis {
     category: "UNKNOWN",
     errorText: normalized,
     isAutoRecoverable: false,
-    userMessage: "El portal devolvió un mensaje que requiere revisión."
+    userMessage: `El portal del comercio reportó el siguiente error: "${normalized || "Error desconocido en el portal"}"`
   };
 }
 
@@ -57,7 +57,19 @@ export async function collectVisiblePortalErrors(page: Page, configuredSelectors
       const item = locator.nth(i);
       if (await item.isVisible().catch(() => false)) {
         const text = (await item.innerText().catch(() => "")).trim();
-        if (text) texts.push(text);
+        if (text) {
+          const normalized = text.replace(/^[\s⚠️]+|[\s]+$/g, "");
+          const lower = normalized.toLowerCase();
+          if (lower.includes("pendiente") && lower.includes("validar")) {
+            continue;
+          }
+          const isStaticLabel = await item.evaluate(el => {
+            return el.closest('.ui-fieldset-legend, legend, .ui-selectbooleancheckbox, fieldset, label') !== null;
+          }).catch(() => false);
+          if (isStaticLabel) continue;
+
+          texts.push(text);
+        }
       }
     }
   }

@@ -1,4 +1,4 @@
-import { getApiUrl } from "./api-client";
+import { getApiUrl, fetchWithAuth } from "./api-client";
 
 export interface RunAutomationParams {
   ticket: any;
@@ -14,9 +14,8 @@ export const runAutomation = async ({
   profile,
   connector
 }: RunAutomationParams): Promise<Response> => {
-  const response = await fetch(getApiUrl("/api/automation/run"), {
+  const response = await fetchWithAuth("/api/automation/run", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ticket,
       profile,
@@ -30,3 +29,4 @@ export const runAutomation = async ({
 
   return response;
 };
+
