@@ -16,9 +16,9 @@ export const getApiUrl = (path: string): string => {
     return `${base}${cleanPath}`;
   }
 
-  // 2. Automatically detect if running on production custom domain on Vercel
+  // 2. Automatically detect if running on production custom domain or staging on Vercel
   const hostname = typeof window !== "undefined" ? window.location.hostname : "";
-  if (hostname && hostname.includes("zenticket.mx")) {
+  if (hostname && (hostname.includes("zenticket.mx") || hostname.endsWith(".vercel.app"))) {
     // Target the 2nd Gen Firebase Function Cloud Run service URL directly
     const base = "https://api-2yeoxrnita-uc.a.run.app";
     const cleanPath = path.startsWith("/") ? path : `/${path}`;
