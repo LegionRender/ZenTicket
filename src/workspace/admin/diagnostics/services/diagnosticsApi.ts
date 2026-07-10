@@ -25,7 +25,7 @@ export interface DiagnosticsFilters {
 
 export const getApiBaseUrl = (): string => {
   // 1. Check for custom base URL in env
-  const envBaseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
+  const envBaseUrl = import.meta.env.VITE_API_BASE_URL;
   if (envBaseUrl) {
     return envBaseUrl.endsWith("/") ? envBaseUrl.slice(0, -1) : envBaseUrl;
   }
