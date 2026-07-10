@@ -3618,6 +3618,9 @@ app.post("/api/billing/cancel-subscription", authenticateFirebaseToken, async (r
   }
 });
 
+const adminDiagnosticsRouter = require("./adminDiagnosticsBundle").default;
+app.use("/api/admin/diagnostics", adminDiagnosticsRouter);
+
 app.post("/api/cfdi/verify-sat", async (req, res) => {
   const { xmlContent } = req.body;
   if (!xmlContent) {
