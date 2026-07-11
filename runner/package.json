@@ -5,8 +5,9 @@
   "main": "dist/runner/src/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/runner/src/index.js",
-    "dev": "tsc && node dist/runner/src/index.js"
+    "start": "node dist/runner/src/cloudRun.js",
+    "start:cloud-run": "node dist/runner/src/cloudRun.js",
+    "dev": "tsc && node dist/runner/src/cloudRun.js"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.21.0",

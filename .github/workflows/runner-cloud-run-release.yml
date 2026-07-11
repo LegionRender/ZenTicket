@@ -1,0 +1,39 @@
+name: Build and release runner to Cloud Run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      RUNNER_SERVICE: ${{ vars.RUNNER_SERVICE }}
+      RUNTIME_SERVICE_ACCOUNT: ${{ vars.RUNNER_RUNTIME_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release configuration
+        run: |
+          test -n "$PROJECT_ID"
+          test -n "$REGION"
+          test -n "$RUNNER_SERVICE"
+          test -n "$RUNTIME_SERVICE_ACCOUNT"
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build image remotely
+        run: |
+          IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/zenticket/runner:${GITHUB_SHA}"
+          gcloud builds submit . --project="$PROJECT_ID" --config=runner/cloudbuild.yaml --substitutions="_IMAGE_URI=$IMAGE_URI"
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+      - name: Deploy authenticated runner
+        run: |
+          gcloud run deploy "$RUNNER_SERVICE" --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" --service-account="$RUNTIME_SERVICE_ACCOUNT" --no-allow-unauthenticated --ingress=internal-and-cloud-load-balancing

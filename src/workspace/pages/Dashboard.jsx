@@ -983,6 +983,11 @@ export const Dashboard = () => {
     ticketId, xml, pdf, uuid, emisorRfc, emisorName, total, cost = 2.50, connectorType = "existente", rawCost = 0.0016
   ) => {
     if (!user) return;
+    // Invoices are created exclusively by the runner after it captures and
+    // validates a real document. The client must never synthesize one.
+    toast.info("La factura se registrará cuando el runner valide el XML real.");
+    return;
+
     try {
       const gId = "invoice_" + Math.random().toString(36).substring(2, 11);
       const invoiceNumber = invoices.length + 1;
@@ -993,11 +998,11 @@ export const Dashboard = () => {
         folioFiscal: uuid,
         rfcEmisor: emisorRfc.toUpperCase(),
         nombreEmisor: emisorName.toUpperCase(),
-        rfcReceptor: fiscalProfile?.rfc || "CABE850101ABC",
-        nombreReceptor: fiscalProfile?.razonSocial || "RICARDO CASTRO BECERRIL",
-        regimenFiscalReceptor: fiscalProfile?.regimenFiscal || "616 - Sin obligaciones fiscales",
-        usoCfdiReceptor: fiscalProfile?.cfdiUse || "G03 - Gastos en general",
-        emailReceptor: fiscalProfile?.email || user.email || "receptor.sat@zenticket.mx",
+        rfcReceptor: fiscalProfile?.rfc || "",
+        nombreReceptor: fiscalProfile?.razonSocial || "",
+        regimenFiscalReceptor: fiscalProfile?.regimenFiscal || "",
+        usoCfdiReceptor: fiscalProfile?.cfdiUse || "",
+        emailReceptor: fiscalProfile?.email || user.email || "",
         total: parseFloat(total.toString()),
         xmlContent: xml,
         pdfHtml: pdf,
@@ -1009,8 +1014,7 @@ export const Dashboard = () => {
       };
 
       try {
-        const docRef = doc(db, "users", user.uid, "invoices", gId);
-        await setDoc(docRef, invoicePayload);
+        throw new Error("CLIENT_INVOICE_WRITE_DISABLED");
       } catch (dbErr) {
         console.warn("Invoice DB save failed due to quota, saving locally:", dbErr);
         if (dbErr?.message?.includes("Quota") || dbErr?.message?.includes("quota") || dbErr?.code?.includes("resource-exhausted")) {
@@ -1067,27 +1071,7 @@ export const Dashboard = () => {
         }
       }
 
-      if (targetInvId) {
-        try {
-          const invRef = doc(db, "users", user.uid, "invoices", targetInvId);
-          await updateDoc(invRef, {
-            hiddenFromUser: true,
-            linkedTicketDeleted: true,
-            updatedAt: serverTimestamp()
-          });
-        } catch (err) {
-          try {
-            const rootRef = doc(db, "invoices", targetInvId);
-            await updateDoc(rootRef, {
-              hiddenFromUser: true,
-              linkedTicketDeleted: true,
-              updatedAt: serverTimestamp()
-            });
-          } catch (rootErr) {
-            console.warn("Could not soft delete invoice in subcollection or root:", rootErr);
-          }
-        }
-      }
+      // Invoice visibility is managed by the backend together with its ticket.
 
       if (ticketId) {
         setTickets(prev => {

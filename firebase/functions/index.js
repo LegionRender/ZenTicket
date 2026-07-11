@@ -11,6 +11,7 @@ const { GoogleGenAI } = require("@google/genai");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret, defineString } = require("firebase-functions/params");
+const { enqueueInvoiceJob, submitInvoiceJobCaptcha, InvoiceEnqueueError } = require("../../shared/backend/invoiceQueue.cjs");
 
 admin.initializeApp();
 
@@ -26,7 +27,18 @@ const stripeSecretKeyParam = defineSecret("STRIPE_SECRET_KEY");
 const mercadoPagoAccessTokenParam = defineSecret("MERCADOPAGO_ACCESS_TOKEN");
 const paypalClientIdParam = defineSecret("PAYPAL_CLIENT_ID");
 const paypalClientSecretParam = defineSecret("PAYPAL_CLIENT_SECRET");
+const runnerTaskTokenParam = defineSecret("RUNNER_TASK_TOKEN");
 const openAiModel = defineString("OPENAI_VISION_MODEL", { default: "gpt-4o-mini" });
+const runnerTaskQueue = defineString("RUNNER_TASK_QUEUE", { default: "" });
+const runnerTaskLocation = defineString("RUNNER_TASK_LOCATION", { default: "us-central1" });
+const runnerUrl = defineString("RUNNER_URL", { default: "" });
+const runnerTaskInvokerServiceAccount = defineString("RUNNER_TASK_INVOKER_SERVICE_ACCOUNT", { default: "" });
+
+// P0: the JIT may propose a connector, but must not mutate a live connector or
+// portal map unless a deliberate server-side rollout explicitly enables it.
+function isAutomaticJitConnectorMutationEnabled() {
+  return process.env.JIT_AUTOMATIC_CONNECTOR_MUTATION_ENABLED === "true";
+}
 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
@@ -1412,6 +1424,15 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       return;
     }
 
+    if (!isAutomaticJitConnectorMutationEnabled()) {
+      await updateProgress(100, "El entrenamiento JIT quedo bloqueado para revision humana; no se modifico ningun conector.", "failed");
+      res.status(423).json({
+        code: "JIT_AUTOMATIC_MUTATION_DISABLED",
+        error: "El entrenamiento JIT puede generar propuestas, pero la modificacion automatica de conectores esta desactivada durante la estabilizacion."
+      });
+      return;
+    }
+
     // 1. Load the ticket from Firestore
     if (!db || typeof db.collection !== "function") {
       throw new Error("Firestore SDK no inicializado");
@@ -2554,6 +2575,47 @@ const authenticateFirebaseToken = async (req, res, next) => {
   }
 };
 
+// Canonical invoice enqueue API. It accepts identifiers only; all fiscal,
+// connector and portal-map snapshots are resolved server-side in one transaction.
+app.post("/api/invoice-jobs", authenticateFirebaseToken, async (req, res) => {
+  try {
+    const result = await enqueueInvoiceJob({
+      db,
+      userId: req.user?.uid,
+      ticketId: req.body?.ticketId,
+      idempotencyKey: req.body?.idempotencyKey
+    });
+    res.status(result.idempotent ? 200 : 202).json(result);
+  } catch (error) {
+    if (error instanceof InvoiceEnqueueError) {
+      res.status(error.status).json({ code: error.code, error: error.message, details: error.details });
+      return;
+    }
+    console.error("[invoice-jobs] enqueue failed:", error);
+    res.status(500).json({ code: "INVOICE_ENQUEUE_FAILED", error: "No fue posible encolar la factura." });
+  }
+});
+
+app.post("/api/invoice-jobs/:jobId/captcha", authenticateFirebaseToken, async (req, res) => {
+  try {
+    const result = await submitInvoiceJobCaptcha({
+      db,
+      userId: req.user?.uid,
+      jobId: req.params.jobId,
+      solution: req.body?.solution,
+      captchaAttemptId: req.body?.captchaAttemptId || null
+    });
+    res.status(202).json(result);
+  } catch (error) {
+    if (error instanceof InvoiceEnqueueError) {
+      res.status(error.status).json({ code: error.code, error: error.message, details: error.details });
+      return;
+    }
+    console.error("[invoice-jobs] CAPTCHA submission failed:", error);
+    res.status(500).json({ code: "CAPTCHA_SUBMISSION_FAILED", error: "No fue posible enviar el CAPTCHA." });
+  }
+});
+
 async function resolveStripeCustomerId(uid, email, emailVerified) {
   const billingRef = db.collection("billingProfiles").doc(uid);
   const billingSnap = await billingRef.get();
@@ -3674,6 +3736,111 @@ exports.api = onRequest(
     ]
   },
   app
+);
+
+function runnerDispatchConfig() {
+  const queue = (runnerTaskQueue.value() || "").trim();
+  const location = (runnerTaskLocation.value() || "").trim();
+  const targetUrl = (runnerUrl.value() || "").trim().replace(/\/$/, "");
+  const invokerServiceAccount = (runnerTaskInvokerServiceAccount.value() || "").trim();
+  const taskToken = (runnerTaskTokenParam.value() || "").trim();
+
+  if (!queue || !location || !targetUrl || !invokerServiceAccount || !taskToken) {
+    throw new Error("RUNNER_TASK_DISPATCH_CONFIG_MISSING");
+  }
+  if (!/^https:\/\//.test(targetUrl)) {
+    throw new Error("RUNNER_URL_INVALID");
+  }
+  return { queue, location, targetUrl, invokerServiceAccount, taskToken };
+}
+
+async function createCloudRunTask(jobId, config) {
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "factubolt";
+  const parent = `projects/${projectId}/locations/${config.location}/queues/${config.queue}`;
+  const taskId = `invoice-${jobId}`.replace(/[^A-Za-z0-9_-]/g, "-");
+  const taskName = `${parent}/tasks/${taskId}`;
+  const credential = admin.app().options.credential;
+  if (!credential || typeof credential.getAccessToken !== "function") {
+    throw new Error("RUNNER_TASK_ADC_UNAVAILABLE");
+  }
+  const token = await credential.getAccessToken();
+  const response = await fetch(`https://cloudtasks.googleapis.com/v2/${parent}/tasks`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token.access_token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      task: {
+        name: taskName,
+        httpRequest: {
+          httpMethod: "POST",
+          url: `${config.targetUrl}/tasks/process`,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Runner-Task-Token": config.taskToken
+          },
+          oidcToken: {
+            serviceAccountEmail: config.invokerServiceAccount,
+            audience: config.targetUrl
+          },
+          body: Buffer.from(JSON.stringify({ jobId }), "utf8").toString("base64")
+        }
+      }
+    })
+  });
+
+  if (response.status === 409) {
+    return { taskName, alreadyExists: true };
+  }
+  if (!response.ok) {
+    throw new Error(`RUNNER_TASK_CREATE_FAILED:${response.status}:${await response.text()}`);
+  }
+  return { taskName, alreadyExists: false };
+}
+
+exports.dispatchInvoiceJobs = onSchedule(
+  {
+    schedule: "every 1 minutes",
+    region: "us-central1",
+    timeoutSeconds: 120,
+    memory: "512MiB",
+    secrets: [runnerTaskTokenParam]
+  },
+  async () => {
+    let config;
+    try {
+      config = runnerDispatchConfig();
+    } catch (error) {
+      console.error("[Runner dispatch] Configuración incompleta; se conserva el outbox sin modificar.", error);
+      return;
+    }
+    const outboxSnapshot = await db.collection("invoice_job_outbox")
+      .where("status", "==", "pending")
+      .limit(20)
+      .get();
+
+    for (const outboxDoc of outboxSnapshot.docs) {
+      const outbox = outboxDoc.data();
+      const jobId = typeof outbox.jobId === "string" ? outbox.jobId : outboxDoc.id;
+      try {
+        const task = await createCloudRunTask(jobId, config);
+        await outboxDoc.ref.set({
+          status: "dispatched",
+          cloudTaskName: task.taskName,
+          dispatchedAt: now(),
+          updatedAt: now()
+        }, { merge: true });
+      } catch (error) {
+        console.error(`[Runner dispatch] ${jobId} no pudo encolarse:`, error);
+        await outboxDoc.ref.set({
+          lastDispatchError: String(error?.message || error),
+          lastDispatchAttemptAt: now(),
+          updatedAt: now()
+        }, { merge: true });
+      }
+    }
+  }
 );
 
 exports.retryOcrQueue = onSchedule(

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Ticket, Invoice } from "@/shared/types/types";
-import { getConfigStatus, sendEmail, fetchWithAuth } from "@/services/api";
+import { getConfigStatus, sendEmail, fetchWithAuth, submitInvoiceJobCaptcha } from "@/services/api";
 import logoLight from "@/assets/logos/logo-light.png";
 import { 
   ChevronLeft, ChevronRight, Share2, FileText, Check, Download, ArrowLeft, 
@@ -298,12 +298,7 @@ export default function TicketsListScreen({
     }
     setIsSubmittingViewCaptcha(true);
     try {
-      await updateDoc(doc(db, "invoice_jobs", jobIdToUpdate), {
-        status: "captcha_submitted",
-        captchaSolution: solution,
-        captchaSolutionAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
+      await submitInvoiceJobCaptcha(jobIdToUpdate, solution, activeJob?.captchaAttemptId || null);
       setViewCaptchaSolution("");
       toast.success("Código enviado. Continuando con el proceso de facturación.");
     } catch (error: any) {

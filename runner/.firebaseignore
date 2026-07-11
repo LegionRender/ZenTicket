@@ -1,0 +1,7 @@
+node_modules/
+src/
+tmp/
+*.js
+*.png
+find_ticket.cjs
+*.log

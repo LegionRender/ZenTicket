@@ -1,16 +1,14 @@
-import { initializeApp, cert, getApp } from "firebase-admin/app";
+import { initializeApp, getApp, getApps } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import * as fs from "fs";
 import * as path from "path";
-import { pollJobs } from "./jobs/pollJobs";
 import { lockJob } from "./jobs/lockJob";
 import { executePortalMap } from "./executor/executePortalMap";
 import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiXml";
 import { createRunnerLog, setActiveJobContext, setActiveStage } from "./logging/createRunnerLog";
 import { validateJobContract } from "./validators/validateJobContract";
 import { verifySatCfdi, SatVerificationResult } from "./validators/verifySatCfdi";
-import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { saveExecutionMemory } from "./memory/executionMemory";
 import { mapToRunnerError, ERROR_CATALOG, RunnerStage, mapErrorCodeToStage, createDiagnosticSnapshot, getFriendlyMessage, classifyAutomationError } from "./errors/errors";
 import { normalizeBillingAttemptFields } from "./utils/normalizeFields";
@@ -37,9 +35,6 @@ function getSafeReviewError(
   };
 }
 
-
-import * as dotenv from "dotenv";
-dotenv.config({ path: path.join(__dirname, "../../.env") });
 
 const MAX_AUTO_RETRIES = 2;
 const AUTO_RECOVERABLE_CODES = new Set([
@@ -74,15 +69,7 @@ export function classifyBlocker(errorCode: string, _errorMessage = "", retryCoun
 }
 
 const workerId = `worker-node-${process.pid}`;
-const serviceAccountPath = path.join(__dirname, "../../serviceAccountKey.json");
-
-if (fs.existsSync(serviceAccountPath)) {
-  const serviceAccount = require(serviceAccountPath);
-  initializeApp({
-    credential: cert(serviceAccount),
-    storageBucket: "factubolt.firebasestorage.app"
-  });
-} else {
+if (!getApps().length) {
   initializeApp({
     projectId: "factubolt",
     storageBucket: "factubolt.firebasestorage.app"
@@ -96,13 +83,13 @@ console.log("=========================================");
 console.log("[Runner] Iniciado correctamente");
 console.log("[Runner] Project: factubolt");
 console.log(`[Runner] Database: ${databaseId}`);
-console.log(`[Runner] Modo de ejecución: ${fs.existsSync(serviceAccountPath) ? "Service Account Key" : "Application Default Credentials"}`);
-console.log("[Runner] Buscando invoice_jobs pending...");
+console.log("[Runner] Autenticación: Application Default Credentials (Cloud Run service account)");
+console.log("[Runner] Esperando una tarea autenticada de Cloud Tasks/API.");
 console.log("=========================================");
 
 export async function processJob(jobId: string) {
-  const isLocalDev = process.env.NODE_ENV !== "production" && !process.env.K_SERVICE;
-  const isE2EMode = process.env.LOCAL_E2E_MODE === "true" || isLocalDev;
+  // Production jobs are accepted only through the authenticated Cloud Run task endpoint.
+  const isE2EMode = false;
   if (isE2EMode) {
     const allowedJobsEnv = process.env.LOCAL_E2E_ALLOWED_JOB_IDS;
     const allowedTicketsEnv = process.env.LOCAL_E2E_ALLOWED_TICKET_IDS;
@@ -1384,7 +1371,11 @@ export async function processJob(jobId: string) {
   }
 }
 
-async function runWorkerLoop() {
+/*
+ * Legacy polling and Firebase Function trigger definitions are intentionally
+ * excluded from the Cloud Run artifact. Cloud Tasks is the only dispatcher.
+ */
+/* async function runWorkerLoop() {
   console.log(`[Runner] Polling invoice_jobs...`);
   try {
     // Stale jobs timeout check (more than 5 minutes)
@@ -1493,6 +1484,7 @@ export const retryInvoiceJob = onDocumentUpdated(
   }
 );
 
+*/
 function printE2EResult(
   success: boolean,
   ticketId: string,
@@ -1559,5 +1551,5 @@ function printE2EResult(
 }
 
 if (require.main === module) {
-  runWorkerLoop();
+  throw new Error("Direct runner execution is disabled. Deploy the Cloud Run entrypoint (start:cloud-run) and invoke it through the authenticated task queue.");
 }

@@ -17,31 +17,8 @@
       "source": "firebase/functions",
       "runtime": "nodejs20",
       "codebase": "default"
-    },
-    {
-      "source": "runner",
-      "runtime": "nodejs20",
-      "codebase": "runner"
     }
   ],
-  "hosting": {
-    "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "/api/**",
-        "function": "api"
-      },
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ]
-  },
   "emulators": {
     "firestore": {
       "port": 8080

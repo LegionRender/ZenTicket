@@ -2,5 +2,12 @@ node_modules
 dist
 .git
 .env
+.env.*
+serviceAccountKey.json
+**/serviceAccountKey.json
+firebase-debug.log
+runner/tmp
+runner/*.js
+runner/*.png
 README.md
 *.log

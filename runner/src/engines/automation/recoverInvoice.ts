@@ -39,6 +39,8 @@ export interface RecoveryResult {
  * Tries declarative recoveryFlow, strategy detectDownloadLinks, or JIT Recovery Learn.
  */
 export async function recoverExistingInvoiceFromPortal(params: {
+  jobId?: string;
+  ticketId?: string;
   page: Page;
   ticket: any;
   fiscalProfile: any;
@@ -49,6 +51,8 @@ export async function recoverExistingInvoiceFromPortal(params: {
   networkSniffer: any;
 }): Promise<RecoveryResult> {
   const { page, ticket, fiscalProfile, portalMap, strategy, downloadedFiles, tmpDir, networkSniffer } = params;
+  const jobId = params.jobId || String(ticket?.jobId || "unknown-job");
+  const ticketId = params.ticketId || String(ticket?.id || ticket?.ticketId || "unknown-ticket");
 
   console.log("[recovery] Starting recoverExistingInvoiceFromPortal flow...");
   // Diagnostic tracing: starting recovery flow for already invoiced ticket
@@ -309,16 +313,29 @@ export async function recoverExistingInvoiceFromPortal(params: {
         const mapId = portalMap.id || ticket.portalMapId || "oxxo";
         const db = getDb();
         if (db) {
-          await db.collection("portal_maps").doc(mapId).update({
-            learnedRecoveryFlow,
-            learnedRecoveryStatus: "pending_review"
-          }).catch((e: any) => console.error("[recovery] Error updating portal_maps:", e));
-
-          if (ticket.connectorId) {
-            await db.collection("connectors").doc(ticket.connectorId).set({
+          if (process.env.RUNNER_AUTOMATIC_CONNECTOR_MUTATION_ENABLED === "true") {
+            await db.collection("portal_maps").doc(mapId).update({
               learnedRecoveryFlow,
-              learnedRecoveryStatus: "learned_recovery_flow"
-            }, { merge: true }).catch((e: any) => console.error("[recovery] Error updating connectors:", e));
+              learnedRecoveryStatus: "pending_review"
+            }).catch((e: any) => console.error("[recovery] Error updating portal_maps:", e));
+
+            if (ticket.connectorId) {
+              await db.collection("connectors").doc(ticket.connectorId).set({
+                learnedRecoveryFlow,
+                learnedRecoveryStatus: "learned_recovery_flow"
+              }, { merge: true }).catch((e: any) => console.error("[recovery] Error updating connectors:", e));
+            }
+          } else {
+            await db.collection("connector_patch_proposals").doc(`${jobId}-recovery-flow`.replace(/[^a-zA-Z0-9_-]/g, "-")).set({
+              type: "recovery_flow",
+              status: "pending_review",
+              connectorId: ticket.connectorId || null,
+              portalMapId: mapId,
+              proposedChanges: { recoveryFlow: learnedRecoveryFlow },
+              evidence: { jobId, ticketId },
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
           }
         } else {
           console.log("[recovery] JIT Learning: Database not initialized. Skipping save.");

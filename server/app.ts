@@ -10,22 +10,20 @@ import { getAuth } from "firebase-admin/auth";
 import axios from "axios";
 import crypto from "crypto";
 import fs from "fs";
+const { enqueueInvoiceJob, submitInvoiceJobCaptcha, InvoiceEnqueueError } = require("../shared/backend/invoiceQueue.cjs");
 
 dotenv.config();
 
-if (process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "prod") {
-  process.env.DEV_BILLING_AUTH_BYPASS = "true";
-}
+// P0: preserve parity with the Firebase API while automatic connector mutation
+// is frozen. This flag is server-only and is intentionally false by default.
+const isAutomaticJitConnectorMutationEnabled = (): boolean =>
+  process.env.JIT_AUTOMATIC_CONNECTOR_MUTATION_ENABLED === "true";
 
 import { sanitizeBillingReferenceForConnector } from "../src/shared/utils/validation";
 
-// Auto-detect local service account key file
-const localServiceAccountPath = path.join(process.cwd(), "serviceAccountKey.json");
-if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(localServiceAccountPath)) {
-  process.env.GOOGLE_APPLICATION_CREDENTIALS = localServiceAccountPath;
-}
-
-const hasRealCredentials = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+// Cloud Run and Firebase Functions provide Application Default Credentials.
+// This backend must never discover a credential file from the host filesystem.
+const hasRealCredentials = true;
 
 let adminDb: any;
 
@@ -1467,6 +1465,47 @@ app.post("/api/tickets", authenticateFirebaseToken, async (req: Request, res: Re
   }
 });
 
+// Mirrors the Firebase production route while the legacy local server remains
+// available. The transaction and validation live in shared/backend/invoiceQueue.
+app.post("/api/invoice-jobs", authenticateFirebaseToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await enqueueInvoiceJob({
+      db: adminDb,
+      userId: (req as any).user?.uid,
+      ticketId: req.body?.ticketId,
+      idempotencyKey: req.body?.idempotencyKey
+    });
+    res.status(result.idempotent ? 200 : 202).json(result);
+  } catch (error: any) {
+    if (error instanceof InvoiceEnqueueError) {
+      res.status(error.status).json({ code: error.code, error: error.message, details: error.details });
+      return;
+    }
+    console.error("[invoice-jobs] enqueue failed:", error);
+    res.status(500).json({ code: "INVOICE_ENQUEUE_FAILED", error: "No fue posible encolar la factura." });
+  }
+});
+
+app.post("/api/invoice-jobs/:jobId/captcha", authenticateFirebaseToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await submitInvoiceJobCaptcha({
+      db: adminDb,
+      userId: (req as any).user?.uid,
+      jobId: req.params.jobId,
+      solution: req.body?.solution,
+      captchaAttemptId: req.body?.captchaAttemptId || null
+    });
+    res.status(202).json(result);
+  } catch (error: any) {
+    if (error instanceof InvoiceEnqueueError) {
+      res.status(error.status).json({ code: error.code, error: error.message, details: error.details });
+      return;
+    }
+    console.error("[invoice-jobs] CAPTCHA submission failed:", error);
+    res.status(500).json({ code: "CAPTCHA_SUBMISSION_FAILED", error: "No fue posible enviar el CAPTCHA." });
+  }
+});
+
 
 // API Endpoint: Parse SAT Constancia de Situación Fiscal (PDF/Image)
 app.post("/api/fiscal/parse-constancia", authenticateFirebaseToken, async (req: Request, res: Response): Promise<void> => {
@@ -2415,6 +2454,15 @@ app.post("/api/tickets/train-jit", authenticateFirebaseToken, async (req: Reques
       (decodedToken.claims && decodedToken.claims.admin === true);
     if (adminMode && !isAdmin) {
       res.status(403).json({ error: "Solo un administrador puede entrenar portales sin ticket." });
+      return;
+    }
+
+    if (!isAutomaticJitConnectorMutationEnabled()) {
+      await updateProgress(100, "El entrenamiento JIT quedo bloqueado para revision humana; no se modifico ningun conector.", "failed");
+      res.status(423).json({
+        code: "JIT_AUTOMATIC_MUTATION_DISABLED",
+        error: "El entrenamiento JIT puede generar propuestas, pero la modificacion automatica de conectores esta desactivada durante la estabilizacion."
+      });
       return;
     }
 
@@ -5026,36 +5074,8 @@ app.post("/api/billing/cancel-subscription", authenticateFirebaseToken, async (r
   }
 });
 
-import { spawn } from "child_process";
-
-function startRunnerWorker() {
-  const runnerPath = path.join(process.cwd(), "runner", "dist", "runner", "src", "index.js");
-  if (fs.existsSync(runnerPath)) {
-    console.log(`[FactuBot] Spawning runner worker process at ${runnerPath}...`);
-    const worker = spawn("node", [runnerPath], {
-      stdio: ["inherit", "pipe", "pipe"],
-      env: { ...process.env, FORCE_COLOR: "1" }
-    });
-    
-    worker.stdout.on("data", (data) => {
-      process.stdout.write(data);
-    });
-    worker.stderr.on("data", (data) => {
-      process.stderr.write(data);
-    });
-    
-    worker.on("close", (code) => {
-      console.log(`[FactuBot] Runner worker process exited with code ${code}. Restarting in 5s...`);
-      setTimeout(startRunnerWorker, 5000);
-    });
-  } else {
-    console.warn(`[FactuBot] Runner worker build not found at ${runnerPath}. Please run "npm run build --prefix runner" first.`);
-  }
-}
-
 // App server routing setup
 export async function startServer() {
-  startRunnerWorker();
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -5074,5 +5094,3 @@ export async function startServer() {
     console.log(`[FactuBot] Full-stack server active at http://localhost:${PORT}`);
   });
 }
-
-

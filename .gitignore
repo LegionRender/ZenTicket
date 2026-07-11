@@ -9,5 +9,11 @@ coverage/
 serviceAccount*.json
 scratch/
 *.cjs
+!shared/backend/invoiceQueue.cjs
+
+# Local runner diagnostics and portal captures are never production artifacts.
+runner/*.js
+runner/*.png
+runner/tmp/
 *.txt
 .gemini/

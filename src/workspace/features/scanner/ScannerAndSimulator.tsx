@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { FiscalProfile, Ticket, Connector, ExtractedTicketData } from "@/shared/types/types";
-import { analyzeTicket, runAutomation, getApiUrl, fetchWithAuth } from "@/services/api";
+import { analyzeTicket, runAutomation, getApiUrl, fetchWithAuth, enqueueInvoiceJob, submitInvoiceJobCaptcha } from "@/services/api";
 import { SAMPLE_TICKETS, drawMockTicketToDataUrl } from "@/shared/utils/ticket-drawer";
 import Logo from "@/shared/brand/Logo";
 import { 
@@ -1546,46 +1546,7 @@ export default function ScannerAndSimulator({
 
       if (missingFields.length > 0) return false;
       
-      const ticketDataSnapshot = {
-        merchantName: ocrResult.nombreEmisor || "",
-        portalFields: buildPortalFieldsSnapshot(foundConnector.extractionContract, pFields),
-        expectedTicketTotal: Number(ocrResult.total || 0),
-        rawOcrText: ocrResult.rawOcrText || "",
-      };
-      
-      const fiscalProfileSnapshot = {
-        userId: fiscalProfile.userId,
-        rfc: fiscalProfile.rfc,
-        razonSocial: fiscalProfile.razonSocial,
-        regimenFiscal: fiscalProfile.regimenFiscal,
-        codigoPostal: fiscalProfile.codigoPostal,
-        usoCFDI: fiscalProfile.usoCFDI,
-        correoElectronico: fpEmail,
-        createdAt: fiscalProfile.createdAt || new Date().toISOString()
-      };
-      
-      const jobData = {
-        ticketId,
-        userId: fiscalProfile.userId,
-        status: "pending",
-        connectorId: foundConnector.id || "",
-        portalMapId: pMapsSnap.docs[0].id || "",
-        connectorStatusAtRun: foundConnector.status || "real_validation",
-        ticketDataSnapshot,
-        fiscalProfileSnapshot,
-        attempts: 0,
-        maxAttempts: 3,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      
-      const jobsCollection = collection(db, "invoice_jobs");
-      await addDoc(jobsCollection, jobData);
-      
-      await onUpdateTicketInDb(ticketId, {
-        status: "queued_for_runner",
-        connectorId: foundConnector.id || ""
-      });
+      await enqueueInvoiceJob(ticketId);
       return true;
     } catch (err) {
       console.warn("Error auto-enqueueing batch ticket:", err);
@@ -2764,33 +2725,7 @@ export default function ScannerAndSimulator({
 
       // Create the invoice_job document
       await addLog("📥 Encolando job en la colección invoice_jobs...", 400);
-      const jobData = {
-        ticketId: activeTicketId,
-        userId: activeFiscalProfile.userId,
-        status: "pending",
-        connectorId: activeConn.id || "",
-        portalMapId: portalMapsSnap.docs[0].id || "",
-        connectorStatusAtRun: activeConn.status || "real_validation",
-        ticketDataSnapshot,
-        fiscalProfileSnapshot,
-        attempts: 0,
-        maxAttempts: 3,
-        currentStepIndex: 0,
-        waitingForFields: [],
-        canResume: true,
-        lastCompletedStepIndex: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      const jobsCollection = collection(db, "invoice_jobs");
-      const jobRef = await addDoc(jobsCollection, jobData);
-      
-      await onUpdateTicketInDb(activeTicketId, {
-        status: "queued_for_runner",
-        connectorId: activeConn.id || "",
-        jobId: jobRef.id
-      });
+      const queuedJob = await enqueueInvoiceJob(activeTicketId);
 
       await addAutomationEvent("connector_resolving", "success", "Ticket encolado para procesamiento por el motor robotizado.");
       await addLog("🎉 ¡Ticket encolado con éxito para procesamiento automático!", 400);
@@ -3293,54 +3228,10 @@ export default function ScannerAndSimulator({
         }
       }
 
-      // Reset associated invoice_job if it exists (Case C)
-      if (ticketData.jobId) {
-        try {
-          const jobDocRef = doc(db, "invoice_jobs", ticketData.jobId);
-          const jobSnap = await getDoc(jobDocRef);
-          if (jobSnap.exists()) {
-            const jobOldData = jobSnap.data();
-            const ticketDataSnapshot = {
-              ...(jobOldData.ticketDataSnapshot || {}),
-              ...ticketUpdates,
-              folio: newPortalFields.billingReference || jobOldData.ticketDataSnapshot?.folio || "",
-              billingReference: newPortalFields.billingReference || jobOldData.ticketDataSnapshot?.billingReference || "",
-              total: newPortalFields.total !== undefined ? newPortalFields.total : (jobOldData.ticketDataSnapshot?.total || 0),
-              date: newPortalFields.date || jobOldData.ticketDataSnapshot?.date || "",
-              portalFields: {
-                ...(jobOldData.ticketDataSnapshot?.portalFields || {}),
-                ...newPortalFields
-              }
-            };
-            
-            const fiscalProfileSnapshot = {
-              ...(jobOldData.fiscalProfileSnapshot || {}),
-              ...profileUpdates
-            };
-
-            await updateDoc(jobDocRef, {
-              status: "pending",
-              attempts: 0,
-              ticketDataSnapshot,
-              fiscalProfileSnapshot,
-              waitingForFields: [],
-              canResume: true,
-              updatedAt: new Date().toISOString()
-            });
-          }
-        } catch (jobErr) {
-          console.error("Error updating/resetting invoice_job in Firestore:", jobErr);
-        }
-      }
-
       // Save ticket updates in Firestore
       const finalTicketUpdates: any = {
         ...ticketUpdates,
-        portalFields: newPortalFields,
-        status: "queued_for_runner", // Queue back for runner
-        errorMsg: null,
-        reviewReasonCode: null,
-        reviewError: null
+        portalFields: newPortalFields
       };
 
       await updateDoc(docRef, finalTicketUpdates);
@@ -3351,18 +3242,14 @@ export default function ScannerAndSimulator({
 
       toast.success("Campos guardados. Reintentando procesamiento automático...");
       
-      if (!ticketData.jobId) {
-        const activeConn = matchingConnector || matchConnector(ticketData.nombreEmisor || "", ticketData.rfcEmisor || "");
-        if (activeConn) {
-          await handleTriggerAutomation(activeConn, ticketId, {
-            ...ticketData,
-            ...finalTicketUpdates
-          }, finalProfile);
-        } else {
-          toast.error("No se pudo iniciar el proceso: conector no identificado.");
-          setIsAutomatingLoading(false);
-        }
+      const activeConn = matchingConnector || matchConnector(ticketData.nombreEmisor || "", ticketData.rfcEmisor || "");
+      if (activeConn) {
+        await handleTriggerAutomation(activeConn, ticketId, {
+          ...ticketData,
+          ...finalTicketUpdates
+        }, finalProfile);
       } else {
+        toast.error("No se pudo iniciar el proceso: conector no identificado.");
         setIsAutomatingLoading(false);
       }
     } catch (err: any) {
@@ -3382,12 +3269,7 @@ export default function ScannerAndSimulator({
     }
     setIsSubmittingCaptcha(true);
     try {
-      await updateDoc(doc(db, "invoice_jobs", jobIdToUpdate), {
-        status: "captcha_submitted",
-        captchaSolution: solution,
-        captchaSolutionAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
+      await submitInvoiceJobCaptcha(jobIdToUpdate, solution);
       setCaptchaSolution("");
       toast.success("Código enviado. Continuando con la facturación.");
     } catch (error: any) {

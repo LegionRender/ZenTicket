@@ -127,4 +127,28 @@ describe("Firestore Security Rules", () => {
     await expect(getDoc(ticketRef)).rejects.toThrow();
     await expect(setDoc(ticketRef, { userId: "anon", amount: 50 })).rejects.toThrow();
   });
+
+  it("Cliente no puede crear ni modificar invoice_jobs", async () => {
+    if (!emulatorActive) return;
+    const aliceDb = testEnv.authenticatedContext("alice", { email: "alice@example.com", admin: false, role: "user" }).firestore();
+    const jobRef = doc(aliceDb, "invoice_jobs", "job_alice");
+
+    await expect(setDoc(jobRef, { userId: "alice", ticketId: "ticket_alice", status: "pending" })).rejects.toThrow();
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "invoice_jobs", "job_alice"), { userId: "alice", ticketId: "ticket_alice", status: "waiting_user_captcha" });
+    });
+    await expect(updateDoc(jobRef, { status: "captcha_submitted" })).rejects.toThrow();
+  });
+
+  it("Cliente no puede escribir invoices ni campos fiscales protegidos", async () => {
+    if (!emulatorActive) return;
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "tickets", "ticket_protected"), { userId: "alice", total: 100, status: "queued_for_runner" });
+    });
+
+    const aliceDb = testEnv.authenticatedContext("alice", { email: "alice@example.com", admin: false, role: "user" }).firestore();
+    await expect(setDoc(doc(aliceDb, "users", "alice", "invoices", "invoice_alice"), { userId: "alice", ticketId: "ticket_protected" })).rejects.toThrow();
+    await expect(updateDoc(doc(aliceDb, "tickets", "ticket_protected"), { invoiceId: "inventado" })).rejects.toThrow();
+    await expect(updateDoc(doc(aliceDb, "tickets", "ticket_protected"), { status: "cfdi_validated" })).rejects.toThrow();
+  });
 });

@@ -608,6 +608,9 @@ export async function executePortalMap(
   const userId = fiscalProfile.userId;
   const connectorId = connector?.id || portalMap?.connectorId || "";
   let wasAlreadyInvoiced = false;
+  // Gemini output is evidence for a future proposal, never an executable
+  // production selector unless an explicit server-side rollout enables it.
+  const allowGeminiSelectorExecution = process.env.JIT_SELECTOR_EXECUTION_ENABLED === "true";
 
   // Validate ticket date period (current calendar month check)
   if (ticketData.portalFields?.fecha) {
@@ -640,15 +643,12 @@ export async function executePortalMap(
 
   await createRunnerLog(jobId, ticketId, "INFO", `Iniciando navegador headless para: ${connector.nombre}`);
 
-  const isServerless = Boolean(process.env.K_SERVICE || process.env.FUNCTION_TARGET);
-  const browserRuntime = isServerless ? require("playwright-core").chromium : chromium;
-  const launchOptions: any = { headless: true };
-  if (isServerless) {
-    const serverlessChromium = require("@sparticuz/chromium");
-    launchOptions.executablePath = await serverlessChromium.executablePath();
-    launchOptions.args = serverlessChromium.args;
-  }
-  const browser = await browserRuntime.launch(launchOptions);
+  // The runner is deployed only in the pinned Playwright Cloud Run image.
+  // Never fall back to a host, Functions, or locally installed Chromium.
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: chromium.executablePath()
+  });
 
   const context = await browser.newContext({
     acceptDownloads: true,
@@ -1432,7 +1432,7 @@ export async function executePortalMap(
           if (!locator) {
             // C. Try AI Self-Healing
             const healed = await healSelectorWithAi(page, step, step.selector, primaryError.message || String(primaryError)).catch(() => null);
-            if (healed?.healedSelector) {
+            if (healed?.healedSelector && allowGeminiSelectorExecution) {
               try {
                 const aiLocator = page.locator(healed.healedSelector);
                 await aiLocator.first().waitFor({ state: "visible", timeout: 10000 });
@@ -1443,6 +1443,15 @@ export async function executePortalMap(
               } catch (aiErr) {
                 console.warn("[SelfHealing] AI healed selector failed to resolve on page:", aiErr);
               }
+            } else if (healed?.healedSelector) {
+              await createRunnerLog(jobId, ticketId, "WARNING", "Selector sugerido por IA bloqueado; requiere revision humana antes de ejecutarse.", {
+                stepIndex: i,
+                stepType: step.type,
+                strategy: "ai_self_healing",
+                proposalStatus: "pending_review",
+                proposedSelector: healed.healedSelector,
+                explanation: healed.explanation
+              });
             }
           }
 
@@ -1909,7 +1918,7 @@ export async function executePortalMap(
           // B. Try AI Self-Healing
           if (!clicked) {
             const healed = await healSelectorWithAi(page, step, step.selector, primaryError.message || String(primaryError)).catch(() => null);
-            if (healed?.healedSelector) {
+            if (healed?.healedSelector && allowGeminiSelectorExecution) {
               try {
                 const aiLocator = page.locator(healed.healedSelector);
                 await aiLocator.first().waitFor({ state: "visible", timeout: 10000 });
@@ -1921,6 +1930,15 @@ export async function executePortalMap(
               } catch (aiErr) {
                 console.warn("[SelfHealing] AI healed click selector failed to click:", aiErr);
               }
+            } else if (healed?.healedSelector) {
+              await createRunnerLog(jobId, ticketId, "WARNING", "Clic sugerido por IA bloqueado; requiere revision humana antes de ejecutarse.", {
+                stepIndex: i,
+                stepType: step.type,
+                strategy: "ai_self_healing",
+                proposalStatus: "pending_review",
+                proposedSelector: healed.healedSelector,
+                explanation: healed.explanation
+              });
             }
           }
 
@@ -2192,6 +2210,8 @@ export async function executePortalMap(
         if (diagnosis.category === "ALREADY_INVOICED") {
           await createRunnerLog(jobId, ticketId, "INFO", "El portal indicó que ya estaba facturado; procediendo con la recuperación/creación de comprobante.");
           const recoveryResult = (await recoverExistingInvoiceFromPortal({
+            jobId,
+            ticketId,
             page,
             ticket: ticketData,
             fiscalProfile,
@@ -2346,21 +2366,36 @@ export async function executePortalMap(
       if (alternative) {
         const databaseId = "ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee";
         const db = getFirestore(getApp(), databaseId);
-        await db.collection("connectors").doc(connector.id || portalMap.connectorId).set({
-          portalUrl: alternative,
-          lastWorkingRoute: alternative,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
         const domain = new URL(alternative).hostname.toLowerCase();
-        await db.collection("portal_learning_memory").doc(`${domain}-working-route`.replace(/[^a-z0-9_-]/g, "-")).set({
-          domain,
-          patternType: "working_route",
-          pattern: { url: alternative },
-          connectorId: connector.id || portalMap.connectorId,
-          successCount: 1,
-          lastSeenAt: new Date().toISOString(),
-          createdAt: new Date().toISOString()
-        }, { merge: true });
+        const targetConnectorId = connector.id || portalMap.connectorId;
+        const automaticConnectorMutationEnabled = process.env.RUNNER_AUTOMATIC_CONNECTOR_MUTATION_ENABLED === "true";
+        if (automaticConnectorMutationEnabled) {
+          await db.collection("connectors").doc(targetConnectorId).set({
+            portalUrl: alternative,
+            lastWorkingRoute: alternative,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+          await db.collection("portal_learning_memory").doc(`${domain}-working-route`.replace(/[^a-z0-9_-]/g, "-")).set({
+            domain,
+            patternType: "working_route",
+            pattern: { url: alternative },
+            connectorId: targetConnectorId,
+            successCount: 1,
+            lastSeenAt: new Date().toISOString(),
+            createdAt: new Date().toISOString()
+          }, { merge: true });
+        } else {
+          await db.collection("connector_patch_proposals").doc(`${jobId}-alternative-route`.replace(/[^a-zA-Z0-9_-]/g, "-")).set({
+            type: "alternative_route",
+            status: "pending_review",
+            connectorId: targetConnectorId,
+            portalMapId: portalMap.id || null,
+            proposedChanges: { portalUrl: alternative, lastWorkingRoute: alternative },
+            evidence: { domain, ticketId, jobId, errorCode: code },
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
         await createRunnerLog(jobId, ticketId, "WARNING", "Se encontró una ruta alternativa verificable; se reintentará el flujo.", {
           strategy: "alternative_route", alternative
         });

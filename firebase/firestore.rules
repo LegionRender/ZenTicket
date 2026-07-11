@@ -23,6 +23,27 @@ service cloud.firestore {
       );
     }
 
+    function ticketClientCreateIsSafe() {
+      return !request.resource.data.keys().hasAny([
+        'invoiceId', 'jobId', 'activeInvoiceJobId', 'connectorId', 'portalMapId',
+        'isCfdiValidated', 'cfdiValidated', 'satValidated', 'satStatus',
+        'validationStatus', 'xmlStoragePath', 'pdfStoragePath', 'folioFiscal',
+        'runnerError', 'runnerDiagnostics', 'attemptId', 'leaseUntil', 'lockedBy'
+      ]);
+    }
+
+    function ticketClientUpdateIsSafe() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny([
+        'invoiceId', 'jobId', 'activeInvoiceJobId', 'connectorId', 'portalMapId',
+        'isCfdiValidated', 'cfdiValidated', 'satValidated', 'satStatus',
+        'validationStatus', 'xmlStoragePath', 'pdfStoragePath', 'folioFiscal',
+        'runnerError', 'runnerDiagnostics', 'attemptId', 'leaseUntil', 'lockedBy'
+      ]) && !(changed.hasAny(['status']) && request.resource.data.status in [
+        'cfdi_validated', 'invoice_obtained', 'sat_validated', 'succeeded'
+      ]);
+    }
+
     // Fiscal Profiles rules
     // Path: fiscalProfiles/{userId}
     match /fiscalProfiles/{userId} {
@@ -47,8 +68,8 @@ service cloud.firestore {
     // Path: tickets/{ticketId}
     match /tickets/{ticketId} {
       allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if (isSignedIn() && (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid)) || isAdmin();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid && ticketClientCreateIsSafe();
+      allow update: if (isSignedIn() && (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid) && ticketClientUpdateIsSafe()) || isAdmin();
       allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
     }
 
@@ -69,7 +90,8 @@ service cloud.firestore {
 
     // Invoices rules nested under users
     match /users/{userId}/invoices/{invoiceId} {
-      allow read, write: if isOwner(userId) || isAdmin();
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if false;
     }
 
     // Collection Group rules to allow admin audit queries
@@ -113,9 +135,17 @@ service cloud.firestore {
     // Invoice Jobs rules
     match /invoice_jobs/{jobId} {
       allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if (isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid) || isAdmin();
-      allow delete: if isAdmin();
+      allow write: if false;
+    }
+
+    match /diagnostic_summaries/{summaryId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /runner_diagnostics/{diagnosticId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow write: if false;
     }
 
     // Portal Maps rules

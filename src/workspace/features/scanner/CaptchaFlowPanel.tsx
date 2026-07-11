@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { db } from "@/services/firebase/firebase";
 import { doc, updateDoc, onSnapshot } from "firebase/firestore";
+import { submitInvoiceJobCaptcha } from "@/services/api";
 import { useToast } from "@/shared/feedback/Toast";
 import { RefreshCw, Check } from "lucide-react";
 
@@ -154,13 +155,7 @@ export const CaptchaFlowPanel: React.FC<CaptchaFlowPanelProps> = ({
     setIsSubmitting(true);
     try {
       console.debug("[CAPTCHA_UI_RENDER] Submitting solution for attempt:", attemptId);
-      await updateDoc(doc(db, "invoice_jobs", targetJobId), {
-        status: "captcha_submitted",
-        captchaSolution: solution,
-        captchaSolutionAt: new Date().toISOString(),
-        captchaAttemptId: attemptId || null,
-        updatedAt: new Date().toISOString()
-      });
+      await submitInvoiceJobCaptcha(targetJobId, solution, attemptId);
       setCaptchaSolution("");
       toast.success("Código enviado. Continuando con la facturación.");
     } catch (error: any) {
