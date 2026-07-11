@@ -32,5 +32,7 @@ jobs:
           cache: npm
       - name: Install Firebase CLI
         run: npm ci
+      - name: Install Functions dependencies
+        run: npm ci --prefix firebase/functions
       - name: Deploy Functions and Firestore Rules
         run: npx firebase-tools deploy --only functions,firestore:rules --project="$PROJECT_ID" --non-interactive
