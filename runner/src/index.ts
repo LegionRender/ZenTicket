@@ -1129,29 +1129,43 @@ export async function processJob(jobId: string) {
         // Schedule next retry!
         const delayMinutes = 15 * recoveryAttemptCount; // 15m, 30m, 45m
         const nextRecoveryAt = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();
+        const recoveryOutboxRef = db.collection("invoice_job_outbox").doc(`recovery-${jobId}-${lockedJob.attemptId}`);
 
-        await jobRef.update({
-          status: "invoice_recovery_pending",
-          retryCount: retryCount + 1,
-          recoveryAttemptCount,
-          maxRecoveryAttempts,
-          nextRecoveryAt,
-          lastRecoveryAt: new Date().toISOString(),
-          lastRecoveryError: errorMessage,
-          wasAlreadyInvoiced: true,
-          portalMessage,
-          recoveryPathsTried,
-          recoveryButtonsClicked,
-          recoveryFormsDetected,
-          nextRecommendedAction,
-          duplicateDetected: true,
-          duplicateBasis: "portal_message",
-          duplicateReference,
-          duplicatePortalMessage: portalMessage,
-          duplicateIsFiscalProof: false,
-          lockedBy: null,
-          lockedAt: null,
-          updatedAt: new Date().toISOString()
+        await db.runTransaction(async (transaction) => {
+          transaction.update(jobRef, {
+            status: "invoice_recovery_pending",
+            retryCount: retryCount + 1,
+            recoveryAttemptCount,
+            maxRecoveryAttempts,
+            nextRecoveryAt,
+            lastRecoveryAt: new Date().toISOString(),
+            lastRecoveryError: errorMessage,
+            wasAlreadyInvoiced: true,
+            portalMessage,
+            recoveryPathsTried,
+            recoveryButtonsClicked,
+            recoveryFormsDetected,
+            nextRecommendedAction,
+            duplicateDetected: true,
+            duplicateBasis: "portal_message",
+            duplicateReference,
+            duplicatePortalMessage: portalMessage,
+            duplicateIsFiscalProof: false,
+            lockedBy: null,
+            lockedAt: null,
+            updatedAt: new Date().toISOString()
+          });
+          transaction.set(recoveryOutboxRef, {
+            jobId,
+            ticketId,
+            userId: lockedJob.userId,
+            attemptId: lockedJob.attemptId,
+            status: "pending",
+            eventType: "invoice_job.recovery",
+            availableAt: nextRecoveryAt,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
         });
 
         await ticketRef.update({
@@ -1241,14 +1255,29 @@ export async function processJob(jobId: string) {
     }
 
     if (shouldAutoRetry(errorCode, retryCount)) {
-      await jobRef.update({
-        status: "pending",
-        retryCount: retryCount + 1,
-        lastRetryReason: errorCode,
-        lastError: errorMessage,
-        lockedBy: null,
-        lockedAt: null,
-        updatedAt: new Date().toISOString()
+      const retryOutboxRef = db.collection("invoice_job_outbox").doc(`retry-${jobId}-${lockedJob.attemptId}`);
+      const retryQueuedAt = new Date().toISOString();
+      await db.runTransaction(async (transaction) => {
+        transaction.update(jobRef, {
+          status: "pending",
+          retryCount: retryCount + 1,
+          lastRetryReason: errorCode,
+          lastError: errorMessage,
+          lockedBy: null,
+          lockedAt: null,
+          updatedAt: retryQueuedAt
+        });
+        transaction.set(retryOutboxRef, {
+          jobId,
+          ticketId,
+          userId: lockedJob.userId,
+          attemptId: lockedJob.attemptId,
+          status: "pending",
+          eventType: "invoice_job.retry",
+          retryReason: errorCode,
+          createdAt: retryQueuedAt,
+          updatedAt: retryQueuedAt
+        });
       });
       await ticketRef.update({
         status: "queued_for_runner",

@@ -3754,10 +3754,10 @@ function runnerDispatchConfig() {
   return { queue, location, targetUrl, invokerServiceAccount, taskToken };
 }
 
-async function createCloudRunTask(jobId, config) {
+async function createCloudRunTask(jobId, deliveryId, config) {
   const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "factubolt";
   const parent = `projects/${projectId}/locations/${config.location}/queues/${config.queue}`;
-  const taskId = `invoice-${jobId}`.replace(/[^A-Za-z0-9_-]/g, "-");
+  const taskId = `invoice-${deliveryId}`.replace(/[^A-Za-z0-9_-]/g, "-");
   const taskName = `${parent}/tasks/${taskId}`;
   const credential = admin.app().options.credential;
   if (!credential || typeof credential.getAccessToken !== "function") {
@@ -3784,7 +3784,7 @@ async function createCloudRunTask(jobId, config) {
             serviceAccountEmail: config.invokerServiceAccount,
             audience: config.targetUrl
           },
-          body: Buffer.from(JSON.stringify({ jobId }), "utf8").toString("base64")
+          body: Buffer.from(JSON.stringify({ jobId, deliveryId }), "utf8").toString("base64")
         }
       }
     })
@@ -3823,8 +3823,10 @@ exports.dispatchInvoiceJobs = onSchedule(
     for (const outboxDoc of outboxSnapshot.docs) {
       const outbox = outboxDoc.data();
       const jobId = typeof outbox.jobId === "string" ? outbox.jobId : outboxDoc.id;
+      const availableAt = outbox.availableAt?.toMillis?.() ?? Date.parse(String(outbox.availableAt || ""));
+      if (Number.isFinite(availableAt) && availableAt > Date.now()) continue;
       try {
-        const task = await createCloudRunTask(jobId, config);
+        const task = await createCloudRunTask(jobId, outboxDoc.id, config);
         await outboxDoc.ref.set({
           status: "dispatched",
           cloudTaskName: task.taskName,
