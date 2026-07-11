@@ -1374,7 +1374,7 @@ app.post("/api/tickets/analyze", authenticateFirebaseToken, async (req: Request,
   }
 });
 
-app.post("/api/tickets", authenticateFirebaseToken, async (req: Request, res: Response): Promise<void> => {
+app.post("/api/tickets", authenticateFirebaseToken, async (req: any, res: Response): Promise<void> => {
   const userId = req.user?.uid;
   if (!userId) {
     res.status(401).json({ error: "No autorizado." });
