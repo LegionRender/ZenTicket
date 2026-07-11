@@ -36,7 +36,20 @@ jobs:
       - name: Build image remotely
         run: |
           IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/zenticket/runner:${GITHUB_SHA}"
-          gcloud builds submit . --project="$PROJECT_ID" --config=runner/cloudbuild.yaml --substitutions="_IMAGE_URI=$IMAGE_URI"
+          BUILD_ID="$(gcloud builds submit . --async --quiet --format='value(id)' --project="$PROJECT_ID" --config=runner/cloudbuild.yaml --substitutions="_IMAGE_URI=$IMAGE_URI")"
+          test -n "$BUILD_ID"
+          for _ in {1..90}; do
+            BUILD_STATUS="$(gcloud builds describe "$BUILD_ID" --project="$PROJECT_ID" --format='value(status)')"
+            case "$BUILD_STATUS" in
+              SUCCESS) break ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED)
+                echo "Cloud Build $BUILD_ID ended with $BUILD_STATUS"
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          test "$BUILD_STATUS" = "SUCCESS"
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
       - name: Deploy authenticated runner
         run: |
