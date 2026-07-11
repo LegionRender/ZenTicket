@@ -12,6 +12,7 @@ const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret, defineString } = require("firebase-functions/params");
 const { enqueueInvoiceJob, submitInvoiceJobCaptcha, InvoiceEnqueueError } = require("./shared/backend/invoiceQueue.cjs");
+const { persistTicket } = require("./shared/backend/ticketPersistence.cjs");
 
 admin.initializeApp();
 
@@ -2574,6 +2575,21 @@ const authenticateFirebaseToken = async (req, res, next) => {
     res.status(401).json({ error: "Token de Firebase inválido o expirado" });
   }
 };
+
+app.post("/api/tickets", authenticateFirebaseToken, async (req, res) => {
+  try {
+    const result = await persistTicket({
+      db,
+      userId: req.user?.uid,
+      ticketData: req.body,
+      idempotencyKey: req.headers["idempotency-key"]
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    console.error("[tickets] save failed:", error);
+    res.status(error.status || 500).json({ error: error.message || "No fue posible guardar el ticket." });
+  }
+});
 
 // Canonical invoice enqueue API. It accepts identifiers only; all fiscal,
 // connector and portal-map snapshots are resolved server-side in one transaction.
