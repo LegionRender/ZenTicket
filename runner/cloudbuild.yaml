@@ -1,3 +1,5 @@
+logsBucket: gs://factubolt_cloudbuild
+
 steps:
   - name: gcr.io/cloud-builders/docker
     args:
