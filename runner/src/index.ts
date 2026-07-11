@@ -3,7 +3,7 @@ import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import * as fs from "fs";
 import * as path from "path";
-import { closeAttempt, heartbeatAttempt, lockJob } from "./jobs/lockJob";
+import { appendAttemptEvidence, closeAttempt, heartbeatAttempt, lockJob } from "./jobs/lockJob";
 import { recordConnectorFailure } from "./jobs/circuitBreaker";
 import { executePortalMap } from "./executor/executePortalMap";
 import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiXml";
@@ -1076,6 +1076,12 @@ export async function processJob(jobId: string) {
     });
 
     await createRunnerLog(jobId, ticketId, "ERROR", `Procesamiento fallido: ${errorMessage} (Código: ${errorCode})`, diagnostic);
+    await appendAttemptEvidence(jobId, lockedJob.attemptId, {
+      stage: currentStage,
+      errorCode,
+      screenshotPath: err.screenshotPath || null,
+      diagnostic
+    });
     if (circuit?.opened) {
       await jobRef.update({
         status: "failed",

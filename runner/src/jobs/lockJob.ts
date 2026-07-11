@@ -137,3 +137,13 @@ export async function closeAttempt(jobId: string, attemptId: string, finalStage:
     heartbeatAt: now
   }, { merge: true });
 }
+
+export async function appendAttemptEvidence(jobId: string, attemptId: string, evidence: Record<string, unknown>): Promise<void> {
+  const db = getFirestore(getApp(), "ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee");
+  const now = Timestamp.now();
+  await db.collection("invoice_jobs").doc(jobId).collection("attempts").doc(attemptId).set({
+    ...evidence,
+    timeline: [{ stage: String(evidence.stage || "unknown"), status: "failed", createdAt: now.toDate().toISOString() }],
+    evidenceUpdatedAt: now
+  }, { merge: true });
+}
