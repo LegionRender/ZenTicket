@@ -3,7 +3,7 @@ import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import * as fs from "fs";
 import * as path from "path";
-import { lockJob } from "./jobs/lockJob";
+import { closeAttempt, heartbeatAttempt, lockJob } from "./jobs/lockJob";
 import { executePortalMap } from "./executor/executePortalMap";
 import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiXml";
 import { createRunnerLog, setActiveJobContext, setActiveStage } from "./logging/createRunnerLog";
@@ -124,7 +124,13 @@ export async function processJob(jobId: string) {
   const jobRef = db.collection("invoice_jobs").doc(jobId);
   const bucket = getStorage().bucket();
 
-  setActiveJobContext(jobId, ticketId, lockedJob.connectorId, lockedJob.environment || null, lockedJob.userId, lockedJob.connectorId);
+  setActiveJobContext(jobId, ticketId, lockedJob.connectorId, lockedJob.environment || null, lockedJob.userId, lockedJob.connectorId, lockedJob.attemptId);
+  const heartbeatTimer = setInterval(() => {
+    void heartbeatAttempt(jobId, lockedJob.attemptId, workerId).catch((error) => {
+      console.error(`[Runner] No se pudo renovar el lease del intento ${lockedJob.attemptId}:`, error);
+    });
+  }, 30_000);
+  heartbeatTimer.unref?.();
 
   const normFields = normalizeBillingAttemptFields(lockedJob.ticketDataSnapshot, null, lockedJob.fiscalProfileSnapshot);
   const tracker = new DiagnosticStageTracker(
@@ -134,7 +140,8 @@ export async function processJob(jobId: string) {
     lockedJob.connectorId,
     lockedJob.connectorId.split("_")[0] || "unknown",
     lockedJob.ticketDataSnapshot?.reference || "unknown",
-    normFields
+    normFields,
+    lockedJob.attemptId
   );
   
   tracker.trackStage("ticket_created", "success");
@@ -1041,6 +1048,7 @@ export async function processJob(jobId: string) {
       userId: lockedJob.userId,
       ticketId,
       jobId,
+      attemptId: lockedJob.attemptId,
       connectorId: lockedJob.connectorId,
       portalMapId: lockedJob.portalMapId || lockedJob.connectorId,
       stage: currentStage,
@@ -1368,6 +1376,12 @@ export async function processJob(jobId: string) {
     await createDiagnosticEvent(tracker.getEvents()[tracker.getEvents().length - 1]);
     const summary = buildDiagnosticSummary(ticketId, jobId, tracker.getEvents());
     await persistDiagnosticSummary(ticketId, summary);
+  } finally {
+    clearInterval(heartbeatTimer);
+    await closeAttempt(jobId, lockedJob.attemptId, currentStage).catch((error) => {
+      console.error(`[Runner] No se pudo cerrar el intento ${lockedJob.attemptId}:`, error);
+    });
+    setActiveJobContext(null, null, null, null);
   }
 }
 

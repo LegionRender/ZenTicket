@@ -7,6 +7,7 @@ let activeEnvironment: string | null = null;
 let activeUserId: string | null = null;
 let activePortalMapId: string | null = null;
 let activeStage: string | null = null;
+let activeAttemptId: string | null = null;
 
 export function setActiveJobContext(
   jobId: string | null,
@@ -14,7 +15,8 @@ export function setActiveJobContext(
   connectorId: string | null,
   environment: string | null,
   userId?: string | null,
-  portalMapId?: string | null
+  portalMapId?: string | null,
+  attemptId?: string | null
 ) {
   activeJobId = jobId;
   activeTicketId = ticketId;
@@ -22,6 +24,7 @@ export function setActiveJobContext(
   activeEnvironment = environment;
   activeUserId = userId || null;
   activePortalMapId = portalMapId || null;
+  activeAttemptId = attemptId || null;
 }
 
 export function setActiveStage(stage: string | null) {
@@ -123,6 +126,9 @@ export async function createRunnerLog(
 
   if (metadata?.errorCode) payload.errorCode = metadata.errorCode;
   else if (metadata?.code) payload.errorCode = metadata.code;
+
+  if (metadata?.attemptId) payload.attemptId = metadata.attemptId;
+  else if (activeJobId === jobId && activeAttemptId) payload.attemptId = activeAttemptId;
 
   if (metadata?.retryable !== undefined) payload.retryable = metadata.retryable;
   if (metadata?.blocking !== undefined) payload.blocking = metadata.blocking;

@@ -5,6 +5,7 @@ export interface DiagnosticEvent {
   userEmailMasked: string;
   ticketId: string;
   jobId: string;
+  attemptId?: string;
   connectorId: string;
   portalName: string;
   ticketReference: string;
@@ -81,6 +82,7 @@ export interface DiagnosticSummary {
   userId: string;
   ticketId: string;
   jobId: string;
+  attemptId?: string;
   connectorId: string;
   reviewed: boolean;
   reviewedAt?: string | null;

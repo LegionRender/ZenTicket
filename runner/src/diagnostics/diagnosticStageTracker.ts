@@ -11,8 +11,9 @@ export class DiagnosticStageTracker {
   private portalName: string;
   private ticketReference: string;
   private normalizedFields: any;
+  private attemptId?: string;
 
-  constructor(ticketId: string, jobId: string, userId: string, connectorId: string, portalName: string, ticketReference: string, normalizedFields: any) {
+  constructor(ticketId: string, jobId: string, userId: string, connectorId: string, portalName: string, ticketReference: string, normalizedFields: any, attemptId?: string) {
     this.ticketId = ticketId;
     this.jobId = jobId;
     this.userId = userId;
@@ -20,6 +21,7 @@ export class DiagnosticStageTracker {
     this.portalName = portalName;
     this.ticketReference = ticketReference;
     this.normalizedFields = normalizedFields;
+    this.attemptId = attemptId;
   }
 
   public getEvents(): DiagnosticEvent[] {
@@ -45,6 +47,7 @@ export class DiagnosticStageTracker {
       userEmailMasked: "S/D",
       ticketId: this.ticketId,
       jobId: this.jobId,
+      attemptId: this.attemptId,
       connectorId: this.connectorId,
       portalName: this.portalName,
       ticketReference: this.ticketReference,

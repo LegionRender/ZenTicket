@@ -4,6 +4,7 @@ export interface DiagnosticSnapshot {
   userId: string;
   ticketId: string;
   jobId: string;
+  attemptId?: string;
   connectorId: string;
   portalMapId: string;
   stage: RunnerStage;
@@ -39,6 +40,7 @@ export function createDiagnosticSnapshot(params: Partial<DiagnosticSnapshot> & {
     userId: params.userId,
     ticketId: params.ticketId,
     jobId: params.jobId,
+    attemptId: params.attemptId,
     connectorId: params.connectorId || "",
     portalMapId: params.portalMapId || "",
     stage: params.stage,
