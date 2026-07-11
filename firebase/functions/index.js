@@ -11,7 +11,7 @@ const { GoogleGenAI } = require("@google/genai");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret, defineString } = require("firebase-functions/params");
-const { enqueueInvoiceJob, submitInvoiceJobCaptcha, InvoiceEnqueueError } = require("../../shared/backend/invoiceQueue.cjs");
+const { enqueueInvoiceJob, submitInvoiceJobCaptcha, InvoiceEnqueueError } = require("./shared/backend/invoiceQueue.cjs");
 
 admin.initializeApp();
 
