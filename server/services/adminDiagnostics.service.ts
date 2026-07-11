@@ -1090,7 +1090,7 @@ export class AdminDiagnosticsService {
     }
 
     const summarySnap = detail.summary;
-    if (summarySnap && (summarySnap.visibility === "archived" || summarySnap.canonicalStatus === "archived")) {
+    if (summarySnap && (summarySnap.diagnosticStatus === "archived" || summarySnap.canonicalStatus === "archived")) {
       return { success: true };
     }
 
