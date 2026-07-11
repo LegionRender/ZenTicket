@@ -42,6 +42,8 @@ jobs:
           cache: npm
       - name: Install Firebase CLI
         run: npm ci
+      - name: Bundle shared backend with Functions
+        run: cp -R shared firebase/functions/shared
       - name: Install Functions dependencies
         run: npm ci --prefix firebase/functions
       - name: Configure Firebase runtime parameters
