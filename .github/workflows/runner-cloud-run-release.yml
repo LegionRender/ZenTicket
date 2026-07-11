@@ -15,6 +15,8 @@ jobs:
       REGION: ${{ vars.GCP_REGION }}
       RUNNER_SERVICE: ${{ vars.RUNNER_SERVICE }}
       RUNTIME_SERVICE_ACCOUNT: ${{ vars.RUNNER_RUNTIME_SERVICE_ACCOUNT }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate release configuration
@@ -23,6 +25,8 @@ jobs:
           test -n "$REGION"
           test -n "$RUNNER_SERVICE"
           test -n "$RUNTIME_SERVICE_ACCOUNT"
+          test -n "$WORKLOAD_IDENTITY_PROVIDER"
+          test -n "$DEPLOY_SERVICE_ACCOUNT"
       - id: auth
         uses: google-github-actions/auth@v2
         with:
@@ -36,4 +40,4 @@ jobs:
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
       - name: Deploy authenticated runner
         run: |
-          gcloud run deploy "$RUNNER_SERVICE" --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" --service-account="$RUNTIME_SERVICE_ACCOUNT" --no-allow-unauthenticated --ingress=internal-and-cloud-load-balancing
+          gcloud run deploy "$RUNNER_SERVICE" --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" --service-account="$RUNTIME_SERVICE_ACCOUNT" --set-secrets="RUNNER_TASK_TOKEN=RUNNER_TASK_TOKEN:latest" --no-allow-unauthenticated --ingress=internal-and-cloud-load-balancing
