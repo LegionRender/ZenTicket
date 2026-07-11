@@ -5,5 +5,22 @@ steps:
       - --file=runner/Dockerfile
       - --tag=${_IMAGE_URI}
       - .
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        docker run --rm "${_IMAGE_URI}" node -e '
+          const { runBrowserSmoke } = require("./dist/runner/src/runtime/browserSmoke");
+          runBrowserSmoke()
+            .then((result) => {
+              console.log(JSON.stringify(result));
+              process.exit(result.healthy ? 0 : 1);
+            })
+            .catch((error) => {
+              console.error(error);
+              process.exit(1);
+            });
+        '
 images:
   - ${_IMAGE_URI}
