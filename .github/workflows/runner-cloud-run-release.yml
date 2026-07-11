@@ -50,6 +50,7 @@ jobs:
             sleep 10
           done
           test "$BUILD_STATUS" = "SUCCESS"
+          gcloud builds log "$BUILD_ID" --project="$PROJECT_ID" | grep -m 1 '"healthy"'
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
       - name: Deploy authenticated runner
         run: |
