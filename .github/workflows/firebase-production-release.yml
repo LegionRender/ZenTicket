@@ -18,6 +18,7 @@ jobs:
       RUNNER_TASK_LOCATION: ${{ vars.RUNNER_TASK_LOCATION }}
       RUNNER_URL: ${{ vars.RUNNER_URL }}
       RUNNER_TASK_INVOKER_SERVICE_ACCOUNT: ${{ vars.RUNNER_TASK_INVOKER_SERVICE_ACCOUNT }}
+      OPENAI_VISION_MODEL: ${{ vars.OPENAI_VISION_MODEL }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate release configuration
@@ -29,6 +30,7 @@ jobs:
           test -n "$RUNNER_TASK_LOCATION"
           test -n "$RUNNER_URL"
           test -n "$RUNNER_TASK_INVOKER_SERVICE_ACCOUNT"
+          test -n "$OPENAI_VISION_MODEL"
       - id: auth
         uses: google-github-actions/auth@v2
         with:
@@ -50,6 +52,7 @@ jobs:
             printf 'RUNNER_TASK_LOCATION=%s\n' "$RUNNER_TASK_LOCATION"
             printf 'RUNNER_URL=%s\n' "$RUNNER_URL"
             printf 'RUNNER_TASK_INVOKER_SERVICE_ACCOUNT=%s\n' "$RUNNER_TASK_INVOKER_SERVICE_ACCOUNT"
+            printf 'OPENAI_VISION_MODEL=%s\n' "$OPENAI_VISION_MODEL"
           } > firebase/functions/.env.factubolt
       - name: Deploy Functions and Firestore Rules
         run: npx firebase-tools deploy --only functions,firestore:rules --project="$PROJECT_ID" --non-interactive
