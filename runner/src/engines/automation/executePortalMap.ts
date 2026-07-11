@@ -957,6 +957,39 @@ export async function executePortalMap(
       await createRunnerLog(jobId, ticketId, "WARNING", "No se pudo resolver el CAPTCHA automáticamente. Escalando a resolución humana.");
     }
 
+    // 2. Durable human handoff. Cloud Run must release the browser instead of
+    // retaining a Firestore listener and an interactive portal session.
+    const durableCaptchaAttemptId = randomUUID();
+    const durableCaptchaMessage = "El portal solicita una verificaciÃ³n humana. ZenTicket pausÃ³ este intento de forma segura.";
+    await jobRef.set({
+      status: "waiting_human_verification",
+      waitingAction: "captcha",
+      captchaScreenshotPath: lastScreenshotPath,
+      captchaScreenshotUrl: lastScreenshotUrl,
+      captchaRequestedAt: new Date().toISOString(),
+      captchaAttemptId: durableCaptchaAttemptId,
+      captchaFlowActive: false,
+      requiresUserAction: true,
+      lockedBy: null,
+      lockedAt: null,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    await ticketRef.set({
+      status: "waiting_user_captcha",
+      jobId,
+      errorMsg: durableCaptchaMessage,
+      reviewReasonCode: "CAPTCHA_DETECTED",
+      captchaScreenshotUrl: lastScreenshotUrl,
+      captchaAttemptId: durableCaptchaAttemptId,
+      captchaFlowActive: false,
+      requiresUserAction: true,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    await createRunnerLog(jobId, ticketId, "WARNING", "CAPTCHA detectado; el intento se pausÃ³ durablemente y el navegador se liberarÃ¡.");
+    return false;
+
+    // Legacy interactive flow retained only as historical source during the
+    // transition; it is unreachable and no longer executes in Cloud Run.
     // 2. Fallback to human captcha
     const captchaAttemptId = randomUUID();
     const captchaDetectedAt = new Date();
