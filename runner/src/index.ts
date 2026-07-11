@@ -4,6 +4,7 @@ import { getStorage } from "firebase-admin/storage";
 import * as fs from "fs";
 import * as path from "path";
 import { closeAttempt, heartbeatAttempt, lockJob } from "./jobs/lockJob";
+import { recordConnectorFailure } from "./jobs/circuitBreaker";
 import { executePortalMap } from "./executor/executePortalMap";
 import { validateCfdiXml, XmlValidationResult } from "./validators/validateCfdiXml";
 import { createRunnerLog, setActiveJobContext, setActiveStage } from "./logging/createRunnerLog";
@@ -1043,6 +1044,9 @@ export async function processJob(jobId: string) {
 
     const wasAlreadyInvoiced = !!err.wasAlreadyInvoiced || errorCode === "TICKET_ALREADY_INVOICED" || !!err.alreadyInvoiced;
     const captchaDetected = errorCode === "CAPTCHA_DETECTED" || errorCode === "CAPTCHA_REQUIRED";
+    const circuit = mappedError.retryable
+      ? await recordConnectorFailure(lockedJob.connectorId, errorCode, currentStage)
+      : null;
 
     const diagnostic = createDiagnosticSnapshot({
       userId: lockedJob.userId,
@@ -1072,6 +1076,29 @@ export async function processJob(jobId: string) {
     });
 
     await createRunnerLog(jobId, ticketId, "ERROR", `Procesamiento fallido: ${errorMessage} (Código: ${errorCode})`, diagnostic);
+    if (circuit?.opened) {
+      await jobRef.update({
+        status: "failed",
+        lastError: errorMessage,
+        lastErrorCode: errorCode,
+        circuitBreakerSignature: circuit.signature,
+        lockedBy: null,
+        lockedAt: null,
+        updatedAt: new Date().toISOString()
+      });
+      await ticketRef.update({
+        status: "requires_manual_review",
+        errorMsg: "Este comercio se pausó temporalmente tras fallos repetidos. Requiere revisión técnica.",
+        reviewReasonCode: "CONNECTOR_CIRCUIT_OPEN",
+        updatedAt: new Date().toISOString()
+      });
+      await createRunnerLog(jobId, ticketId, "ERROR", `Circuit breaker abierto para el conector tras ${circuit.failureCount} fallos equivalentes.`, {
+        attemptId: lockedJob.attemptId,
+        errorCode,
+        circuitBreakerSignature: circuit.signature
+      });
+      return;
+    }
     setActiveJobContext(null, null, null, null);
     printE2EResult(false, ticketId, jobId, connector, null, null, "failed", "requires_manual_review", "failed", false, false, false, { xml: "", pdf: null }, err);
 
