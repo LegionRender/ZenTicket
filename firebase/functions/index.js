@@ -13,6 +13,7 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret, defineString } = require("firebase-functions/params");
 const { enqueueInvoiceJob, submitInvoiceJobCaptcha, InvoiceEnqueueError } = require("./shared/backend/invoiceQueue.cjs");
 const { persistTicket } = require("./shared/backend/ticketPersistence.cjs");
+const { promoteTrainingProposalToObservation } = require("./shared/backend/trainingReviewQueue.cjs");
 
 admin.initializeApp();
 
@@ -34,12 +35,6 @@ const runnerTaskQueue = defineString("RUNNER_TASK_QUEUE", { default: "" });
 const runnerTaskLocation = defineString("RUNNER_TASK_LOCATION", { default: "us-central1" });
 const runnerUrl = defineString("RUNNER_URL", { default: "" });
 const runnerTaskInvokerServiceAccount = defineString("RUNNER_TASK_INVOKER_SERVICE_ACCOUNT", { default: "" });
-
-// P0: the JIT may propose a connector, but must not mutate a live connector or
-// portal map unless a deliberate server-side rollout explicitly enables it.
-function isAutomaticJitConnectorMutationEnabled() {
-  return process.env.JIT_AUTOMATIC_CONNECTOR_MUTATION_ENABLED === "true";
-}
 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
@@ -1425,14 +1420,10 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       return;
     }
 
-    if (!isAutomaticJitConnectorMutationEnabled()) {
-      await updateProgress(100, "El entrenamiento JIT quedo bloqueado para revision humana; no se modifico ningun conector.", "failed");
-      res.status(423).json({
-        code: "JIT_AUTOMATIC_MUTATION_DISABLED",
-        error: "El entrenamiento JIT puede generar propuestas, pero la modificacion automatica de conectores esta desactivada durante la estabilizacion."
-      });
-      return;
-    }
+    // A user-triggered JIT run may discover a draft, but it never activates or
+    // changes a connector by itself. The draft is stored only in a pending
+    // proposal and requires the administrator's sandbox/observation review.
+    const allowDirectDraftPersistence = adminMode;
 
     // 1. Load the ticket from Firestore
     if (!db || typeof db.collection !== "function") {
@@ -2054,7 +2045,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
     const existingConnectorDoc = await connectorRef.get();
     const existingConnector = existingConnectorDoc.exists ? existingConnectorDoc.data() : null;
     const connectorVersion = Number(existingConnector?.version || 0) + 1;
-    if (existingConnector) {
+    if (allowDirectDraftPersistence && existingConnector) {
       await connectorRef.collection("versions").doc(String(existingConnector.version || 1).padStart(4, "0")).set({
         version: existingConnector.version || 1,
         snapshotAt: new Date().toISOString(),
@@ -2084,7 +2075,9 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       createdAt: existingConnector?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    await connectorRef.set(newConnector);
+    if (allowDirectDraftPersistence) {
+      await connectorRef.set(newConnector);
+    }
 
     // Save Portal Map
     const reqFieldsList = discoverResult.requiredPortalFields.map(f => ({
@@ -2134,7 +2127,9 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       updatedAt: new Date().toISOString(),
       createdAt: new Date().toISOString()
     };
-    await db.collection("portal_maps").doc(`map-${connectorId}`).set(portalMapData);
+    if (allowDirectDraftPersistence) {
+      await db.collection("portal_maps").doc(`map-${connectorId}`).set(portalMapData);
+    }
 
     if (adminMode) {
       await updateProgress(100, "Portal entrenado y agregado a la Biblioteca de conectores.", "completed");
@@ -2258,7 +2253,10 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       fechaCompra: ocrResultData.fechaCompra || ticketData.fechaCompra || "",
       billingReference: portalFields.billingReference || ticketData.folio || "",
       portalFields: portalFields,
-      connectorId: connectorId,
+      // A user JIT run must not bind the ticket to an unreviewed connector.
+      // The reviewed promotion writes connectorId/portalMapId immediately before
+      // using the canonical queue.
+      ...(allowDirectDraftPersistence ? { connectorId } : { trainingConnectorCandidateId: connectorId }),
       updatedAt: new Date().toISOString()
     };
     await db.collection("tickets").doc(ticketId).update(updatedFields);
@@ -2349,6 +2347,8 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         ticketId,
         userId: decodedToken.uid,
         evidence: { portalUrl, portalFields, trainingId },
+        candidateConnector: newConnector,
+        candidatePortalMap: { ...portalMapData, id: `map-${connectorId}` },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       }, { merge: true });
@@ -3715,6 +3715,32 @@ app.post("/api/billing/cancel-subscription", authenticateFirebaseToken, async (r
     res.json({ success: true, message: "Suscripción cancelada exitosamente." });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// This route deliberately precedes the diagnostics bundle: promoting a training
+// proposal is the one human-reviewed transition that may resume its source
+// ticket. The shared helper enforces the state transition and canonical queue.
+app.post("/api/admin/diagnostics/proposals/:proposalId/promote-observation", authenticateFirebaseToken, async (req, res) => {
+  const user = req.user || {};
+  const email = String(user.email || "").toLowerCase();
+  const isAdmin = user.claims?.admin === true || user.role === "admin" ||
+    email === "ricardo@zenticket.mx" || email === "legionrender@gmail.com";
+  if (!isAdmin) {
+    res.status(403).json({ error: "Acceso denegado. Se requiere rol de administrador." });
+    return;
+  }
+  try {
+    const result = await promoteTrainingProposalToObservation({
+      db,
+      proposalId: req.params.proposalId,
+      adminUser: user
+    });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    const code = error?.message || "TRAINING_PROMOTION_FAILED";
+    res.status(code === "PROPOSAL_NOT_FOUND" || code === "TICKET_NOT_FOUND" ? 404 : 409)
+      .json({ code, error: "No fue posible promover el conector para observación." });
   }
 });
 

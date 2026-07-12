@@ -39,6 +39,15 @@ export const getDetailedReasonMsg = (ticket: any): string => {
   if (ticket.status === "training_required") {
     return "Este comercio aún no tenía automatización. Estamos localizando su portal y preparando los datos que solicita. El primer proceso puede tardar algunos minutos.";
   }
+  if (ticket.status === "training_pending_review") {
+    return "Estamos preparando la facturación con este comercio. Tu ticket está resguardado y continuará automáticamente cuando el flujo sea revisado.";
+  }
+  if (ticket.status === "training_approved_queueing") {
+    return "El flujo de este comercio ya fue aprobado. Estamos enviando tu solicitud de factura automáticamente.";
+  }
+  if (ticket.status === "training_approved_queue_blocked") {
+    return "Estamos resolviendo una validación antes de enviar la solicitud al portal. Tu ticket sigue resguardado; no necesitas volver a subirlo.";
+  }
   if (ticket.status === "connector_not_ready") {
     return "El conector de este comercio está en mantenimiento técnico o ajustes.";
   }
@@ -248,6 +257,17 @@ const _getTicketVisualState = (ticket: any): TicketVisualState => {
       badgeTone: "zt-badge-archived",
       message: getDetailedReasonMsg(ticket),
       isActive: false,
+      requiresAttention: false
+    };
+  }
+
+  if (["training_pending_review", "training_approved_queueing", "training_approved_queue_blocked"].includes(ticket.status)) {
+    return {
+      visualStatus: "training_required",
+      badgeLabel: "PREPARANDO FACTURA",
+      badgeTone: "zt-badge-archived",
+      message: getDetailedReasonMsg(ticket),
+      isActive: true,
       requiresAttention: false
     };
   }

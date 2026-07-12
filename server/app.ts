@@ -12,6 +12,7 @@ import crypto from "crypto";
 import fs from "fs";
 const { enqueueInvoiceJob, submitInvoiceJobCaptcha, InvoiceEnqueueError } = require("../shared/backend/invoiceQueue.cjs");
 const { persistTicket } = require("../shared/backend/ticketPersistence.cjs");
+const { promoteTrainingProposalToObservation } = require("../shared/backend/trainingReviewQueue.cjs");
 
 dotenv.config();
 
@@ -443,6 +444,23 @@ app.post("/api/billing/webhooks/stripe", express.raw({ type: "application/json" 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
+// A reviewed training proposal resumes its original ticket via the canonical
+// queue. It is registered before the diagnostics router so both deployments
+// share the same safe promotion behavior.
+app.post("/api/admin/diagnostics/proposals/:proposalId/promote-observation", authenticateFirebaseToken, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await promoteTrainingProposalToObservation({
+      db: adminDb,
+      proposalId: req.params.proposalId,
+      adminUser: (req as any).user
+    });
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    const code = error?.message || "TRAINING_PROMOTION_FAILED";
+    res.status(code === "PROPOSAL_NOT_FOUND" || code === "TICKET_NOT_FOUND" ? 404 : 409)
+      .json({ code, error: "No fue posible promover el conector para observación." });
+  }
+});
 app.use("/api/admin/diagnostics", adminDiagnosticsRoutes);
 
 // API Endpoint: Check SMTP Configuration Status safely
