@@ -4558,7 +4558,7 @@ return list.map(n => {
                   </div>
                 </div>
               </div>
-            ) : (currentTicket?.status === "training_required" || currentTicket?.status === "connector_not_ready") ? (
+            ) : (["training_required", "connector_not_ready", "portal_retry_required"].includes(currentTicket?.status || "")) ? (
               <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-6 text-left shadow-md animate-fade-in font-sans">
                 <div className="flex items-start gap-4">
                   <div className="shrink-0 w-12 h-12 rounded-2xl bg-[#0B53F4]/10 flex items-center justify-center text-[#0B53F4]">
@@ -4566,15 +4566,21 @@ return list.map(n => {
                   </div>
                   <div className="space-y-2">
                     <span className="text-[10px] font-black text-[#0B53F4] uppercase tracking-widest block font-mono">
-                      {currentTicket?.status === "training_required" ? "Comercio por Identificar / Sin Conector" : "Conector No Listo / En Mantenimiento"}
+                      {currentTicket?.status === "portal_retry_required"
+                        ? "Portal de facturación no disponible"
+                        : currentTicket?.status === "training_required" ? "Comercio por Identificar / Sin Conector" : "Conector No Listo / En Mantenimiento"}
                     </span>
                     <h4 className="text-lg font-black text-slate-800 tracking-tight leading-snug">
-                      {currentTicket?.status === "training_required" 
+                      {currentTicket?.status === "portal_retry_required"
+                        ? "Tuvimos una complicación con el portal"
+                        : currentTicket?.status === "training_required"
                         ? "Estamos preparando este comercio"
                         : "El conector de este comercio está en mantenimiento"}
                     </h4>
                     <p className="text-[12.5px] font-medium text-slate-500 leading-relaxed font-sans">
-                      {currentTicket?.status === "training_required"
+                      {currentTicket?.status === "portal_retry_required"
+                        ? "Estamos trabajando en el portal de facturación. Para intentarlo nuevamente, envía otra vez el ticket y presiona Facturar."
+                        : currentTicket?.status === "training_required"
                         ? `Este comercio aún no tenía automatización. Estamos localizando su portal y preparando los datos que solicita. Este primer proceso puede tardar algunos minutos; puedes salir de esta pantalla y consultar el avance en Mis tickets.`
                         : `El conector oficial para "${extractedData?.nombreEmisor || "este comercio"}" está experimentando ajustes o cambios en el portal del emisor. Estamos actualizando el flujo de automatización.`}
                     </p>
@@ -4616,7 +4622,7 @@ return list.map(n => {
                     onClick={resetAll}
                     className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-slate-500 bg-slate-100 hover:bg-slate-200 px-6 py-4 rounded-xl transition duration-150 active:scale-[0.98] select-none cursor-pointer border-none font-sans"
                   >
-                    Subir otro
+                    {currentTicket?.status === "portal_retry_required" ? "Facturar" : "Subir otro"}
                   </button>
                 </div>
               </div>

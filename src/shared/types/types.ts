@@ -106,6 +106,7 @@ export type TicketStatus =
   | "training_pending_review"
   | "training_approved_queueing"
   | "training_approved_queue_blocked"
+  | "portal_retry_required"
   | "connector_not_ready"
   | "connector_resolving"
   | "pending_portal_submission"

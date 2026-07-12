@@ -48,6 +48,9 @@ export const getDetailedReasonMsg = (ticket: any): string => {
   if (ticket.status === "training_approved_queue_blocked") {
     return "Estamos resolviendo una validación antes de enviar la solicitud al portal. Tu ticket sigue resguardado; no necesitas volver a subirlo.";
   }
+  if (ticket.status === "portal_retry_required") {
+    return "Tuvimos una complicación al localizar el portal de facturación y estamos trabajando en ello. Envía de nuevo el ticket para intentarlo otra vez.";
+  }
   if (ticket.status === "connector_not_ready") {
     return "El conector de este comercio está en mantenimiento técnico o ajustes.";
   }
@@ -269,6 +272,17 @@ const _getTicketVisualState = (ticket: any): TicketVisualState => {
       message: getDetailedReasonMsg(ticket),
       isActive: true,
       requiresAttention: false
+    };
+  }
+
+  if (ticket.status === "portal_retry_required") {
+    return {
+      visualStatus: "portal_retry_required",
+      badgeLabel: "REINTENTO REQUERIDO",
+      badgeTone: "zt-badge-attention",
+      message: getDetailedReasonMsg(ticket),
+      isActive: false,
+      requiresAttention: true
     };
   }
 

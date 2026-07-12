@@ -3319,17 +3319,19 @@ app.post("/api/tickets/train-jit", authenticateFirebaseToken, async (req: Reques
     if (ticketId && !adminMode && adminDb && typeof adminDb.collection === "function") {
       const authRequired = err.code === "PORTAL_AUTH_REQUIRED";
       await adminDb.collection("tickets").doc(ticketId).set({
-        status: authRequired ? "connector_auth_required" : "training_required",
+        status: authRequired ? "connector_auth_required" : "portal_retry_required",
         errorMsg: authRequired
           ? "El portal oficial requiere una cuenta del comercio para continuar."
-          : "No se pudo verificar automáticamente el portal oficial de este comercio.",
+          : "Tuvimos una complicación al localizar el portal de facturación. Estamos trabajando en ello; envía de nuevo el ticket para intentarlo otra vez.",
         reviewReasonCode: authRequired ? "PORTAL_AUTH_REQUIRED" : "PORTAL_NOT_FOUND",
         updatedAt: new Date().toISOString()
       }, { merge: true }).catch(() => null);
     }
-    const statusCode = err.code === "PORTAL_AUTH_REQUIRED" ? 409 : 500;
+    const statusCode = err.code === "PORTAL_AUTH_REQUIRED" ? 409 : 422;
     res.status(statusCode).json({
-      error: "Fallo durante el auto-entrenamiento: " + err.message,
+      error: err.code === "PORTAL_AUTH_REQUIRED"
+        ? "El portal oficial requiere una cuenta del comercio para continuar."
+        : "Tuvimos una complicación al localizar el portal de facturación. Envía de nuevo el ticket para intentarlo otra vez.",
       code: err.code || "JIT_TRAINING_FAILED"
     });
   }
