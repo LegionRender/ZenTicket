@@ -2726,6 +2726,16 @@ export default function ScannerAndSimulator({
       const errMessage = err.message || "";
       await addLog(`❌ ERROR: ${errMessage}`, 200);
 
+      if (/conector resuelto|connector.*not found|connector not found/i.test(errMessage)) {
+        await onUpdateTicketInDb(activeTicketId, {
+          status: "training_required",
+          errorMsg: "Estamos preparando la facturación con este comercio. Tu ticket quedó resguardado y continuará automáticamente."
+        });
+        setIsAutomatingLoading(false);
+        void handleRunTraining(activeExtractedData, activeTicketId);
+        return;
+      }
+
       const reviewErr: ReviewError = {
         reviewReasonCode: "UNKNOWN_RUNNER_ERROR",
         reviewReasonMessage: errMessage || "Error desconocido al encolar el job.",
@@ -3132,6 +3142,8 @@ export default function ScannerAndSimulator({
     // Immediately trigger automation (Guardar y continuar behavior)
     if (found && found.runnerAvailable) {
       await handleTriggerAutomation(found, ticketId, updatedData, finalProfileToUse);
+    } else if (ticketId) {
+      void handleRunTraining(updatedData, ticketId);
     }
   };
 
@@ -3232,8 +3244,8 @@ export default function ScannerAndSimulator({
           ...finalTicketUpdates
         }, finalProfile);
       } else {
-        toast.error("No se pudo iniciar el proceso: conector no identificado.");
         setIsAutomatingLoading(false);
+        void handleRunTraining({ ...ticketData, ...finalTicketUpdates }, ticketId);
       }
     } catch (err: any) {
       console.error("Error saving inline inputs:", err);
@@ -5160,9 +5172,13 @@ return list.map(n => {
                             <button
                               onClick={async () => {
                                 if (ticketId) {
+                                  if (!matchingConnector) {
+                                    void handleRunTraining(extractedData, ticketId);
+                                    return;
+                                  }
                                   const reviewErr: ReviewError = {
-                                    reviewReasonCode: matchingConnector ? "PORTAL_ERROR" : "CONNECTOR_NOT_FOUND",
-                                    reviewReasonMessage: matchingConnector ? "El usuario solicitó revisión manual." : "Este comercio aún requiere revisión. Estamos revisando si puede procesarse automáticamente.",
+                                    reviewReasonCode: "PORTAL_ERROR",
+                                    reviewReasonMessage: "El usuario solicitó revisión manual.",
                                     lastAutomationStep: "extraction_ready",
                                     connectorAttempted: false,
                                     connectorId: matchingConnector?.id || null,
@@ -5180,7 +5196,7 @@ return list.map(n => {
                               }}
                               className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-slate-700 bg-slate-100 hover:bg-slate-205 px-6 py-4 rounded-2xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-2xs font-sans"
                             >
-                              Enviar a revisión
+                              {matchingConnector ? "Enviar a revisión" : "Preparar facturación"}
                             </button>
                           </>
                         )}
@@ -6152,28 +6168,11 @@ return list.map(n => {
                   type="button"
                   onClick={async () => {
                     setShowOcrConfirmationModal(false);
-                    if (ticketId) {
-                      const reviewErr: ReviewError = {
-                        reviewReasonCode: "CONNECTOR_NOT_FOUND",
-                        reviewReasonMessage: "Este comercio aún requiere revisión. Estamos revisando si puede procesarse automáticamente.",
-                        lastAutomationStep: "extraction_ready",
-                        connectorAttempted: false,
-                        connectorId: null,
-                        connectorName: null,
-                        portalErrorMessage: "No conector available"
-                      };
-                      await onUpdateTicketInDb(ticketId, {
-                        status: "requires_manual_review",
-                        errorMsg: reviewErr.reviewReasonMessage,
-                        reviewError: reviewErr as any
-                      });
-                      toast.info("Enviado a revisión manual. Podrás facturar este ticket cuando un agente lo complete.", "Revisión");
-                      resetAll();
-                    }
+                    if (ticketId) void handleRunTraining(extractedData, ticketId);
                   }}
                   className="text-xs font-black uppercase tracking-wider text-white bg-slate-600 hover:bg-slate-700 py-3 px-6 rounded-xl duration-150 cursor-pointer active:scale-98 text-center shadow-md shadow-slate-600/15"
                 >
-                  Enviar a Revisión
+                  Preparar facturación
                 </button>
               )}
             </div>
