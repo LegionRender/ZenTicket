@@ -11,6 +11,7 @@ import axios from "axios";
 import crypto from "crypto";
 import fs from "fs";
 const { enqueueInvoiceJob, submitInvoiceJobCaptcha, InvoiceEnqueueError } = require("../shared/backend/invoiceQueue.cjs");
+const { persistTicket } = require("../shared/backend/ticketPersistence.cjs");
 
 dotenv.config();
 
@@ -1375,93 +1376,17 @@ app.post("/api/tickets/analyze", authenticateFirebaseToken, async (req: Request,
 });
 
 app.post("/api/tickets", authenticateFirebaseToken, async (req: any, res: Response): Promise<void> => {
-  const userId = req.user?.uid;
-  if (!userId) {
-    res.status(401).json({ error: "No autorizado." });
-    return;
-  }
-  const ticketData = req.body;
-  const idempotencyKey = (req.headers["idempotency-key"] || ticketData.clientRequestId || "").toString();
-
-  const reference = ticketData.portalFields?.billingReference || ticketData.reference || ticketData.folio || "";
-  const rfcEmisor = ticketData.rfcEmisor || "";
-  const date = ticketData.fechaCompra || ticketData.fecha || "";
-  const total = parseFloat(String(ticketData.total)) || 0;
-
-  if (!adminDb) {
-    res.status(500).json({ error: "Base de datos no inicializada" });
-    return;
-  }
-
   try {
-    let resolvedTicketId = "";
-
-    await adminDb.runTransaction(async (transaction) => {
-      // 1. Fetch user's tickets
-      const ticketsQuery = adminDb.collection("tickets").where("userId", "==", userId);
-      const querySnap = await transaction.get(ticketsQuery);
-      
-      const activeTickets = querySnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-      // 2. Check Idempotency Key first
-      if (idempotencyKey) {
-        const foundByIdempotency = activeTickets.find((t: any) => t.clientRequestId === idempotencyKey);
-        if (foundByIdempotency) {
-          resolvedTicketId = foundByIdempotency.id;
-          return;
-        }
-      }
-
-      // 3. Check Fingerprint for purchase deduplication
-      const normRef = reference.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
-      const normRfc = rfcEmisor.toUpperCase().trim();
-      const normDate = date.substring(0, 10);
-      const normTotal = parseFloat(total.toFixed(2));
-
-      const hasSufficientFields = normRef && normRfc && normDate && !isNaN(normTotal) && normTotal > 0;
-
-      if (hasSufficientFields) {
-        const matchingTicket = activeTickets.find((t: any) => {
-          if (t.status === "deleted" || t.deletedAt) return false;
-          const tRef = (t.portalFields?.billingReference || t.reference || t.folio || "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
-          const tRfc = (t.rfcEmisor || "").toUpperCase().trim();
-          const tDate = (t.fechaCompra || t.fecha || "").substring(0, 10);
-          const tTotal = parseFloat(parseFloat(String(t.total || 0)).toFixed(2));
-          return tRef === normRef && tRfc === normRfc && tDate === normDate && tTotal === normTotal;
-        });
-
-        if (matchingTicket) {
-          resolvedTicketId = matchingTicket.id;
-          // Update the existing ticket with latest data
-          const docRef = adminDb.collection("tickets").doc(matchingTicket.id);
-          transaction.update(docRef, {
-            ...ticketData,
-            clientRequestId: idempotencyKey || matchingTicket.clientRequestId || null,
-            updatedAt: new Date().toISOString()
-          });
-          return;
-        }
-      }
-
-      // 4. Create new ticket if not matched
-      const newId = ticketData.id || "ticket_" + Math.random().toString(36).substring(2, 11);
-      const docRef = adminDb.collection("tickets").doc(newId);
-      const newTicket = {
-        ...ticketData,
-        id: newId,
-        userId,
-        clientRequestId: idempotencyKey || null,
-        createdAt: ticketData.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      transaction.set(docRef, newTicket);
-      resolvedTicketId = newId;
+    const result = await persistTicket({
+      db: adminDb,
+      userId: req.user?.uid,
+      ticketData: req.body,
+      idempotencyKey: req.headers["idempotency-key"]
     });
-
-    res.json({ id: resolvedTicketId });
-  } catch (err: any) {
-    console.error("Error creating/updating ticket in transaction:", err);
-    res.status(500).json({ error: err.message || "Internal server error" });
+    res.status(201).json(result);
+  } catch (error: any) {
+    console.error("[tickets] save failed:", error);
+    res.status(error.status || 500).json({ error: error.message || "No fue posible guardar el ticket." });
   }
 });
 

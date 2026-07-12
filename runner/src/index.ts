@@ -617,7 +617,8 @@ export async function processJob(jobId: string) {
       portalMap,
       connector,
       lockedJob.ticketDataSnapshot,
-      lockedJob.fiscalProfileSnapshot
+      lockedJob.fiscalProfileSnapshot,
+      lockedJob.attemptId
     );
 
     if (result.paused) {

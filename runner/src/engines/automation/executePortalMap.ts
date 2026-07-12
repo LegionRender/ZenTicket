@@ -603,7 +603,8 @@ export async function executePortalMap(
   portalMap: any,
   connector: any,
   ticketData: any,
-  fiscalProfile: any
+  fiscalProfile: any,
+  attemptId?: string
 ): Promise<ExecutionResult> {
   const userId = fiscalProfile.userId;
   const connectorId = connector?.id || portalMap?.connectorId || "";
@@ -654,6 +655,15 @@ export async function executePortalMap(
     acceptDownloads: true,
     viewport: { width: 1280, height: 800 }
   });
+  const traceFilePath = path.join(tmpDir, `attempt-${attemptId || "unassigned"}.zip`);
+  let traceStarted = false;
+  let retainTrace = true;
+  try {
+    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    traceStarted = true;
+  } catch (error: any) {
+    await createRunnerLog(jobId, ticketId, "WARNING", `No se pudo iniciar Playwright Trace: ${error.message || String(error)}`);
+  }
 
   let page = await context.newPage();
   const downloadedFiles: { filename: string; path: string }[] = [];
@@ -2349,6 +2359,7 @@ export async function executePortalMap(
 
     const portalSnapshot = await capturePortalSnapshot(page, lastScreenshotPath);
 
+    retainTrace = false;
     return {
       success: true,
       xmlContent,
@@ -2434,7 +2445,7 @@ export async function executePortalMap(
         });
         return executePortalMap(jobId, ticketId, portalMap, { ...connector, portalUrl: alternative }, {
           ...ticketData, __alternativeRouteAttempted: true
-        }, fiscalProfile);
+        }, fiscalProfile, attemptId);
       }
     }
     await uploadErrorScreenshot(code);
@@ -2454,6 +2465,34 @@ export async function executePortalMap(
       portalSnapshot
     };
   } finally {
+    if (traceStarted) {
+      try {
+        if (retainTrace) {
+          await context.tracing.stop({ path: traceFilePath });
+          if (fs.existsSync(traceFilePath)) {
+            const bucket = getStorage().bucket();
+            const tracePath = `users/${userId}/tickets/${ticketId}/runner-traces/${attemptId || jobId}.zip`;
+            await bucket.upload(traceFilePath, {
+              destination: tracePath,
+              metadata: { contentType: "application/zip" }
+            });
+            if (attemptId) {
+              const databaseId = "ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee";
+              await getFirestore(getApp(), databaseId)
+                .collection("invoice_jobs").doc(jobId).collection("attempts").doc(attemptId)
+                .set({ tracePath, traceCapturedAt: new Date().toISOString() }, { merge: true });
+            }
+            await createRunnerLog(jobId, ticketId, "ERROR", `Playwright Trace guardado: ${tracePath}`, { tracePath, attemptId });
+          }
+        } else {
+          await context.tracing.stop();
+        }
+      } catch (error: any) {
+        await createRunnerLog(jobId, ticketId, "WARNING", `No se pudo guardar Playwright Trace: ${error.message || String(error)}`, { attemptId });
+      } finally {
+        fs.rmSync(traceFilePath, { force: true });
+      }
+    }
     networkSniffer.dispose();
     await context.close();
     await browser.close();
