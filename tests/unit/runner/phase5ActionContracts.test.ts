@@ -16,4 +16,12 @@ describe("Fase 5 - contratos de accion del runner", () => {
     expect(source).toContain("clickForDocument");
     expect(source).toContain("DOCUMENT_NOT_OBSERVED");
   });
+
+  it("no conserva pausas fijas ni clics silenciosos en la estrategia OXXO", () => {
+    const strategyPath = path.resolve(__dirname, "../../../runner/src/engines/connectors/strategies/oxxo.ts");
+    const source = fs.readFileSync(strategyPath, "utf8");
+    expect(source).not.toContain("waitForTimeout");
+    expect(source).not.toMatch(/\.click\(\)\.catch/);
+    expect(source).toContain("PORTAL_FIELD_POSTCONDITION_FAILED");
+  });
 });
