@@ -105,9 +105,21 @@ service cloud.firestore {
     // Path: automation_trainings/{trainingId}
     match /automation_trainings/{trainingId} {
       allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == resource.data.userId);
-      allow delete: if isAdmin();
+      allow write: if false;
+    }
+
+    match /connector_discovery_jobs/{jobId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /connector_discovery_outbox/{outboxId} {
+      allow read, write: if false;
+    }
+
+    match /connector_patch_proposals/{proposalId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // Training Requests rules for common users

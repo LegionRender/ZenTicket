@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from "http";
 import { processJob } from "./index";
+import { processConnectorDiscovery } from "./discovery/processDiscovery";
 import { runBrowserSmoke } from "./runtime/browserSmoke";
 
 const port = Number(process.env.PORT || 8080);
@@ -56,6 +57,31 @@ createServer(async (request, response) => {
     } catch (error: any) {
       console.error("[cloud-run] task processing failed", error);
       sendJson(response, 500, { code: "RUNNER_TASK_FAILED", error: error?.message || String(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && request.url === "/tasks/discover") {
+    if (!taskRequestAuthorized(request)) {
+      sendJson(response, 401, { code: "RUNNER_TASK_UNAUTHORIZED" });
+      return;
+    }
+    try {
+      const payload = await readJson(request);
+      if (typeof payload.discoveryId !== "string" || !payload.discoveryId || payload.discoveryId.includes("/")) {
+        sendJson(response, 400, { code: "INVALID_DISCOVERY_ID" });
+        return;
+      }
+      const smoke = await runBrowserSmoke();
+      if (!smoke.healthy) {
+        sendJson(response, 503, { code: smoke.errorCode, smoke });
+        return;
+      }
+      await processConnectorDiscovery(payload.discoveryId);
+      sendJson(response, 202, { discoveryId: payload.discoveryId, status: "accepted", smoke });
+    } catch (error: any) {
+      console.error("[cloud-run] connector discovery failed", error);
+      sendJson(response, 500, { code: "CONNECTOR_DISCOVERY_FAILED", error: error?.message || String(error) });
     }
     return;
   }

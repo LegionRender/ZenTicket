@@ -587,7 +587,8 @@ export default function TicketsListScreen({
 
     if (!canRenderPdf) {
       const isCaptcha = detailState.canonicalStatus === "waiting_user_captcha";
-      const isProcessing = detailState.isActive || detailState.canonicalStatus === "invoice_recovery_pending";
+      const isTraining = detailState.canonicalStatus === "training" || ["training_required", "training_pending_review", "training_approved_queueing"].includes(String(associatedTicket?.status || ""));
+      const isProcessing = (detailState.isActive && !isTraining) || detailState.canonicalStatus === "invoice_recovery_pending";
       
       const displayMsg = detailState.message || "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.";
       return (
@@ -775,20 +776,82 @@ export default function TicketsListScreen({
               </div>
             );
           })() : (() => {
-            const alertStyle = getBillingAlertStyle(detailState);
-            const iconBg = alertStyle.tone === "red" ? "zt-badge-error text-[var(--zt-error-text)]" :
-                           alertStyle.tone === "green" ? "zt-badge-ok text-[var(--zt-ok-text)]" :
-                           alertStyle.tone === "blue" ? "zt-badge-queue text-[var(--zt-queue-text)]" :
-                           "zt-badge-alert text-[var(--zt-alert-text)]";
+            const ticketData = associatedTicket || {};
+            const jitResolution = ticketData.jitResolution && typeof ticketData.jitResolution === "object" ? ticketData.jitResolution : null;
+            const extracted = ticketData.portalFields && typeof ticketData.portalFields === "object" ? ticketData.portalFields : {};
+            const receiptImage = ticketData.imageUrl || ticketData.imageDataUrl || null;
+            const portalUrl = String(ticketData.portalUrl || extracted.portalUrl || "").trim();
+            const verifiedPortalUrl = portalUrl && (
+              ticketData.portalUrlVerifiedAt ||
+              ["verified", "verified_observed_dom"].includes(ticketData.portalUrlVerification)
+            );
+            const visibleFields = Object.entries(extracted)
+              .filter(([key, value]) => key !== "portalUrl" && value !== null && value !== undefined && String(value).trim())
+              .slice(0, 6);
+
             return (
-              <div className={`border rounded-3xl p-8 text-left space-y-4 ${alertStyle.bgClass} ${alertStyle.textClass}`}>
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${iconBg}`}>
-                  {renderAlertIcon(alertStyle.icon, "w-6 h-6")}
+              <div className="max-w-4xl mx-auto space-y-6 text-left animate-fade-in font-sans">
+                <section className="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-6 sm:p-8">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 shrink-0 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                      {renderAlertIcon("AlertCircle", "w-6 h-6")}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">Seguimiento de facturación</p>
+                      <h3 className="mt-1 text-xl font-black tracking-tight text-white">{jitResolution?.title || "Necesitamos un nuevo intento"}</h3>
+                      <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300">{jitResolution?.description || displayMsg}</p>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+                  <section className="rounded-3xl border border-slate-800 bg-[#0b0d19] p-4 shadow-2xs">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h4 className="text-sm font-black text-white">Foto del ticket</h4>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Evidencia original</span>
+                    </div>
+                    {receiptImage ? (
+                      <img src={receiptImage} alt="Ticket original" className="max-h-[420px] w-full rounded-2xl border border-slate-100 bg-slate-50 object-contain" />
+                    ) : (
+                      <div className="flex min-h-52 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm text-slate-500">La imagen original del ticket no está disponible en este detalle.</div>
+                    )}
+                  </section>
+
+                  <div className="space-y-6">
+                    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-2xs">
+                      <h4 className="text-sm font-black text-slate-900">Datos extraídos</h4>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-500">Revisa estos datos antes de solicitar otro intento. No se completa ningún valor que no aparezca en el ticket.</p>
+                      <dl className="mt-5 grid grid-cols-2 gap-x-5 gap-y-4 text-sm">
+                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Comercio</dt><dd className="mt-1 font-bold text-slate-900">{ticketData.nombreEmisor || "No detectado"}</dd></div>
+                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total</dt><dd className="mt-1 font-bold text-slate-900">${getTicketTotal(ticketData).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
+                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Fecha</dt><dd className="mt-1 font-mono text-slate-900">{ticketData.fechaCompra || "No detectada"}</dd></div>
+                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Folio</dt><dd className="mt-1 font-mono text-slate-900">{ticketData.folio || ticketData.billingReference || "No detectado"}</dd></div>
+                        <div className="col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">RFC emisor</dt><dd className="mt-1 font-mono text-slate-900">{ticketData.rfcEmisor || "No detectado"}</dd></div>
+                      </dl>
+                      {visibleFields.length > 0 && <div className="mt-5 border-t border-slate-100 pt-4"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Campos del portal detectados</p><div className="mt-3 flex flex-wrap gap-2">{visibleFields.map(([key, value]) => <span key={key} className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs text-slate-700"><strong>{key}:</strong> {String(value)}</span>)}</div></div>}
+                    </section>
+
+                    {jitResolution && <section className="rounded-3xl border border-slate-800 bg-[#0b0d19] p-6 shadow-2xs">
+                      <h4 className="text-sm font-black text-white">Resolución del intento</h4>
+                      <dl className="mt-4 space-y-3 text-sm">
+                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Etapa</dt><dd className="mt-1 font-mono text-slate-200">{jitResolution.stage || "No disponible"}</dd></div>
+                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Causa probable</dt><dd className="mt-1 text-slate-200">{jitResolution.probableCause || "Aún no clasificada"}</dd></div>
+                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Siguiente acción</dt><dd className="mt-1 text-slate-200">{jitResolution.recommendedAction || "Conservar la evidencia para revisión."}</dd></div>
+                        {jitResolution.evidence?.finalUrl && <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">URL observada</dt><dd className="mt-1 break-all font-mono text-xs text-slate-300">{jitResolution.evidence.finalUrl}</dd></div>}
+                      </dl>
+                    </section>}
+
+                    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-2xs">
+                      <h4 className="text-sm font-black text-slate-900">Portal de facturación</h4>
+                      {verifiedPortalUrl ? <a href={portalUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex break-all text-sm font-bold text-[#0B53F4] hover:underline">{portalUrl}</a> : <p className="mt-2 text-sm leading-relaxed text-slate-600">Aún no hay una dirección oficial validada. ZenTicket seguirá investigando solo con evidencia del ticket y resultados del sitio del comercio.</p>}
+                    </section>
+                  </div>
                 </div>
-                <h3 className={`text-base font-extrabold ${alertStyle.labelClass}`}>{detailState.badgeLabel}</h3>
-                <p className="text-xs leading-normal font-medium font-sans">
-                  {displayMsg}
-                </p>
+
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <button type="button" onClick={() => onTriggerSimulationInline(ticketData)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-xs font-black uppercase tracking-wider text-slate-700 transition hover:bg-slate-50">Corregir datos</button>
+                  <button type="button" onClick={() => onTriggerSimulationInline(ticketData)} className="rounded-xl bg-[#0B53F4] px-5 py-3 text-xs font-black uppercase tracking-wider text-white shadow-md shadow-blue-500/20 transition hover:bg-[#0941C4]">Facturar</button>
+                </div>
               </div>
             );
           })()}

@@ -2224,7 +2224,7 @@ export default function ScannerAndSimulator({
 
       await addLog(`📋 Campos extraídos con confianza:`, 300);
       await addLog(`   • Comercio: ${activeConn?.nombre || activeExtractedData.nombreEmisor} (Confianza: 98%)`, 200);
-      await addLog(`   • RFC Emisor: ${activeExtractedData.rfcEmisor || "XAXX010101000"} (Confianza: 99%)`, 200);
+      await addLog(`   • RFC Emisor: ${activeExtractedData.rfcEmisor || "No detectado"}`, 200);
       await addLog(`   • Folio: ${activeExtractedData.folio} (Confianza: 93%)`, 200);
       await addLog(`   • Total: $${activeExtractedData.total} (Confianza: 96%)`, 200);
       await addLog(`   • Fecha: ${activeExtractedData.fechaCompra} (Confianza: 95%)`, 200);
@@ -2780,25 +2780,8 @@ export default function ScannerAndSimulator({
     const userEmail = auth.currentUser?.email || "legionrender@gmail.com";
     const trainingDocRef = doc(db, "automation_trainings", trainingTicketId);
 
-    const initialTrainingData = {
-      id: trainingTicketId,
-      ticketId: trainingTicketId,
-      userId: auth.currentUser?.uid || "guest",
-      userEmail: userEmail,
-      storeName: trainingData.nombreEmisor,
-      company: trainingData.nombreEmisor,
-      totalAmount: trainingData.total,
-      status: "Buscando portal del comercio...",
-      progress: 5,
-      step: "Buscando portal del comercio...",
-      createdAt: new Date().toISOString()
-    };
-
-    try {
-      await setDoc(trainingDocRef, initialTrainingData);
-    } catch (e) {
-      console.warn("Error creating training doc, continuing locally:", e);
-    }
+    // The backend owns automation_trainings. The client may observe progress but
+    // must never create or mutate a JIT training record.
 
     // Set up a real-time listener to Firestore to update UI progress dynamically from the backend!
     const unsubscribe = onSnapshot(trainingDocRef, (snap) => {

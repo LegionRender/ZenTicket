@@ -125,6 +125,16 @@ function now() {
   return admin.firestore.FieldValue.serverTimestamp();
 }
 
+function classifyJitFailure(error) {
+  const message = String(error?.message || error || "");
+  const normalized = message.toLowerCase();
+  if (error?.code === "PORTAL_AUTH_REQUIRED" || /iniciar sesi[oó]n|login|cuenta/.test(normalized)) return { code: "PORTAL_AUTH_REQUIRED", stage: "portal_discovery", title: "El portal requiere una cuenta", description: "El portal oficial solicita iniciar sesión antes de mostrar el formulario de facturación.", probableCause: "Acceso restringido por el comercio.", recommendedAction: "No reintentar automáticamente; revisar el flujo autorizado para este portal." };
+  if (/captcha|recaptcha|hcaptcha/.test(normalized)) return { code: "CAPTCHA_DETECTED", stage: "portal_discovery", title: "El portal solicitó una verificación humana", description: "Se detectó un CAPTCHA durante la revisión del portal.", probableCause: "Protección antibot del comercio.", recommendedAction: "Pausar el intento de forma durable y conservar la evidencia." };
+  if (/timeout|timed out|network|fetch failed|enotfound|econn/.test(normalized)) return { code: "PORTAL_NETWORK_UNAVAILABLE", stage: "portal_research", title: "No fue posible conectar con el portal", description: "La investigación no pudo obtener una respuesta estable del sitio candidato.", probableCause: "Portal temporalmente no disponible, redirección o problema de red.", recommendedAction: "Reintentar con backoff y abrir incidencia si la firma se repite." };
+  if (/no se pudo verificar un portal|portal oficial/.test(normalized)) return { code: "OFFICIAL_PORTAL_NOT_VERIFIED", stage: "portal_research", title: "No se confirmó un portal oficial", description: "No se encontró una URL respaldada por la evidencia del ticket o del sitio oficial.", probableCause: "El ticket no mostró URL legible y la búsqueda no produjo una fuente verificable.", recommendedAction: "Conservar candidatos y solicitar revisión del comercio, sin inventar una dirección." };
+  return { code: error?.code || "JIT_TRAINING_FAILED", stage: "jit_training", title: "La preparación del conector se detuvo", description: "El motor no pudo terminar una etapa de preparación del portal.", probableCause: "Error no clasificado aún; la evidencia queda disponible para revisión.", recommendedAction: "Revisar candidatos, OCR y registros del intento antes de reintentar." };
+}
+
 function emptyOcrDraft(message = "El OCR no pudo procesar la imagen. Completa los campos manualmente.") {
   return {
     rfcEmisor: "",
@@ -742,7 +752,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           type: "OBJECT",
           properties: {
             merchantName: { type: "STRING", description: "Nombre comercial o razón social de la tienda en mayúsculas." },
-            emitterRfc: { type: "STRING", description: "RFC del emisor de la tienda. Si no viene o no es legible, coloca 'XAXX010101000'." },
+            emitterRfc: { type: "STRING", description: "RFC del emisor de la tienda. Si no viene o no es legible, devuelve una cadena vacía." },
             brandAliases: { type: "ARRAY", items: { type: "STRING" }, description: "Lista de posibles marcas o nombres alternos por los que se conoce al comercio." },
             billingUrl: { type: "STRING", description: "URL del portal de facturación visible en el ticket, si existe." },
             evidence: { type: "STRING", description: "Evidencia textual o fragmento literal extraído del ticket que demuestre el nombre del comercio." },
@@ -752,7 +762,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         };
 
         const idPrompt = {
-          text: "Analiza la imagen de este ticket de compra. Identifica únicamente el comercio emisor, extrayendo su nombre comercial (merchantName), RFC (emitterRfc - si no viene usa XAXX010101000), nombres alternos o alias (brandAliases), la URL del portal de facturación oficial si viene impresa en el ticket (billingUrl), un fragmento literal del ticket que evidencie estos datos (evidence), y tu estimación de confianza en la identificación (confidence, de 0.0 a 1.0)."
+          text: "Analiza la imagen de este ticket de compra. Identifica únicamente el comercio emisor, extrayendo su nombre comercial (merchantName), RFC (emitterRfc; si no viene o no es legible, devuelve una cadena vacía), nombres alternos o alias (brandAliases), la URL del portal de facturación oficial si viene impresa en el ticket (billingUrl), un fragmento literal del ticket que evidencie estos datos (evidence), y tu estimación de confianza en la identificación (confidence, de 0.0 a 1.0)."
         };
 
         const imagePart = {
@@ -856,7 +866,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           const candidateRef = db.collection("connector_candidates").doc();
           await candidateRef.set({
             nombre: detectedName || "Comercio por identificar",
-            rfc: detectedRfc || "XAXX010101000",
+            rfc: detectedRfc || "",
             aliases: brandAliases || [],
             portalUrl: billingUrl || "",
             status: "pending_setup",
@@ -866,7 +876,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           const reqRef = db.collection("training_requests").doc();
           await reqRef.set({
             storeName: detectedName || "Comercio por identificar",
-            rfc: detectedRfc || "XAXX010101000",
+            rfc: detectedRfc || "",
             officialBillingUrl: billingUrl || "",
             status: "pending_training",
             evidence: evidence || "",
@@ -880,7 +890,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           ocrFailed: false,
           status: "training_required",
           nombreEmisor: detectedName || "Comercio por identificar",
-          rfcEmisor: detectedRfc || "XAXX010101000",
+          rfcEmisor: detectedRfc || "",
           items: [],
           rawOcrText: "",
           portalFields: {},
@@ -1163,18 +1173,18 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
 
       const fields = {
         comercio: {
-          value: detectedProfile ? detectedProfile.name : (rawNombre || "Comercio General"),
+          value: detectedProfile ? detectedProfile.name : rawNombre,
           confidence: detectedProfile ? 0.98 : 0.85,
           source: "ocr",
           rawText: rawNombre,
-          normalizedValue: detectedProfile ? detectedProfile.name : (rawNombre || "Comercio General")
+          normalizedValue: detectedProfile ? detectedProfile.name : rawNombre
         },
         rfcEmisor: {
-          value: qrParsed ? qrParsed.rfcEmisor : (rawRfc.toUpperCase().replace(/[^A-Z0-9]/g, "") || "XAXX010101000"),
+          value: qrParsed ? qrParsed.rfcEmisor : rawRfc.toUpperCase().replace(/[^A-Z0-9]/g, ""),
           confidence: qrParsed ? 1.0 : (rawRfc && rawRfc.length >= 12 ? 0.97 : 0.50),
           source: qrParsed ? "qr" : "ocr",
           rawText: rawRfc,
-          normalizedValue: qrParsed ? qrParsed.rfcEmisor : (rawRfc.toUpperCase().replace(/[^A-Z0-9]/g, "") || "XAXX010101000")
+          normalizedValue: qrParsed ? qrParsed.rfcEmisor : rawRfc.toUpperCase().replace(/[^A-Z0-9]/g, "")
         },
         fecha: {
           value: extractedData.fechaCompra || "",
@@ -1219,18 +1229,18 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
           normalizedValue: extractedData.codigoBarras || ""
         },
         sucursal: {
-          value: extractedData.sucursal || "Matriz",
+          value: extractedData.sucursal || "",
           confidence: extractedData.sucursal ? 0.88 : 0.50,
           source: "ocr",
           rawText: extractedData.sucursal || "",
-          normalizedValue: extractedData.sucursal || "Matriz"
+          normalizedValue: extractedData.sucursal || ""
         },
         terminal: {
-          value: extractedData.terminal || "Caja 1",
+          value: extractedData.terminal || "",
           confidence: extractedData.terminal ? 0.80 : 0.50,
           source: "ocr",
           rawText: extractedData.terminal || "",
-          normalizedValue: extractedData.terminal || "Caja 1"
+          normalizedValue: extractedData.terminal || ""
         },
         barcode: {
           value: qrValue,
@@ -1509,13 +1519,6 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         ? "Verificando primero la dirección de facturación impresa en el ticket..."
         : "El ticket no mostró una URL verificable. Buscando el portal oficial en internet..."
     );
-    const brandDomainToken = nombreEmisor.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-      .split(/[^a-z0-9]+/).filter(token => token.length >= 4 && !["tienda", "tiendas", "cadena", "comercial", "grupo"].includes(token))
-      .sort((a, b) => b.length - a.length)[0];
-    if (brandDomainToken) {
-      addPortalCandidate(`https://www.${brandDomainToken}.com/`);
-      addPortalCandidate(`https://www.${brandDomainToken}.com.mx/`);
-    }
     try {
       const keyToUse = customKey || optionalSecret(geminiPrimaryKey) || optionalSecret(geminiApiKey) || "";
       const ai = new GoogleGenAI({ apiKey: keyToUse });
@@ -1646,6 +1649,61 @@ app.post("/api/tickets/train-jit", async (req, res) => {
     const learningMemorySnap = await db.collection("portal_learning_memory").where("domain", "==", portalDomain).get();
     const learningMemory = learningMemorySnap.docs.map(doc => doc.data());
     await db.collection("automation_trainings").doc(trainingId).set({ learningMemoryUsed: learningMemory }, { merge: true });
+
+    // Firebase only gathers URL evidence. Chromium exploration runs in the
+    // production Cloud Run runner and never executes Gemini-proposed selectors.
+    await updateProgress(45, "Portal oficial localizado. Verificando su estructura con el runner seguro...", "queued");
+    const discoveryJobRef = db.collection("connector_discovery_jobs").doc(trainingId);
+    const discoveryOutboxRef = db.collection("connector_discovery_outbox").doc(`discovery-${trainingId}`);
+    const queuedAt = now();
+    await db.runTransaction(async (transaction) => {
+      const existing = await transaction.get(discoveryJobRef);
+      const existingData = existing.exists ? existing.data() : null;
+      if (["queued", "running", "completed"].includes(String(existingData?.status || ""))) return;
+      transaction.set(discoveryJobRef, {
+        id: trainingId,
+        trainingId,
+        ticketId: ticketId || null,
+        userId: decodedToken.uid,
+        merchantName: nombreEmisor,
+        rfcEmisor: rfcEmisor || "",
+        portalUrl,
+        portalDomain,
+        portalCandidates: scoredCandidates,
+        learningMemory,
+        status: "queued",
+        attemptId: `discovery-${trainingId}-${Date.now()}`,
+        createdAt: existingData?.createdAt || queuedAt,
+        updatedAt: queuedAt
+      }, { merge: true });
+      transaction.set(discoveryOutboxRef, {
+        discoveryId: trainingId,
+        ticketId: ticketId || null,
+        userId: decodedToken.uid,
+        status: "pending",
+        eventType: "connector_discovery.requested",
+        createdAt: queuedAt,
+        updatedAt: queuedAt
+      }, { merge: true });
+      if (!adminMode && ticketId) {
+        transaction.update(db.collection("tickets").doc(ticketId), {
+          status: "training_required",
+          trainingId,
+          portalUrlCandidate: portalUrl,
+          portalUrlVerification: "candidate_verified_http",
+          updatedAt: queuedAt
+        });
+      }
+    });
+    res.status(202).json({
+      success: true,
+      queued: true,
+      trainingId,
+      status: "training_required",
+      portalUrlCandidate: portalUrl,
+      message: "Estamos verificando la estructura del portal oficial con el runner seguro."
+    });
+    return;
 
     // 3. Portal Structure Discovery — Gemini-first, Playwright as refinement
     await updateProgress(45, "Analizando el portal de facturación con IA para identificar los campos...");
@@ -2367,11 +2425,20 @@ app.post("/api/tickets/train-jit", async (req, res) => {
 
   } catch (err) {
     console.error("JIT training failed:", err);
+    const jitFailure = classifyJitFailure(err);
     await updateProgress(100, "Fallo durante el auto-entrenamiento: " + err.message, "failed");
     if (ticketId && !adminMode && db && typeof db.collection === "function") {
       const authRequired = err.code === "PORTAL_AUTH_REQUIRED";
       await db.collection("tickets").doc(ticketId).set({
         status: authRequired ? "connector_auth_required" : "portal_retry_required",
+        errorCode: jitFailure.code,
+        reviewReasonCode: jitFailure.code,
+        jitResolution: {
+          ...jitFailure,
+          attemptId: trainingId,
+          evidence: { trainingId, errorMessage: String(err?.message || err), capturedAt: new Date().toISOString() },
+          updatedAt: new Date().toISOString()
+        },
         errorMsg: authRequired
           ? "El portal oficial requiere una cuenta del comercio para continuar."
           : "Tuvimos una complicación al localizar el portal de facturación. Estamos trabajando en ello; envía de nuevo el ticket para intentarlo otra vez.",
@@ -3865,6 +3932,35 @@ async function createCloudRunTask(jobId, deliveryId, config) {
   return { taskName, alreadyExists: false };
 }
 
+async function createConnectorDiscoveryTask(discoveryId, deliveryId, config) {
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "factubolt";
+  const parent = `projects/${projectId}/locations/${config.location}/queues/${config.queue}`;
+  const taskId = `discovery-${deliveryId}`.replace(/[^A-Za-z0-9_-]/g, "-");
+  const taskName = `${parent}/tasks/${taskId}`;
+  const credential = admin.app().options.credential;
+  if (!credential || typeof credential.getAccessToken !== "function") throw new Error("RUNNER_TASK_ADC_UNAVAILABLE");
+  const token = await credential.getAccessToken();
+  const response = await fetch(`https://cloudtasks.googleapis.com/v2/${parent}/tasks`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      task: {
+        name: taskName,
+        httpRequest: {
+          httpMethod: "POST",
+          url: `${config.targetUrl}/tasks/discover`,
+          headers: { "Content-Type": "application/json", "X-Runner-Task-Token": config.taskToken },
+          oidcToken: { serviceAccountEmail: config.invokerServiceAccount, audience: config.targetUrl },
+          body: Buffer.from(JSON.stringify({ discoveryId, deliveryId }), "utf8").toString("base64")
+        }
+      }
+    })
+  });
+  if (response.status === 409) return { taskName, alreadyExists: true };
+  if (!response.ok) throw new Error(`CONNECTOR_DISCOVERY_TASK_CREATE_FAILED:${response.status}:${await response.text()}`);
+  return { taskName, alreadyExists: false };
+}
+
 exports.dispatchInvoiceJobs = onSchedule(
   {
     schedule: "every 1 minutes",
@@ -3906,6 +4002,38 @@ exports.dispatchInvoiceJobs = onSchedule(
           lastDispatchAttemptAt: now(),
           updatedAt: now()
         }, { merge: true });
+      }
+    }
+  }
+);
+
+exports.dispatchConnectorDiscoveryJobs = onSchedule(
+  {
+    schedule: "every 1 minutes",
+    region: "us-central1",
+    timeoutSeconds: 120,
+    memory: "512MiB",
+    secrets: [runnerTaskTokenParam]
+  },
+  async () => {
+    let config;
+    try {
+      config = runnerDispatchConfig();
+    } catch (error) {
+      console.error("[Connector discovery dispatch] ConfiguraciÃ³n incompleta; se conserva el outbox.", error);
+      return;
+    }
+    const snapshot = await db.collection("connector_discovery_outbox").where("status", "==", "pending").limit(20).get();
+    for (const outboxDoc of snapshot.docs) {
+      const outbox = outboxDoc.data();
+      const discoveryId = typeof outbox.discoveryId === "string" ? outbox.discoveryId : "";
+      if (!discoveryId) continue;
+      try {
+        const task = await createConnectorDiscoveryTask(discoveryId, outboxDoc.id, config);
+        await outboxDoc.ref.set({ status: "dispatched", cloudTaskName: task.taskName, dispatchedAt: now(), updatedAt: now() }, { merge: true });
+      } catch (error) {
+        console.error(`[Connector discovery dispatch] ${discoveryId} no pudo encolarse:`, error);
+        await outboxDoc.ref.set({ lastDispatchError: String(error?.message || error), lastDispatchAttemptAt: now(), updatedAt: now() }, { merge: true });
       }
     }
   }
