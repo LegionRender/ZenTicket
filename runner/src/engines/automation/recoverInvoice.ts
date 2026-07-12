@@ -1,21 +1,6 @@
 import { Page } from "playwright";
 import * as fs from "fs";
-import * as path from "path";
 import { collectDocuments } from "../../executor/documentSniffer";
-import { getApp, getApps } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-
-let dbInstance: any = null;
-function getDb() {
-  if (getApps().length === 0) {
-    return null;
-  }
-  if (!dbInstance) {
-    const databaseId = "ai-studio-1f1e2a82-b500-4db2-9cf3-751b301c35ee";
-    dbInstance = getFirestore(getApp(), databaseId);
-  }
-  return dbInstance;
-}
 
 export interface RecoveryResult {
   success: boolean;
@@ -31,12 +16,72 @@ export interface RecoveryResult {
   recoveryFormsDetected?: string[];
   lastRecoveryError?: string;
   nextRecommendedAction?: string;
-  learnedRecoveryFlow?: any;
+}
+
+type RecoveryFailure = { code: string; message: string };
+
+function fail(code: string, message: string): never {
+  throw { code, message } satisfies RecoveryFailure;
+}
+
+function recoveryError(error: unknown, fallbackCode: string): RecoveryFailure {
+  const candidate = error as Partial<RecoveryFailure> | undefined;
+  return {
+    code: candidate?.code || fallbackCode,
+    message: candidate?.message || String(error || "Unknown recovery error.")
+  };
+}
+
+function readStepValue(step: any, ticket: any, fiscalProfile: any): string {
+  if (step.value !== undefined && step.value !== null) return String(step.value);
+  const source = String(step.source || "");
+  const [root, group, field] = source.split(".");
+  if (root === "ticket" && group === "portalFields" && field) return String(ticket?.portalFields?.[field] ?? "");
+  if (root === "ticket" && group) return String(ticket?.[group] ?? "");
+  if (root === "fiscalProfile" && group) return String(fiscalProfile?.[group] ?? "");
+  fail("RECOVERY_FLOW_INVALID", "A fill step must declare value or a valid ticket/fiscalProfile source.");
+}
+
+function absoluteHttpsUrl(value: unknown): string {
+  const url = String(value || "").trim();
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") fail("RECOVERY_FLOW_INVALID", "Recovery only permits explicit HTTPS URLs.");
+    return parsed.toString();
+  } catch (error) {
+    if ((error as Partial<RecoveryFailure>)?.code) throw error;
+    fail("RECOVERY_FLOW_INVALID", "A goto step must declare an absolute HTTPS URL.");
+  }
+}
+
+async function waitForDocumentSignal(params: {
+  downloadedFiles: Array<{ filename: string; path: string }>;
+  networkSniffer: any;
+  previousDownloads: number;
+  previousCaptures: number;
+  timeoutMs: number;
+  action: string;
+}): Promise<void> {
+  const { downloadedFiles, networkSniffer, previousDownloads, previousCaptures, timeoutMs, action } = params;
+  const hasDocumentSignal = () => downloadedFiles.length > previousDownloads || (networkSniffer?.captures?.length || 0) > previousCaptures;
+  if (hasDocumentSignal()) return;
+  await new Promise<void>((resolve, reject) => {
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      if (hasDocumentSignal()) {
+        clearInterval(interval);
+        resolve();
+      } else if (Date.now() - startedAt >= timeoutMs) {
+        clearInterval(interval);
+        reject({ code: "DOCUMENT_NOT_OBSERVED", message: `No document signal was observed after ${action}.` } satisfies RecoveryFailure);
+      }
+    }, 100);
+  });
 }
 
 /**
- * Modular function to attempt recovery of an already invoiced ticket.
- * Tries declarative recoveryFlow, strategy detectDownloadLinks, or JIT Recovery Learn.
+ * Recovers an existing invoice only through an explicit strategy or verified
+ * declarative flow. Semantic/JIT exploration is frozen and cannot mutate maps.
  */
 export async function recoverExistingInvoiceFromPortal(params: {
   jobId?: string;
@@ -51,300 +96,103 @@ export async function recoverExistingInvoiceFromPortal(params: {
   networkSniffer: any;
 }): Promise<RecoveryResult> {
   const { page, ticket, fiscalProfile, portalMap, strategy, downloadedFiles, tmpDir, networkSniffer } = params;
-  const jobId = params.jobId || String(ticket?.jobId || "unknown-job");
-  const ticketId = params.ticketId || String(ticket?.id || ticket?.ticketId || "unknown-ticket");
-
-  console.log("[recovery] Starting recoverExistingInvoiceFromPortal flow...");
-  // Diagnostic tracing: starting recovery flow for already invoiced ticket
-
   const pathsTried: string[] = [];
   const buttonsClicked: string[] = [];
   const formsDetected: string[] = [];
-  const learnedSteps: any[] = [];
-
+  let failure: RecoveryFailure | undefined;
   let clickedXml = false;
   let clickedPdf = false;
 
-  // 1. Try strategy recovery/downloads hook if defined
+  console.log("[recovery] Starting verified invoice recovery flow...");
+
   if (strategy?.detectDownloadLinks) {
-    console.log("[recovery] Strategy detectDownloadLinks hook found. Invoking...");
     pathsTried.push("strategy");
-    const strategyResult = await strategy.detectDownloadLinks(page).catch((e: any) => {
-      console.warn("[recovery] Strategy detectDownloadLinks failed:", e);
-      return {};
-    });
-    clickedXml = !!strategyResult?.clickedXml;
-    clickedPdf = !!strategyResult?.clickedPdf;
-  }
-
-  // 2. Try declarative recoveryFlow if configured
-  const recoveryFlow = portalMap?.recoveryFlow;
-  if (recoveryFlow && Array.isArray(recoveryFlow.steps) && recoveryFlow.steps.length > 0) {
-    console.log("[recovery] Declarative recoveryFlow configured. Executing...");
-    pathsTried.push("declarative_recovery_flow");
-
-    for (let index = 0; index < recoveryFlow.steps.length; index++) {
-      const step = recoveryFlow.steps[index];
-      const stepType = String(step.type || step.step || "").toLowerCase();
-      console.log(`[recovery] Executing step ${index + 1}/${recoveryFlow.steps.length}: [${stepType}]`);
-
-      try {
-        if (stepType === "goto") {
-          const url = step.url || "http://localhost:8899/";
-          console.log(`[recovery] Navigating to: ${url}`);
-          await page.goto(url);
-          await page.waitForTimeout(2000);
-        } else if (stepType === "click") {
-          if (step.selector) {
-            const el = page.locator(step.selector).first();
-            const textVal = await el.innerText().catch(() => "");
-            buttonsClicked.push(textVal || step.selector);
-            await el.click();
-          } else if (step.text) {
-            const btn = page.locator("button, a, div, span, input").filter({ hasText: new RegExp(step.text, "i") }).first();
-            const textVal = await btn.innerText().catch(() => "");
-            buttonsClicked.push(textVal || step.text);
-            await btn.click();
-          }
-          await page.waitForTimeout(2500);
-        } else if (stepType === "fill") {
-          let val = "";
-          if (step.source) {
-            if (step.source.startsWith("ticket.portalFields.")) {
-              const k = step.source.replace("ticket.portalFields.", "");
-              val = ticket.portalFields?.[k] || "";
-            } else if (step.source.startsWith("fiscalProfile.")) {
-              const k = step.source.replace("fiscalProfile.", "");
-              val = fiscalProfile?.[k] || "";
-            } else if (step.source.startsWith("ticket.")) {
-              const k = step.source.replace("ticket.", "");
-              val = ticket?.[k] || "";
-            }
-          } else if (step.value) {
-            val = step.value;
-          }
-
-          if (step.selector) {
-            await page.locator(step.selector).first().fill(val);
-          } else if (step.field) {
-            formsDetected.push(step.field);
-            let input = page.locator(`input[id*='${step.field}' i], input[name*='${step.field}' i], input[placeholder*='${step.field}' i]`).first();
-            if (!(await input.isVisible().catch(() => false))) {
-              input = page.locator("input[type='text'], input[type='number']").nth(0);
-            }
-            await input.fill(val);
-          }
-          await page.waitForTimeout(1000);
-        } else if (stepType === "download") {
-          console.log("[recovery] Download step triggered, waiting for file downloads...");
-          await page.waitForTimeout(3000);
-        }
-      } catch (stepErr: any) {
-        console.warn(`[recovery] Step ${index + 1} execution failed:`, stepErr.message);
-      }
-    }
-  } else {
-    // 3. Fallback: JIT Recovery Learn Mode + Semantic Recovery
-    console.log("[recovery] No recoveryFlow configured. Activating JIT Recovery Learn & semantic recovery...");
-    pathsTried.push("jit_recovery_learn");
-
+    const previousDownloads = downloadedFiles.length;
+    const previousCaptures = networkSniffer?.captures?.length || 0;
     try {
-      const startUrl = page.url();
-      learnedSteps.push({ type: "goto", url: startUrl });
-
-      // Click "Reimprimir", "Consultar factura", etc.
-      const consultKeywords = /consultar factura|descargar|reenviar|ver factura|recuperar|historial|reimprimir|obtener xml/i;
-      const genericButtons = page.locator("button, a, div, span").filter({ hasText: consultKeywords });
-      const count = await genericButtons.count().catch(() => 0);
-      let clickedRecovery = false;
-
-      for (let i = 0; i < count; i++) {
-        const btn = genericButtons.nth(i);
-        if (await btn.isVisible().catch(() => false)) {
-          const textVal = (await btn.innerText().catch(() => "")).trim();
-          console.log(`[recovery] JIT Learn: Clicking candidate recovery button: "${textVal}"`);
-          buttonsClicked.push(textVal);
-          learnedSteps.push({ type: "click", text: textVal });
-          await btn.click().catch(() => null);
-          await page.waitForTimeout(3000);
-          clickedRecovery = true;
-          break;
-        }
+      const strategyResult = await strategy.detectDownloadLinks(page);
+      clickedXml = !!strategyResult?.clickedXml;
+      clickedPdf = !!strategyResult?.clickedPdf;
+      if (clickedXml || clickedPdf) {
+        await waitForDocumentSignal({ downloadedFiles, networkSniffer, previousDownloads, previousCaptures, timeoutMs: 15000, action: "the recovery strategy" });
       }
-
-      // Identify and fill form fields
-      const inputs = page.locator("input[type='text']:visible, input[type='number']:visible, input[type='email']:visible");
-      const inputCount = await inputs.count().catch(() => 0);
-      for (let i = 0; i < inputCount; i++) {
-        const input = inputs.nth(i);
-        const id = await input.getAttribute("id").catch(() => "");
-        const name = await input.getAttribute("name").catch(() => "");
-        const placeholder = await input.getAttribute("placeholder").catch(() => "");
-        const label = (id + " " + name + " " + placeholder).toLowerCase();
-
-        let val = "";
-        let fieldKey = "";
-        let sourceKey = "";
-
-        if (/folio|referencia|ticket|venta/i.test(label)) {
-          val = ticket.portalFields?.billingReference || ticket.reference || "";
-          fieldKey = "folio";
-          sourceKey = "ticket.portalFields.billingReference";
-        } else if (/rfc/i.test(label)) {
-          val = fiscalProfile.rfc || "";
-          fieldKey = "rfc";
-          sourceKey = "fiscalProfile.rfc";
-        } else if (/fecha/i.test(label)) {
-          val = ticket.portalFields?.fecha || "";
-          fieldKey = "fecha";
-          sourceKey = "ticket.portalFields.fecha";
-        } else if (/total|monto/i.test(label)) {
-          val = String(ticket.expectedTicketTotal || ticket.total || "");
-          fieldKey = "total";
-          sourceKey = "ticket.expectedTicketTotal";
-        } else if (/email|correo/i.test(label)) {
-          val = fiscalProfile.correoElectronico || fiscalProfile.email || "";
-          fieldKey = "email";
-          sourceKey = "fiscalProfile.email";
-        }
-
-        if (val && fieldKey) {
-          console.log(`[recovery] JIT Learn: Filling input field [${fieldKey}] with [${val}]`);
-          formsDetected.push(fieldKey);
-          learnedSteps.push({ type: "fill", field: fieldKey, source: sourceKey });
-          await input.fill(val).catch(() => null);
-          await page.waitForTimeout(1000);
-        }
-      }
-
-      // Click search/submit button
-      const searchKeywords = /buscar|consultar|aceptar|enviar|filtrar/i;
-      const searchButtons = page.locator("button, a, div, span").filter({ hasText: searchKeywords });
-      const searchCount = await searchButtons.count().catch(() => 0);
-      for (let i = 0; i < searchCount; i++) {
-        const btn = searchButtons.nth(i);
-        if (await btn.isVisible().catch(() => false)) {
-          const textVal = (await btn.innerText().catch(() => "")).trim();
-          console.log(`[recovery] JIT Learn: Clicking search button: "${textVal}"`);
-          buttonsClicked.push(textVal);
-          learnedSteps.push({ type: "click", text: textVal });
-          await btn.click().catch(() => null);
-          await page.waitForTimeout(4000);
-          break;
-        }
-      }
-
-      // Try fallback semantic click download buttons
-      if (!clickedPdf) {
-        const fallbackPdfBtn = page.locator("div, span, a, button").filter({ hasText: /Descargar PDF|Descargar comprobante|Reimprimir|Ver PDF/i }).first();
-        if (await fallbackPdfBtn.isVisible().catch(() => false)) {
-          console.log("[recovery] Clicking fallback PDF button...");
-          await fallbackPdfBtn.click().catch(() => null);
-          await page.waitForTimeout(3000);
-        }
-      }
-      if (!clickedXml) {
-        const fallbackXmlBtn = page.locator("div, span, a, button").filter({ hasText: /Descargar XML|Descargar factura|Obtener XML/i }).first();
-        if (await fallbackXmlBtn.isVisible().catch(() => false)) {
-          console.log("[recovery] Clicking fallback XML button...");
-          await fallbackXmlBtn.click().catch(() => null);
-          await page.waitForTimeout(3000);
-        }
-      }
-
-      // Try email option if visible
-      const clientEmail = fiscalProfile.correoElectronico || fiscalProfile.email;
-      if (clientEmail) {
-        let emailInput = page.locator("input[id*='email'], input[id*='correo'], input[type='email']").first();
-        if (!(await emailInput.isVisible().catch(() => false))) {
-          emailInput = page.locator("input[type='text']:visible, input[type='email']:visible").first();
-        }
-        if (await emailInput.isVisible().catch(() => false)) {
-          console.log(`[recovery] Recovery screen email input found. Filling with: ${clientEmail}`);
-          await emailInput.fill(clientEmail).catch(() => null);
-          await page.waitForTimeout(1000);
-
-          const sendEmailBtn = page.locator("button, a, div, span").filter({ hasText: /Enviar correo|Reenviar/i }).first();
-          if (await sendEmailBtn.isVisible().catch(() => false)) {
-            console.log("[recovery] Clicking send email button...");
-            await sendEmailBtn.click().catch(() => null);
-            await page.waitForTimeout(3000);
-          }
-        }
-      }
-    } catch (learnErr: any) {
-      console.warn("[recovery] JIT Recovery Learn execution encountered error:", learnErr.message);
+    } catch (error) {
+      failure = recoveryError(error, "RECOVERY_STRATEGY_FAILED");
+      console.warn("[recovery] Strategy recovery failed:", failure.message);
     }
   }
 
-  await page.waitForTimeout(3000);
+  const recoveryFlow = portalMap?.recoveryFlow;
+  if (!failure && recoveryFlow && Array.isArray(recoveryFlow.steps) && recoveryFlow.steps.length > 0) {
+    pathsTried.push("declarative_recovery_flow");
+    const timeoutMs = Math.min(Math.max(Number(recoveryFlow.documentTimeoutMs) || 15000, 1000), 30000);
+    try {
+      for (let index = 0; index < recoveryFlow.steps.length; index++) {
+        const step = recoveryFlow.steps[index];
+        const stepType = String(step?.type || step?.step || "").trim().toLowerCase();
+        const stepLabel = `step ${index + 1} (${stepType || "missing type"})`;
+        if (stepType === "goto") {
+          await page.goto(absoluteHttpsUrl(step.url), { waitUntil: "domcontentloaded" });
+          continue;
+        }
+        if (stepType === "fill") {
+          if (!step.selector) fail("RECOVERY_FLOW_INVALID", `${stepLabel} requires selector.`);
+          const value = readStepValue(step, ticket, fiscalProfile);
+          const input = page.locator(step.selector).first();
+          await input.fill(value);
+          if ((await input.inputValue()) !== value) fail("RECOVERY_FIELD_POSTCONDITION_FAILED", `${stepLabel} did not retain the captured value.`);
+          formsDetected.push(step.selector);
+          continue;
+        }
+        if (stepType === "click") {
+          if (!step.selector) fail("RECOVERY_FLOW_INVALID", `${stepLabel} requires selector.`);
+          if (!step.expectSelector && !step.expectDownload) fail("RECOVERY_STEP_POSTCONDITION_REQUIRED", `${stepLabel} requires expectSelector or expectDownload.`);
+          const target = page.locator(step.selector).first();
+          const label = (await target.innerText().catch(() => "")).trim();
+          buttonsClicked.push(label || step.selector);
+          const previousDownloads = downloadedFiles.length;
+          const previousCaptures = networkSniffer?.captures?.length || 0;
+          await target.click();
+          if (step.expectSelector) await page.locator(step.expectSelector).first().waitFor({ state: step.expectState || "visible" });
+          if (step.expectDownload) await waitForDocumentSignal({ downloadedFiles, networkSniffer, previousDownloads, previousCaptures, timeoutMs, action: stepLabel });
+          continue;
+        }
+        if (stepType === "download") {
+          await waitForDocumentSignal({
+            downloadedFiles,
+            networkSniffer,
+            previousDownloads: Number(step.previousDownloads ?? 0),
+            previousCaptures: Number(step.previousCaptures ?? 0),
+            timeoutMs,
+            action: stepLabel
+          });
+          continue;
+        }
+        fail("RECOVERY_FLOW_INVALID", `${stepLabel} uses an unsupported action.`);
+      }
+    } catch (error) {
+      failure = recoveryError(error, "RECOVERY_STEP_FAILED");
+      console.warn("[recovery] Declarative recovery failed:", failure.message);
+    }
+  } else if (!failure && !strategy?.detectDownloadLinks) {
+    pathsTried.push("recovery_flow_not_configured");
+    failure = { code: "RECOVERY_FLOW_NOT_CONFIGURED", message: "Connector has no approved strategy or declarative recoveryFlow." };
+  }
 
-  const expectedTotal = ticket.expectedTicketTotal || ticket.total || 0;
-  const emisorRfc = portalMap.rfc || "";
-  const receptorRfc = fiscalProfile.rfc || "";
-
-  // Sniff or collect any files downloaded
   const docs = await collectDocuments(
     page,
     page.context(),
     tmpDir,
     downloadedFiles,
     networkSniffer || { captures: [], dispose: () => {} },
-    expectedTotal,
-    emisorRfc,
-    receptorRfc
+    ticket.expectedTicketTotal || ticket.total || 0,
+    portalMap.rfc || "",
+    fiscalProfile.rfc || ""
   );
-
   const xmlDownloaded = !!docs.xmlPath && fs.existsSync(docs.xmlPath);
   const pdfDownloaded = !!docs.pdfPath && fs.existsSync(docs.pdfPath);
 
   if (xmlDownloaded) {
-    console.log(`[recovery] Success! XML recovered at ${docs.xmlPath}`);
-
-    // If JIT learned steps successfully recovered the XML, save the learned flow
-    if (learnedSteps.length > 1) {
-      console.log(`[recovery] JIT Learning: Recovery flow successfully learned! Saving...`);
-      try {
-        const learnedRecoveryFlow = {
-          steps: learnedSteps,
-          learnedAt: new Date().toISOString(),
-          status: "learned_recovery_flow"
-        };
-        const mapId = portalMap.id || ticket.portalMapId || "oxxo";
-        const db = getDb();
-        if (db) {
-          if (process.env.RUNNER_AUTOMATIC_CONNECTOR_MUTATION_ENABLED === "true") {
-            await db.collection("portal_maps").doc(mapId).update({
-              learnedRecoveryFlow,
-              learnedRecoveryStatus: "pending_review"
-            }).catch((e: any) => console.error("[recovery] Error updating portal_maps:", e));
-
-            if (ticket.connectorId) {
-              await db.collection("connectors").doc(ticket.connectorId).set({
-                learnedRecoveryFlow,
-                learnedRecoveryStatus: "learned_recovery_flow"
-              }, { merge: true }).catch((e: any) => console.error("[recovery] Error updating connectors:", e));
-            }
-          } else {
-            await db.collection("connector_patch_proposals").doc(`${jobId}-recovery-flow`.replace(/[^a-zA-Z0-9_-]/g, "-")).set({
-              type: "recovery_flow",
-              status: "pending_review",
-              connectorId: ticket.connectorId || null,
-              portalMapId: mapId,
-              proposedChanges: { recoveryFlow: learnedRecoveryFlow },
-              evidence: { jobId, ticketId },
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
-            }, { merge: true });
-          }
-        } else {
-          console.log("[recovery] JIT Learning: Database not initialized. Skipping save.");
-        }
-      } catch (saveErr) {
-        console.error("[recovery] JIT Learn save error:", saveErr);
-      }
-    }
-
     return {
       success: true,
       xmlDownloaded,
@@ -356,20 +204,19 @@ export async function recoverExistingInvoiceFromPortal(params: {
       recoveryButtonsClicked: buttonsClicked,
       recoveryFormsDetected: formsDetected
     };
-  } else {
-    console.warn("[recovery] XML not found or recovered.");
-    return {
-      success: false,
-      xmlDownloaded: false,
-      pdfDownloaded: false,
-      recoveryErrorCode: "TICKET_ALREADY_INVOICED",
-      technicalMessage: "El portal indicó que el ticket ya fue facturado, pero no se pudo descargar ni recuperar el archivo XML.",
-      wasAlreadyInvoiced: true,
-      recoveryPathsTried: pathsTried,
-      recoveryButtonsClicked: buttonsClicked,
-      recoveryFormsDetected: formsDetected,
-      lastRecoveryError: "XML not found or recovered on screen.",
-      nextRecommendedAction: "El portal indica que ya existe una factura, pero no se encontró ruta de descarga XML. Reintentar recuperación o revisar manualmente."
-    };
   }
+
+  return {
+    success: false,
+    xmlDownloaded: false,
+    pdfDownloaded: false,
+    recoveryErrorCode: failure?.code || "TICKET_ALREADY_INVOICED",
+    technicalMessage: "The portal indicated the ticket was already invoiced, but XML could not be recovered through a verified path.",
+    wasAlreadyInvoiced: true,
+    recoveryPathsTried: pathsTried,
+    recoveryButtonsClicked: buttonsClicked,
+    recoveryFormsDetected: formsDetected,
+    lastRecoveryError: failure?.message || "XML not found or recovered on screen.",
+    nextRecommendedAction: "Configure or repair an approved strategy or declarative recoveryFlow before retrying."
+  };
 }

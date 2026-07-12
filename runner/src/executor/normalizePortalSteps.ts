@@ -113,6 +113,13 @@ export function normalizePortalSteps(rawSteps: unknown, connector: any): any[] {
       };
     }
 
+    if (normalizedType === "waitForTimeout") {
+      throw {
+        message: `Paso ${index + 1} usa una espera arbitraria. Declare una postcondiciÃ³n observable (selector, navegaciÃ³n o descarga).`,
+        code: "PORTAL_MAP_ARBITRARY_WAIT_REJECTED"
+      };
+    }
+
     const step: any = { ...raw, type: normalizedType };
     delete step.action;
 

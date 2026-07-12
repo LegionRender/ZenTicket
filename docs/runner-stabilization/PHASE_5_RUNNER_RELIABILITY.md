@@ -27,6 +27,12 @@ fijas, y exige una seÃ±al de documento. Los siguientes cortes migran las esper
 heredadas de selectores PrimeFaces, CAPTCHA, recuperaciÃ³n y la estrategia OXXO a
 contratos por estado observable.
 
+El segundo corte bloquea las esperas arbitrarias al normalizar portal maps y
+reemplaza la recuperaciÃ³n semÃ¡ntica/JIT por una estrategia o `recoveryFlow`
+declarativo verificable: URL HTTPS explÃ­cita, selectores estables y una
+postcondiciÃ³n obligatoria por clic. El runner no se desplegarÃ¡ con este bloqueo
+hasta auditar y migrar los portal maps remotos que aÃºn usen `wait_for_timeout`.
+
 ## Criterio de salida
 
 Cada familia de portal debe tener una prueba remota con una pÃ¡gina controlada o
