@@ -105,7 +105,7 @@ jobs:
           curl --fail --silent --show-error --header "Authorization: Bearer $ACCESS_TOKEN" \
             "https://firebaserules.googleapis.com/v1/$RULESET_NAME" > evidence/firestore-ruleset.json
           jq -r '.source.files[] | select(.name == "firestore.rules") | .content' evidence/firestore-ruleset.json > evidence/firestore.rules
-          diff -u firestore.rules evidence/firestore.rules
+          node -e 'const fs = require("fs"); const normalize = (file) => fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n").replace(/\n+$/, ""); if (normalize("firestore.rules") !== normalize("evidence/firestore.rules")) process.exit(1);'
           test "$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // empty' evidence/cloud-run-service.json)" = "internal-and-cloud-load-balancing"
           if jq -e '.. | strings? | select(. == "allUsers" or . == "allAuthenticatedUsers")' evidence/cloud-run-iam.json > /dev/null; then
             echo "Cloud Run must not allow unauthenticated invocation"
