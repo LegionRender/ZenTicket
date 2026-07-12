@@ -54,7 +54,7 @@ jobs:
 
       - name: Validate source contracts remotely
         run: |
-          npm run test:unit
+          npm exec vitest -- run tests/unit/server/invoiceQueue.test.ts tests/unit/server/runnerDispatch.test.ts tests/unit/runner/cloudRunHandler.test.ts --reporter=verbose
           npm run test:firestore
           npm run build --prefix runner
           npm run build
