@@ -97,7 +97,14 @@ jobs:
           gcloud run services get-iam-policy "$RUNNER_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json > evidence/cloud-run-iam.json
           gcloud tasks queues describe "$RUNNER_TASK_QUEUE" --project="$PROJECT_ID" --location="$RUNNER_TASK_LOCATION" --format=json > evidence/cloud-tasks-queue.json
           gcloud functions describe api --gen2 --project="$PROJECT_ID" --region=us-central1 --format=json > evidence/firebase-api.json
-          npx firebase-tools firestore:rules:get evidence/firestore.rules --project="$PROJECT_ID" --non-interactive
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error --header "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://firebaserules.googleapis.com/v1/projects/$PROJECT_ID/releases/cloud.firestore" > evidence/firestore-release.json
+          RULESET_NAME="$(jq -r '.rulesetName // empty' evidence/firestore-release.json)"
+          test -n "$RULESET_NAME"
+          curl --fail --silent --show-error --header "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://firebaserules.googleapis.com/v1/$RULESET_NAME" > evidence/firestore-ruleset.json
+          jq -r '.source.files[] | select(.name == "firestore.rules") | .content' evidence/firestore-ruleset.json > evidence/firestore.rules
           diff -u firestore.rules evidence/firestore.rules
           test "$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // empty' evidence/cloud-run-service.json)" = "internal-and-cloud-load-balancing"
           if jq -e '.. | strings? | select(. == "allUsers" or . == "allAuthenticatedUsers")' evidence/cloud-run-iam.json > /dev/null; then
