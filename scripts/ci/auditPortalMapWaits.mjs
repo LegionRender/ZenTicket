@@ -34,7 +34,14 @@ function findArbitraryWaits(value, valuePath = "root", matches = []) {
   if (!value || typeof value !== "object") return matches;
 
   const declaredType = String(value.type || value.action || value.step || value.stepType || "").toLowerCase();
-  if (WAIT_TYPES.has(declaredType)) matches.push(valuePath);
+  if (WAIT_TYPES.has(declaredType)) {
+    matches.push({
+      path: valuePath,
+      type: declaredType,
+      selector: typeof value.selector === "string" ? value.selector : null,
+      delay: Number(value.delay ?? value.timeout ?? value.ms ?? 0) || null
+    });
+  }
   for (const [key, nested] of Object.entries(value)) {
     if (["type", "action", "step", "stepType"].includes(key)) continue;
     findArbitraryWaits(nested, `${valuePath}.${key}`, matches);
