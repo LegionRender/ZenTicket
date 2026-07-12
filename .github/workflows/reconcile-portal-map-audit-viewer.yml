@@ -1,0 +1,40 @@
+name: Reconcile portal-map audit viewer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+
+jobs:
+  grant-firestore-viewer:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+    steps:
+      - name: Validate remote configuration
+        run: |
+          test -n "$PROJECT_ID"
+          test -n "$WORKLOAD_IDENTITY_PROVIDER"
+          test -n "$DEPLOY_SERVICE_ACCOUNT"
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Grant only Firestore read access to the audit identity
+        run: |
+          MEMBER="serviceAccount:${DEPLOY_SERVICE_ACCOUNT}"
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+            --member="$MEMBER" \
+            --role="roles/datastore.viewer" \
+            --quiet
+          gcloud projects get-iam-policy "$PROJECT_ID" --format=json | jq -e --arg member "$MEMBER" '
+            any(.bindings[]?; .role == "roles/datastore.viewer" and any(.members[]?; . == $member))
+          ' > /dev/null
