@@ -1,0 +1,51 @@
+name: Reconcile Cloud Tasks runner invoker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+
+jobs:
+  grant-runner-invoker:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      RUNNER_SERVICE: ${{ vars.RUNNER_SERVICE }}
+      RUNNER_TASK_INVOKER_SERVICE_ACCOUNT: ${{ vars.RUNNER_TASK_INVOKER_SERVICE_ACCOUNT }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+    steps:
+      - name: Validate remote configuration
+        run: |
+          test -n "$PROJECT_ID"
+          test -n "$REGION"
+          test -n "$RUNNER_SERVICE"
+          test -n "$RUNNER_TASK_INVOKER_SERVICE_ACCOUNT"
+          test -n "$WORKLOAD_IDENTITY_PROVIDER"
+          test -n "$DEPLOY_SERVICE_ACCOUNT"
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Grant the task service account only runner invocation
+        run: |
+          MEMBER="serviceAccount:${RUNNER_TASK_INVOKER_SERVICE_ACCOUNT}"
+          gcloud run services add-iam-policy-binding "$RUNNER_SERVICE" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --member="$MEMBER" \
+            --role="roles/run.invoker" \
+            --quiet
+          gcloud run services get-iam-policy "$RUNNER_SERVICE" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --format=json | jq -e --arg member "$MEMBER" '
+              any(.bindings[]?; .role == "roles/run.invoker" and any(.members[]?; . == $member))
+            ' > /dev/null
