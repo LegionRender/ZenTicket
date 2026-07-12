@@ -1,0 +1,61 @@
+name: Validate Phase 5 runner contracts remotely
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install runner dependencies
+        run: |
+          npm ci
+          npm ci --prefix runner
+
+      - name: Validate Phase 5 action contracts
+        run: |
+          npm exec vitest -- run tests/unit/runner/phase5ActionContracts.test.ts --reporter=verbose
+          npm run build --prefix runner
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and smoke-test runner image remotely
+        run: |
+          test -n "$PROJECT_ID"
+          test -n "$REGION"
+          IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/zenticket/runner:phase5-${GITHUB_SHA}"
+          BUILD_ID="$(gcloud builds submit . --async --quiet --format='value(id)' --project="$PROJECT_ID" --config=runner/cloudbuild.yaml --substitutions="_IMAGE_URI=$IMAGE_URI")"
+          test -n "$BUILD_ID"
+          for _ in {1..90}; do
+            BUILD_STATUS="$(gcloud builds describe "$BUILD_ID" --project="$PROJECT_ID" --format='value(status)')"
+            case "$BUILD_STATUS" in
+              SUCCESS) break ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED) exit 1 ;;
+            esac
+            sleep 10
+          done
+          test "$BUILD_STATUS" = "SUCCESS"
+          gcloud builds log "$BUILD_ID" --project="$PROJECT_ID" | grep -m 1 '"healthy"'

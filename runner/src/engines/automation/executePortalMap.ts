@@ -668,16 +668,67 @@ export async function executePortalMap(
   let page = await context.newPage();
   const downloadedFiles: { filename: string; path: string }[] = [];
   const networkSniffer = setupNetworkSniffer(page);
+  const downloadWaiters = new Set<() => void>();
   page.on("dialog", (dialog: Dialog) => dialog.accept().catch(() => null));
 
   const attachDownloadListener = (targetPage: Page) => targetPage.on("download", async (download: any) => {
-      const filename = download.suggestedFilename();
-      const savePath = path.join(tmpDir, filename);
-      await download.saveAs(savePath);
-      downloadedFiles.push({ filename, path: savePath });
-      await createRunnerLog(jobId, ticketId, "INFO", `Archivo descargado capturado: ${filename}`);
+      try {
+        const filename = download.suggestedFilename();
+        const savePath = path.join(tmpDir, filename);
+        await download.saveAs(savePath);
+        downloadedFiles.push({ filename, path: savePath });
+        for (const notify of downloadWaiters) notify();
+        downloadWaiters.clear();
+        await createRunnerLog(jobId, ticketId, "INFO", `Archivo descargado capturado: ${filename}`);
+      } catch (error: any) {
+        await createRunnerLog(jobId, ticketId, "ERROR", `No se pudo persistir una descarga del portal: ${error?.message || String(error)}`);
+      }
     });
   attachDownloadListener(page);
+
+  const waitForDocumentSignal = async (
+    previousDownloads: number,
+    previousNetworkCaptures: number,
+    timeoutMs: number,
+    action: string
+  ): Promise<boolean> => {
+    if (downloadedFiles.length > previousDownloads || networkSniffer.captures.length > previousNetworkCaptures) return true;
+    const observed = await new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => {
+        downloadWaiters.delete(onDownload);
+        clearInterval(networkPoll);
+        resolve(false);
+      }, timeoutMs);
+      const finish = () => {
+        clearTimeout(timeout);
+        clearInterval(networkPoll);
+        downloadWaiters.delete(onDownload);
+        resolve(true);
+      };
+      const onDownload = () => finish();
+      const networkPoll = setInterval(() => {
+        if (networkSniffer.captures.length > previousNetworkCaptures) finish();
+      }, 100);
+      downloadWaiters.add(onDownload);
+    });
+    if (!observed) {
+      const portalError = await checkPortalError(page, errorSelectors) || await collectVisiblePortalErrors(page, errorSelectors);
+      if (portalError) throw { code: "PORTAL_RETURNED_ERROR", message: `El portal reportÃ³ un error tras ${action}: ${portalError}` };
+      await createRunnerLog(jobId, ticketId, "WARNING", `No se observÃ³ una descarga ni respuesta documental tras ${action}.`, {
+        action,
+        timeoutMs
+      });
+    }
+    return observed;
+  };
+
+  const clickForDocument = async (locator: any, action: string, timeoutMs = 15000): Promise<boolean> => {
+    const previousDownloads = downloadedFiles.length;
+    const previousNetworkCaptures = networkSniffer.captures.length;
+    await locator.scrollIntoViewIfNeeded();
+    await locator.click({ timeout: Math.min(timeoutMs, 10000) });
+    return waitForDocumentSignal(previousDownloads, previousNetworkCaptures, timeoutMs, action);
+  };
 
   context.on("page", (newPage: any) => {
     console.log("[download] New tab/popup opened. Attaching download listener.");
@@ -2016,7 +2067,15 @@ export async function executePortalMap(
           if (await action.count().catch(() => 0)) await action.click();
         }
       } else if (step.type === "sniffDownload") {
-        await page.waitForTimeout(step.timeout || 3000);
+        const observed = await waitForDocumentSignal(
+          downloadedFiles.length,
+          networkSniffer.captures.length,
+          step.timeout || 15000,
+          "la espera de documento configurada en el portal map"
+        );
+        if (!observed) {
+          throw { code: "DOCUMENT_NOT_OBSERVED", message: "El portal no entregÃ³ un documento tras el paso de descarga configurado." };
+        }
       } else if (step.type === "assertText") {
         await waitForSelectorOrError(page, step.selector, step.iframeSelector, captchaSelectors, errorSelectors, step.timeout || 15000);
         const locator = getLocator(step.selector, step.iframeSelector);
@@ -2074,8 +2133,11 @@ export async function executePortalMap(
             return style.display !== 'none' && style.visibility !== 'hidden' && (el as any).offsetHeight > 0;
           });
           return visibleLoaders.length === 0;
-        }, { timeout: 45000 }).catch(() => null);
-        await page.waitForTimeout(3000);
+        }, { timeout: 45000 }).catch(async (error: any) => {
+          const portalFailure = await checkPortalError(page, errorSelectors) || await collectVisiblePortalErrors(page, errorSelectors);
+          if (portalFailure) throw { code: "PORTAL_RETURNED_ERROR", message: `El portal reportÃ³ un error mientras preparaba la descarga: ${portalFailure}` };
+          await createRunnerLog(jobId, ticketId, "WARNING", `El portal no confirmÃ³ que sus cargadores terminaron antes del timeout: ${error?.message || String(error)}`);
+        });
 
         // Check if a portal error message appeared (e.g. growl or general error message)
         const portalError = page.locator(".ui-growl-message:visible, .ui-messages-error:visible, .ui-message-error:visible, .ui-messages-fatal:visible").first();
@@ -2096,10 +2158,15 @@ export async function executePortalMap(
         const strategy = getConnectorStrategy(connectorId);
         let clickedXml = false;
         let clickedPdf = false;
+        const downloadsBeforeStrategy = downloadedFiles.length;
+        const networkBeforeStrategy = networkSniffer.captures.length;
         if (strategy?.detectDownloadLinks) {
           const linksResult = await strategy.detectDownloadLinks(page);
           clickedXml = !!linksResult.clickedXml;
           clickedPdf = !!linksResult.clickedPdf;
+          if (clickedXml || clickedPdf) {
+            await waitForDocumentSignal(downloadsBeforeStrategy, networkBeforeStrategy, step.timeout || 15000, "el conector de descarga");
+          }
         }
 
         // Generic fallback: look for standard "Descargar PDF / XML" buttons if not clicked by strategy
@@ -2107,16 +2174,14 @@ export async function executePortalMap(
           const fallbackPdfBtn = page.locator("div, span, a, button").filter({ hasText: /Descargar PDF|Descargar comprobante/i }).first();
           if (await fallbackPdfBtn.isVisible().catch(() => false)) {
             console.log("[download] Generic PDF download button detected. Clicking...");
-            await fallbackPdfBtn.click().catch(() => null);
-            await page.waitForTimeout(3000);
+            clickedPdf = await clickForDocument(fallbackPdfBtn, "el botÃ³n PDF configurado como fallback", step.timeout || 15000);
           }
         }
         if (!clickedXml) {
           const fallbackXmlBtn = page.locator("div, span, a, button").filter({ hasText: /Descargar XML|Descargar factura/i }).first();
           if (await fallbackXmlBtn.isVisible().catch(() => false)) {
             console.log("[download] Generic XML download button detected. Clicking...");
-            await fallbackXmlBtn.click().catch(() => null);
-            await page.waitForTimeout(3000);
+            clickedXml = await clickForDocument(fallbackXmlBtn, "el botÃ³n XML configurado como fallback", step.timeout || 15000);
           }
         }
 
@@ -2185,8 +2250,7 @@ export async function executePortalMap(
               const text = (await btn.innerText().catch(() => "")) || (await btn.getAttribute("title").catch(() => "")) || "";
               if (/xml/i.test(text) && !/enviar|correo|mail/i.test(text)) {
                 await createRunnerLog(jobId, ticketId, "INFO", `Intentando hacer clic en botón de XML: "${text.trim()}"`);
-                await btn.click({ force: true, timeout: 2000 }).catch(() => null);
-                await page.waitForTimeout(3000);
+                await clickForDocument(btn, "un botÃ³n XML descubierto fuera del contrato del conector", step.timeout || 15000);
                 if (downloadedFiles.length > 0) break;
               }
             }
@@ -2197,8 +2261,7 @@ export async function executePortalMap(
                 const text = (await btn.innerText().catch(() => "")) || (await btn.getAttribute("title").catch(() => "")) || "";
                 if (/pdf|descargar|bajar|descarga|download/i.test(text) && !/enviar|correo|mail/i.test(text)) {
                   await createRunnerLog(jobId, ticketId, "INFO", `Intentando hacer clic en botón alterno de descarga: "${text.trim()}"`);
-                  await btn.click({ force: true, timeout: 2000 }).catch(() => null);
-                  await page.waitForTimeout(3000);
+                  await clickForDocument(btn, "un botÃ³n de descarga descubierto fuera del contrato del conector", step.timeout || 15000);
                   if (downloadedFiles.length > 0) break;
                 }
               }
@@ -2206,10 +2269,12 @@ export async function executePortalMap(
           }
         }
 
-        let waited = 0;
-        while (downloadedFiles.length === 0 && waited < 15000) {
-          await page.waitForTimeout(500);
-          waited += 500;
+        if (downloadedFiles.length === 0 && networkSniffer.captures.length === 0) {
+          await createRunnerLog(jobId, ticketId, "WARNING", "No hay descarga observada; el runner esperarÃ¡ una seÃ±al documental verificable.");
+          const observed = await waitForDocumentSignal(0, 0, step.timeout || 15000, "la postcondiciÃ³n de descarga");
+          if (!observed) {
+            throw { code: "DOCUMENT_NOT_OBSERVED", message: "El portal no entregÃ³ XML/PDF. Configura un selector de descarga verificable en el portal map o conector." };
+          }
         }
       }
     }
