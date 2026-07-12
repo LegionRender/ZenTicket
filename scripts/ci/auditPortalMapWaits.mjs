@@ -67,7 +67,11 @@ async function main() {
   };
   const outputPath = process.env.AUDIT_OUTPUT || path.resolve(process.cwd(), "portal-map-wait-audit.json");
   fs.writeFileSync(outputPath, JSON.stringify(report, null, 2));
-  console.log(JSON.stringify({ portalMapsScanned: report.portalMapsScanned, affectedCount: report.affectedCount }));
+  console.log(JSON.stringify({
+    portalMapsScanned: report.portalMapsScanned,
+    affectedCount: report.affectedCount,
+    affectedMaps: report.affectedMaps
+  }));
 }
 
 main().catch((error) => {
