@@ -2236,28 +2236,14 @@ export default function ScannerAndSimulator({
       await addLog("🔌 Buscando conector oficial para el portal del comercio...", 800);
 
       if (!activeConn) {
-        await addLog("❌ Error: No se localizó un conector automático para este comercio.", 1000);
-        await ensureTrainingRequest(activeExtractedData, null, activeTicketId);
-        
-        const reviewErr: ReviewError = {
-          reviewReasonCode: "CONNECTOR_NOT_FOUND",
-          reviewReasonMessage: "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.",
-          lastAutomationStep: "connector_resolving",
-          connectorAttempted: false,
-          connectorId: null,
-          connectorName: null,
-          portalErrorMessage: "No connector found"
-        };
-        
+        await addLog("🧠 No existe un conector aún. Iniciando el entrenamiento seguro del portal...", 400);
         await onUpdateTicketInDb(activeTicketId, {
-          status: "requires_manual_review",
-          errorMsg: "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.",
-          reviewError: reviewErr as any
+          status: "training_required",
+          errorMsg: "Estamos preparando la facturación con este comercio. Tu ticket quedó resguardado y continuará automáticamente."
         });
-        
-        await addAutomationEvent("connector_resolving", "failed", "No existe conector disponible para este comercio.", undefined, "CONNECTOR_NOT_FOUND");
-        
+        await addAutomationEvent("connector_resolving", "processing", "No existe un conector; iniciamos el entrenamiento seguro del portal.");
         setIsAutomatingLoading(false);
+        void handleRunTraining(activeExtractedData, activeTicketId);
         return;
       }
 
@@ -2856,12 +2842,14 @@ export default function ScannerAndSimulator({
 
       const data = await response.json();
       
-      // 1. Set newly trained connector
-      setMatchingConnector(data.connector);
+      // A user JIT result is a pending proposal, not a runnable connector. Do
+      // not retain it as a match or a subsequent click could try to enqueue the
+      // ticket before the administrator has approved observation.
+      setMatchingConnector(data.jobId ? data.connector : null);
       setExtractedData({
         ...trainingData,
         ...data.ocrResult,
-        status: "extracted"
+        status: data.jobId ? "extracted" : "training_pending_review"
       });
       setIsConnectorNewlyLearned(true);
       setIsTrainingModel(false);
