@@ -2887,7 +2887,9 @@ export default function ScannerAndSimulator({
 
   useEffect(() => {
     const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
-    if (currentTicket?.status !== "training_required" || !ticketId || !extractedData) return;
+    const needsTraining = currentTicket?.status === "training_required" ||
+      (currentTicket?.status === "requires_manual_review" && currentTicket?.reviewReasonCode === "CONNECTOR_NOT_FOUND");
+    if (!needsTraining || !ticketId || !extractedData) return;
     void handleRunTraining(extractedData, ticketId);
   }, [liveTicket?.status, tickets, ticketId, extractedData]);
 
