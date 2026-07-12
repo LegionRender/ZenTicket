@@ -15,7 +15,6 @@ jobs:
       PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
-      AUDIT_OUTPUT: ${{ runner.temp }}/portal-map-wait-audit.json
     steps:
       - uses: actions/checkout@v4
 
@@ -39,5 +38,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: production-portal-map-wait-audit
-          path: ${{ runner.temp }}/portal-map-wait-audit.json
+          path: portal-map-wait-audit.json
           if-no-files-found: error
