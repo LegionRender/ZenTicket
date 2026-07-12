@@ -114,7 +114,11 @@ jobs:
           jq -e --arg member "serviceAccount:${RUNNER_TASK_INVOKER_SERVICE_ACCOUNT}" '
             any(.bindings[]?; .role == "roles/run.invoker" and any(.members[]?; . == $member))
           ' evidence/cloud-run-iam.json > /dev/null
-          jq -e --arg queue "$RUNNER_TASK_QUEUE" --arg location "$RUNNER_TASK_LOCATION" --arg runner "$RUNNER_URL" --arg invoker "$RUNNER_TASK_INVOKER_SERVICE_ACCOUNT" '
+          EXPECTED_QUEUE="$(printf '%s' "$RUNNER_TASK_QUEUE" | xargs)"
+          EXPECTED_LOCATION="$(printf '%s' "$RUNNER_TASK_LOCATION" | xargs)"
+          EXPECTED_RUNNER_URL="$(printf '%s' "$RUNNER_URL" | xargs)"
+          EXPECTED_INVOKER="$(printf '%s' "$RUNNER_TASK_INVOKER_SERVICE_ACCOUNT" | xargs)"
+          jq -e --arg queue "$EXPECTED_QUEUE" --arg location "$EXPECTED_LOCATION" --arg runner "$EXPECTED_RUNNER_URL" --arg invoker "$EXPECTED_INVOKER" '
             .serviceConfig.environmentVariables as $env |
             $env.RUNNER_TASK_QUEUE == $queue and
             $env.RUNNER_TASK_LOCATION == $location and
