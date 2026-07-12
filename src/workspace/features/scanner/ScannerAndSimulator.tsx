@@ -4541,7 +4541,7 @@ return list.map(n => {
                   </div>
                 </div>
               </div>
-            ) : (["training_required", "connector_not_ready", "portal_retry_required"].includes(currentTicket?.status || "")) ? (
+            ) : (["training_required", "connector_not_ready", "portal_retry_required"].includes(currentTicket?.status || "") && !isEditing) ? (
               <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-6 text-left shadow-md animate-fade-in font-sans">
                 <div className="flex items-start gap-4">
                   <div className="shrink-0 w-12 h-12 rounded-2xl bg-[#0B53F4]/10 flex items-center justify-center text-[#0B53F4]">
@@ -4587,6 +4587,14 @@ return list.map(n => {
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-3 pt-3 border-t border-slate-100">
+                  {currentTicket?.status === "training_required" && (
+                    <button
+                      onClick={() => setIsEditing(true)}
+                      className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-white bg-[#0B53F4] hover:bg-blue-600 px-6 py-4 rounded-xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-2xs font-sans"
+                    >
+                      Corroborar datos
+                    </button>
+                  )}
                   {currentTicket?.status === "connector_not_ready" && <a
                     href={(() => {
                       // Build a useful fallback URL for manual billing
