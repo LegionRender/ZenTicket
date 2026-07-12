@@ -2068,8 +2068,8 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       rfc: rfcEmisor,
       aliases: [nombreEmisor],
       portalUrl: portalUrl,
-      status: adminMode ? "trained_needs_validation" : "real_validation",
-      runnerAvailable: true,
+      status: "draft",
+      runnerAvailable: false,
       extractionContract: contract,
       fieldsJson: JSON.stringify(fields),
       flowJson: discoverResult.stepsJson,
@@ -2129,8 +2129,8 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         textPattern: "ya fue facturado",
         recoverySelector: "text=/Consultar factura|Descargar|Recuperar|Obtener XML/i"
       },
-      isApproved: true,
-      status: "approved",
+      isApproved: false,
+      status: "draft",
       updatedAt: new Date().toISOString(),
       createdAt: new Date().toISOString()
     };
@@ -2226,7 +2226,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
     }
 
     // 6. Update Ticket in Firestore
-    await updateProgress(95, "Auto-entrenamiento completado con éxito. Encolando facturación...");
+    await updateProgress(95, "Auto-entrenamiento completado. Preparando la revisión segura del conector...");
 
     const portalFields = {};
     discoverResult.requiredPortalFields.forEach(f => {
@@ -2280,7 +2280,8 @@ app.post("/api/tickets/train-jit", async (req, res) => {
     const missingFiscalFields = ["rfc", "razonSocial", "regimenFiscal", "codigoPostal", "usoCFDI", "correoElectronico"]
       .filter(key => !fiscalProfileSnapshot[key]);
     let invoiceJobId = null;
-    if (missingFiscalFields.length === 0) {
+    const automaticJitPromotionEnabled = false;
+    if (automaticJitPromotionEnabled && missingFiscalFields.length === 0) {
       const existingJobs = await db.collection("invoice_jobs").where("ticketId", "==", ticketId).get();
       const existingActiveJob = existingJobs.docs.find(doc =>
         ["pending", "locked", "running", "waiting_user_action", "waiting_user_input"].includes(doc.data().status)
@@ -2324,13 +2325,34 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       await updateProgress(100, "Conector listo. La solicitud ya fue enviada al portal del comercio.", "completed");
     } else {
       await db.collection("tickets").doc(ticketId).update({
-        status: "waiting_fiscal_profile",
-        reviewReasonCode: "MISSING_FISCAL_PROFILE",
-        errorMsg: "Completa tus datos fiscales para continuar con la factura.",
-        missingFields: missingFiscalFields.map(key => `fiscalProfile.${key}`),
+        status: "training_pending_review",
+        reviewReasonCode: "CONNECTOR_TRAINING_PENDING_REVIEW",
+        errorMsg: "El conector se entrenó y quedó en revisión antes de procesar tickets reales.",
+        missingFields: admin.firestore.FieldValue.delete(),
         updatedAt: new Date().toISOString()
       });
-      await updateProgress(100, "El portal está listo. Faltan datos fiscales del receptor para continuar.", "completed");
+      await updateProgress(100, "El conector quedó en revisión antes de procesar tickets reales.", "completed");
+    }
+
+    if (!automaticJitPromotionEnabled) {
+      await db.collection("tickets").doc(ticketId).set({
+        status: "training_pending_review",
+        reviewReasonCode: "CONNECTOR_TRAINING_PENDING_REVIEW",
+        errorMsg: "El conector se entrenó y quedó en revisión antes de procesar tickets reales.",
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      await db.collection("connector_patch_proposals").doc(`${trainingId}-connector-draft`).set({
+        type: "connector_training",
+        status: "pending_review",
+        connectorId,
+        portalMapId: `map-${connectorId}`,
+        ticketId,
+        userId: decodedToken.uid,
+        evidence: { portalUrl, portalFields, trainingId },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      await updateProgress(100, "Entrenamiento completado. El conector quedó en revisión antes de procesar tickets reales.", "completed");
     }
 
     res.json({

@@ -1419,12 +1419,10 @@ export default function ScannerAndSimulator({
       const rfcReceptorVal = fiscalProfile?.rfc || "";
       const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfcReceptorVal);
 
-      const isTrainingRequired = ocrResult.status === "training_required" || ocrResult.status === "connector_not_ready";
+      const isTrainingRequired = !foundConnector || ocrResult.status === "training_required" || ocrResult.status === "connector_not_ready";
       if (isTrainingRequired) {
         setActiveStep("extracted");
-        if (ocrResult.status === "training_required") {
-          void handleRunTraining(ocrResult, tId);
-        }
+        void handleRunTraining(ocrResult, tId);
       } else if (hasCritFields) {
         setActiveStep("automating");
         setTimeout(() => {
@@ -1953,12 +1951,10 @@ export default function ScannerAndSimulator({
       const rfcReceptorVal = fiscalProfile?.rfc || "";
       const isRfcReceptorValid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfcReceptorVal);
 
-      const isTrainingRequired = ocrResult.status === "training_required" || ocrResult.status === "connector_not_ready";
+      const isTrainingRequired = !foundConnector || ocrResult.status === "training_required" || ocrResult.status === "connector_not_ready";
       if (isTrainingRequired) {
         setActiveStep("extracted");
-        if (ocrResult.status === "training_required") {
-          void handleRunTraining(ocrResult, tId);
-        }
+        void handleRunTraining(ocrResult, tId);
       } else if (hasCritFields) {
         setActiveStep("automating");
         setTimeout(() => {
@@ -2882,11 +2878,8 @@ export default function ScannerAndSimulator({
           onTabChange("tickets");
         }
       } else {
-        await handleTriggerAutomation(data.connector, trainingTicketId, {
-          ...trainingData,
-          ...data.ocrResult,
-          status: "extracted"
-        });
+        setActiveStep("extracted");
+        toast.info("El conector quedó en revisión de seguridad. Conservamos tu ticket y te avisaremos cuando pueda procesarse en observación.");
       }
     } catch (err: any) {
       console.error("Error during real-time JIT training:", err);
