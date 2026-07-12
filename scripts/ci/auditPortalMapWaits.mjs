@@ -15,12 +15,23 @@ const app = initializeApp({ credential: applicationDefault(), projectId });
 const db = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 const WAIT_TYPES = new Set(["waitfortimeout", "wait_for_timeout"]);
 
-function findArbitraryWaits(value, valuePath = "root", matches = []) {
+function summarizeStep(step) {
+  if (!step || typeof step !== "object") return null;
+  return {
+    type: String(step.type || step.action || step.step || step.stepType || "").toLowerCase() || null,
+    selector: typeof step.selector === "string" ? step.selector : null,
+    expectSelector: typeof step.expectSelector === "string" ? step.expectSelector : null,
+    expectDownload: step.expectDownload === true,
+    hasNestedSteps: Array.isArray(step.steps) && step.steps.length > 0
+  };
+}
+
+function findArbitraryWaits(value, valuePath = "root", matches = [], context = null) {
   if (typeof value === "string") {
     const trimmed = value.trim();
     if ((trimmed.startsWith("[") || trimmed.startsWith("{")) && trimmed.length > 1) {
       try {
-        return findArbitraryWaits(JSON.parse(trimmed), valuePath, matches);
+        return findArbitraryWaits(JSON.parse(trimmed), valuePath, matches, context);
       } catch {
         // A non-JSON string cannot represent executable steps on its own.
       }
@@ -28,7 +39,10 @@ function findArbitraryWaits(value, valuePath = "root", matches = []) {
     return matches;
   }
   if (Array.isArray(value)) {
-    value.forEach((item, index) => findArbitraryWaits(item, `${valuePath}[${index}]`, matches));
+    value.forEach((item, index) => findArbitraryWaits(item, `${valuePath}[${index}]`, matches, {
+      previous: summarizeStep(value[index - 1]),
+      next: summarizeStep(value[index + 1])
+    }));
     return matches;
   }
   if (!value || typeof value !== "object") return matches;
@@ -39,7 +53,9 @@ function findArbitraryWaits(value, valuePath = "root", matches = []) {
       path: valuePath,
       type: declaredType,
       selector: typeof value.selector === "string" ? value.selector : null,
-      delay: Number(value.delay ?? value.timeout ?? value.ms ?? 0) || null
+      delay: Number(value.delay ?? value.timeout ?? value.ms ?? 0) || null,
+      previous: context?.previous || null,
+      next: context?.next || null
     });
   }
   for (const [key, nested] of Object.entries(value)) {
