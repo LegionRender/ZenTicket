@@ -12,6 +12,7 @@ const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret, defineString } = require("firebase-functions/params");
 const { enqueueInvoiceJob, submitInvoiceJobCaptcha, InvoiceEnqueueError } = require("./shared/backend/invoiceQueue.cjs");
+const { normalizeRunnerDispatchConfig, buildCloudRunTask } = require("./shared/backend/runnerDispatch.cjs");
 const { persistTicket } = require("./shared/backend/ticketPersistence.cjs");
 const { promoteTrainingProposalToObservation } = require("./shared/backend/trainingReviewQueue.cjs");
 
@@ -1345,6 +1346,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
 }
 
 app.post("/api/automation/run", async (req, res) => {
+  if (!(await requireAuthenticatedRequest(req, res))) return;
   const { ticket, profile, connector } = req.body || {};
 
   if (!ticket || !profile || !connector) {
@@ -1361,7 +1363,9 @@ app.post("/api/automation/run", async (req, res) => {
 });
 
 app.post("/api/tickets/analyze", async (req, res) => {
-  const { image, mimeType, userId, forceTargetedRetry, connectorId } = req.body || {};
+  if (!(await requireAuthenticatedRequest(req, res))) return;
+  const { image, mimeType, forceTargetedRetry, connectorId } = req.body || {};
+  const userId = req.user.uid;
 
   if (!image) {
     res.status(400).json({ error: "Missing base64 ticket image" });
@@ -2457,6 +2461,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
 });
 
 app.post("/api/fiscal/parse-constancia", async (req, res) => {
+  if (!(await requireAuthenticatedRequest(req, res))) return;
   const { file, mimeType } = req.body || {};
 
   if (!file) {
@@ -2516,6 +2521,11 @@ app.post("/api/fiscal/parse-constancia", async (req, res) => {
 });
 
 app.post("/api/ocr/retry-pending", async (req, res) => {
+  if (!(await requireAuthenticatedRequest(req, res))) return;
+  if (!isRequestAdmin(req.user)) {
+    res.status(403).json({ error: "Acceso denegado. Se requiere rol de administrador." });
+    return;
+  }
   const snapshot = await db.collection("ocr_retry_queue")
     .where("status", "==", "pending")
     .where("nextRunAt", "<=", admin.firestore.Timestamp.now())
@@ -2658,7 +2668,8 @@ const authenticateFirebaseToken = async (req, res, next) => {
     req.user = { 
       uid: decodedToken.uid, 
       email: decodedToken.email || "",
-      email_verified: decodedToken.email_verified === true 
+      email_verified: decodedToken.email_verified === true,
+      claims: decodedToken
     };
     next();
   } catch (error) {
@@ -2666,6 +2677,34 @@ const authenticateFirebaseToken = async (req, res, next) => {
     res.status(401).json({ error: "Token de Firebase inválido o expirado" });
   }
 };
+
+function isRequestAdmin(user) {
+  const email = String(user?.email || "").toLowerCase();
+  return user?.claims?.admin === true || user?.claims?.role === "admin" ||
+    email === "ricardo@zenticket.mx" || email === "legionrender@gmail.com";
+}
+
+async function requireAuthenticatedRequest(req, res) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Falta el token de autorizaciÃ³n o es invÃ¡lido" });
+    return false;
+  }
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(authHeader.slice(7));
+    req.user = {
+      uid: decodedToken.uid,
+      email: decodedToken.email || "",
+      email_verified: decodedToken.email_verified === true,
+      claims: decodedToken
+    };
+    return true;
+  } catch (error) {
+    console.error("Error al verificar token de Firebase:", error.message);
+    res.status(401).json({ error: "Token de Firebase invÃ¡lido o expirado" });
+    return false;
+  }
+}
 
 app.post("/api/tickets", authenticateFirebaseToken, async (req, res) => {
   try {
@@ -3817,6 +3856,7 @@ const adminDiagnosticsRouter = require("./adminDiagnosticsBundle").default;
 app.use("/api/admin/diagnostics", adminDiagnosticsRouter);
 
 app.post("/api/cfdi/verify-sat", async (req, res) => {
+  if (!(await requireAuthenticatedRequest(req, res))) return;
   const { xmlContent } = req.body;
   if (!xmlContent) {
     res.status(400).json({ error: "Missing xmlContent in request body" });
@@ -3872,64 +3912,39 @@ exports.api = onRequest(
 );
 
 function runnerDispatchConfig() {
-  const queue = (runnerTaskQueue.value() || "").trim();
-  const location = (runnerTaskLocation.value() || "").trim();
-  const targetUrl = (runnerUrl.value() || "").trim().replace(/\/$/, "");
-  const invokerServiceAccount = (runnerTaskInvokerServiceAccount.value() || "").trim();
-  const taskToken = (runnerTaskTokenParam.value() || "").trim();
-
-  if (!queue || !location || !targetUrl || !invokerServiceAccount || !taskToken) {
-    throw new Error("RUNNER_TASK_DISPATCH_CONFIG_MISSING");
-  }
-  if (!/^https:\/\//.test(targetUrl)) {
-    throw new Error("RUNNER_URL_INVALID");
-  }
-  return { queue, location, targetUrl, invokerServiceAccount, taskToken };
+  return normalizeRunnerDispatchConfig({
+    queue: runnerTaskQueue.value(),
+    location: runnerTaskLocation.value(),
+    targetUrl: runnerUrl.value(),
+    invokerServiceAccount: runnerTaskInvokerServiceAccount.value(),
+    taskToken: runnerTaskTokenParam.value()
+  });
 }
 
 async function createCloudRunTask(jobId, deliveryId, config) {
   const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "factubolt";
-  const parent = `projects/${projectId}/locations/${config.location}/queues/${config.queue}`;
-  const taskId = `invoice-${deliveryId}`.replace(/[^A-Za-z0-9_-]/g, "-");
-  const taskName = `${parent}/tasks/${taskId}`;
+  const taskRequest = buildCloudRunTask({ projectId, jobId, deliveryId, config });
   const credential = admin.app().options.credential;
   if (!credential || typeof credential.getAccessToken !== "function") {
     throw new Error("RUNNER_TASK_ADC_UNAVAILABLE");
   }
   const token = await credential.getAccessToken();
-  const response = await fetch(`https://cloudtasks.googleapis.com/v2/${parent}/tasks`, {
+  const response = await fetch(`https://cloudtasks.googleapis.com/v2/${taskRequest.parent}/tasks`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token.access_token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      task: {
-        name: taskName,
-        httpRequest: {
-          httpMethod: "POST",
-          url: `${config.targetUrl}/tasks/process`,
-          headers: {
-            "Content-Type": "application/json",
-            "X-Runner-Task-Token": config.taskToken
-          },
-          oidcToken: {
-            serviceAccountEmail: config.invokerServiceAccount,
-            audience: config.targetUrl
-          },
-          body: Buffer.from(JSON.stringify({ jobId, deliveryId }), "utf8").toString("base64")
-        }
-      }
-    })
+    body: JSON.stringify({ task: taskRequest.task })
   });
 
   if (response.status === 409) {
-    return { taskName, alreadyExists: true };
+    return { taskName: taskRequest.taskName, alreadyExists: true };
   }
   if (!response.ok) {
     throw new Error(`RUNNER_TASK_CREATE_FAILED:${response.status}:${await response.text()}`);
   }
-  return { taskName, alreadyExists: false };
+  return { taskName: taskRequest.taskName, alreadyExists: false };
 }
 
 async function createConnectorDiscoveryTask(discoveryId, deliveryId, config) {

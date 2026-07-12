@@ -10,6 +10,7 @@ serviceAccount*.json
 scratch/
 *.cjs
 !shared/backend/invoiceQueue.cjs
+!shared/backend/runnerDispatch.cjs
 
 # Local runner diagnostics and portal captures are never production artifacts.
 runner/*.js

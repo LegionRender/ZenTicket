@@ -5021,6 +5021,9 @@ app.post("/api/billing/cancel-subscription", authenticateFirebaseToken, async (r
 
 // App server routing setup
 export async function startServer() {
+  if (process.env.K_SERVICE || process.env.VERCEL) {
+    throw new Error("LEGACY_EXPRESS_RUNTIME_DISABLED: la API pÃºblica canÃ³nica es Firebase Functions.");
+  }
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

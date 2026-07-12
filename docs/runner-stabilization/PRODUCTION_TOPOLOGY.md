@@ -26,7 +26,11 @@ Firebase Auth + Firestore + Cloud Storage <--> API backend / Cloud Run runner
 | Cloud Run runner | Ejecutar exactamente un trabajo por solicitud, con Chromium de la imagen | Usar `serviceAccountKey.json`, `.env` local, Firebase Functions o un loop propio |
 | Firebase | Auth, Firestore y Storage | Permitir al SDK cliente escribir jobs, diagnósticos, facturas o estados de runner |
 
-La URL del backend ya se concentra en [`vercel.json`](../../vercel.json). El runner no se publica mediante Firebase Hosting ni como codebase de Firebase Functions; [`firebase.json`](../../firebase.json) ya no declara ese codebase ni Hosting.
+La URL del backend se concentra en [`vercel.json`](../../vercel.json) y apunta a la
+Function `api` de Firebase. El runner no se publica mediante Firebase Hosting ni
+como codebase de Firebase Functions; [`firebase.json`](../../firebase.json) ya no
+declara ese codebase ni Hosting. El Express heredado no puede iniciar en Vercel ni
+Cloud Run: sÃ³lo existe para compatibilidad y pruebas locales.
 
 ## Identidad y secretos
 

@@ -1,0 +1,125 @@
+name: Certify Phase 4 platform remotely
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  certify:
+    name: Remote platform evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      RUNNER_SERVICE: ${{ vars.RUNNER_SERVICE }}
+      RUNNER_TASK_QUEUE: ${{ vars.RUNNER_TASK_QUEUE }}
+      RUNNER_TASK_LOCATION: ${{ vars.RUNNER_TASK_LOCATION }}
+      RUNNER_URL: ${{ vars.RUNNER_URL }}
+      RUNNER_TASK_INVOKER_SERVICE_ACCOUNT: ${{ vars.RUNNER_TASK_INVOKER_SERVICE_ACCOUNT }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate remote configuration
+        run: |
+          test -n "$PROJECT_ID"
+          test -n "$REGION"
+          test -n "$RUNNER_SERVICE"
+          test -n "$RUNNER_TASK_QUEUE"
+          test -n "$RUNNER_TASK_LOCATION"
+          test -n "$RUNNER_URL"
+          test -n "$RUNNER_TASK_INVOKER_SERVICE_ACCOUNT"
+          test -n "$WORKLOAD_IDENTITY_PROVIDER"
+          test -n "$DEPLOY_SERVICE_ACCOUNT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install test dependencies
+        run: |
+          npm ci
+          npm ci --prefix runner
+
+      - name: Validate source contracts remotely
+        run: |
+          npm run test:unit
+          npm run test:firestore
+          npm run build --prefix runner
+          npm run build
+          node --check firebase/functions/index.js
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and smoke-test the runner image remotely
+        run: |
+          mkdir -p evidence
+          IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/zenticket/runner:phase4-${GITHUB_SHA}"
+          BUILD_ID="$(gcloud builds submit . --async --quiet --format='value(id)' --project="$PROJECT_ID" --config=runner/cloudbuild.yaml --substitutions="_IMAGE_URI=$IMAGE_URI")"
+          test -n "$BUILD_ID"
+          printf '%s\n' "$BUILD_ID" > evidence/cloud-build-id.txt
+          for _ in {1..90}; do
+            BUILD_STATUS="$(gcloud builds describe "$BUILD_ID" --project="$PROJECT_ID" --format='value(status)')"
+            case "$BUILD_STATUS" in
+              SUCCESS) break ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED)
+                echo "Cloud Build $BUILD_ID ended with $BUILD_STATUS"
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          test "$BUILD_STATUS" = "SUCCESS"
+          gcloud builds log "$BUILD_ID" --project="$PROJECT_ID" | tee evidence/cloud-build.log
+          grep -m 1 '"healthy"' evidence/cloud-build.log
+
+      - name: Verify deployed runtime and dispatch identity
+        run: |
+          mkdir -p evidence
+          gcloud run services describe "$RUNNER_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json > evidence/cloud-run-service.json
+          gcloud run services get-iam-policy "$RUNNER_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json > evidence/cloud-run-iam.json
+          gcloud tasks queues describe "$RUNNER_TASK_QUEUE" --project="$PROJECT_ID" --location="$RUNNER_TASK_LOCATION" --format=json > evidence/cloud-tasks-queue.json
+          gcloud functions describe api --gen2 --project="$PROJECT_ID" --region=us-central1 --format=json > evidence/firebase-api.json
+          npx firebase-tools firestore:rules:get evidence/firestore.rules --project="$PROJECT_ID" --non-interactive
+          diff -u firestore.rules evidence/firestore.rules
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // empty' evidence/cloud-run-service.json)" = "internal-and-cloud-load-balancing"
+          if jq -e '.. | strings? | select(. == "allUsers" or . == "allAuthenticatedUsers")' evidence/cloud-run-iam.json > /dev/null; then
+            echo "Cloud Run must not allow unauthenticated invocation"
+            exit 1
+          fi
+          jq -e --arg member "serviceAccount:${RUNNER_TASK_INVOKER_SERVICE_ACCOUNT}" '
+            any(.bindings[]?; .role == "roles/run.invoker" and any(.members[]?; . == $member))
+          ' evidence/cloud-run-iam.json > /dev/null
+          jq -e --arg queue "$RUNNER_TASK_QUEUE" --arg location "$RUNNER_TASK_LOCATION" --arg runner "$RUNNER_URL" --arg invoker "$RUNNER_TASK_INVOKER_SERVICE_ACCOUNT" '
+            .serviceConfig.environmentVariables as $env |
+            $env.RUNNER_TASK_QUEUE == $queue and
+            $env.RUNNER_TASK_LOCATION == $location and
+            $env.RUNNER_URL == $runner and
+            $env.RUNNER_TASK_INVOKER_SERVICE_ACCOUNT == $invoker
+          ' evidence/firebase-api.json > /dev/null
+
+      - name: Upload Phase 4 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-platform-evidence-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 90
