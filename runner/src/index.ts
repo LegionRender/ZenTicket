@@ -618,8 +618,27 @@ export async function processJob(jobId: string) {
       connector,
       lockedJob.ticketDataSnapshot,
       lockedJob.fiscalProfileSnapshot,
-      lockedJob.attemptId
+      lockedJob.attemptId,
+      { validationOnly: lockedJob.validationOnly === true }
     );
+
+    if (result.validationOnly) {
+      await jobRef.update({
+        status: "validation_only_completed",
+        validationOnlyCompletedAt: new Date().toISOString(),
+        lockedBy: null,
+        lockedAt: null,
+        updatedAt: new Date().toISOString()
+      });
+      await ticketRef.update({
+        status: "validation_only_completed",
+        validationOnlyCompletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      await createRunnerLog(jobId, ticketId, "INFO", "ValidaciÃ³n remota concluida sin enviar datos fiscales ni generar factura.");
+      setActiveJobContext(null, null, null, null);
+      return;
+    }
 
     if (result.paused) {
       tracker.trackStage("captcha_waiting_user", "warning");

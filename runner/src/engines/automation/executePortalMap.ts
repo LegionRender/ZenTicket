@@ -58,6 +58,7 @@ export interface ExecutionResult {
   alreadyInvoiced?: boolean;
   recoveryAttempted?: boolean;
   portalMessage?: string;
+  validationOnly?: boolean;
   recoveryPathsTried?: string[];
   recoveryButtonsClicked?: string[];
   recoveryFormsDetected?: string[];
@@ -604,7 +605,8 @@ export async function executePortalMap(
   connector: any,
   ticketData: any,
   fiscalProfile: any,
-  attemptId?: string
+  attemptId?: string,
+  options: { validationOnly?: boolean } = {}
 ): Promise<ExecutionResult> {
   const userId = fiscalProfile.userId;
   const connectorId = connector?.id || portalMap?.connectorId || "";
@@ -1382,6 +1384,10 @@ export async function executePortalMap(
       if (step.type === "fill" || step.type === "select" || step.type === "assertText" || step.type === "evaluate") {
         const template = step.value || "";
         const matches = [...template.matchAll(/\{\{([^}]+)\}\}/g)];
+        if (options.validationOnly && matches.some((match) => match[1].trim().startsWith("fiscalProfile."))) {
+          await createRunnerLog(jobId, ticketId, "INFO", "ValidaciÃ³n de ticket completada; se detiene antes de datos fiscales.", { stepIndex: i, stepType: step.type });
+          return { success: true, validationOnly: true, stepIndex: i };
+        }
         const missingFieldsForStep: string[] = [];
 
         for (const m of matches) {
