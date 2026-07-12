@@ -15,7 +15,8 @@ const identifiers = ["486267", "TS#050726155547"];
 const tickets = await db.collection("tickets").limit(1000).get();
 const matches = tickets.docs.filter((ticket) => {
   const serialized = JSON.stringify(ticket.data()).toUpperCase();
-  return identifiers.some((identifier) => serialized.includes(identifier));
+  return identifiers.some((identifier) => serialized.includes(identifier)) ||
+    /OXXO|BODEGA\s*AURRERA|NUEVA\s*WAL\s*MART/.test(serialized);
 });
 const ticketIds = new Set(matches.map((ticket) => ticket.id));
 const jobs = await db.collection("invoice_jobs").limit(1000).get();
@@ -35,7 +36,10 @@ console.log(JSON.stringify({
       connectorId: data.connectorId || null,
       portalMapId: data.portalMapId || null,
       jobId: job?.id || null,
-      jobStatus: job?.status || null
+      jobStatus: job?.status || null,
+      issuer: data.nombreEmisor || data.ticketData?.nombreEmisor || null,
+      total: data.total || data.expectedTicketTotal || data.ticketData?.total || null,
+      purchaseDate: data.fechaCompra || data.ticketData?.fechaCompra || null
     };
   })
 }));
