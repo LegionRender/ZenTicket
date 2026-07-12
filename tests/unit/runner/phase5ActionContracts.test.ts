@@ -44,4 +44,11 @@ describe("Fase 5 - contratos de accion del runner", () => {
     ], { extractionContract: { requiredPortalFields: [], fiscalFields: [] } }))
       .toThrow(expect.objectContaining({ code: "PORTAL_MAP_ARBITRARY_WAIT_REJECTED" }));
   });
+
+  it("impide que el backend persista nuevos portal maps con pausas arbitrarias", () => {
+    const backendPath = path.resolve(__dirname, "../../../firebase/functions/index.js");
+    const source = fs.readFileSync(backendPath, "utf8");
+    expect(source).toContain("PORTAL_MAP_ARBITRARY_WAIT_REJECTED");
+    expect(source).toContain("No se permiten esperas arbitrarias");
+  });
 });

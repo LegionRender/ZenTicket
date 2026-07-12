@@ -2004,7 +2004,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       }
     }
 
-    const supportedStepTypes = new Set(["goto", "fill", "evaluate", "select", "click", "check", "radio", "waitForSelector", "waitForNavigation", "waitForTimeout", "assertText", "extractText", "conditional", "waitForDownload"]);
+    const supportedStepTypes = new Set(["goto", "fill", "evaluate", "select", "click", "check", "radio", "waitForSelector", "waitForNavigation", "assertText", "extractText", "conditional", "waitForDownload"]);
     const stepTypeAliases = {
       navigate: "goto",
       type: "fill",
@@ -2028,6 +2028,11 @@ app.post("/api/tickets/train-jit", async (req, res) => {
       });
       if (!normalized.some(step => step.type === "goto")) normalized.unshift({ type: "goto", url: portalUrl });
       for (const step of normalized) {
+        if (step.type === "waitForTimeout") {
+          const arbitraryWaitError = new Error("No se permiten esperas arbitrarias; declare una postcondicion observable.");
+          arbitraryWaitError.code = "PORTAL_MAP_ARBITRARY_WAIT_REJECTED";
+          throw arbitraryWaitError;
+        }
         if (!supportedStepTypes.has(step.type)) throw new Error(`tipo de paso no soportado: ${step.type || "vacío"}`);
         if (["fill", "evaluate", "select", "click", "check", "radio", "waitForSelector", "assertText", "extractText"].includes(step.type) && !step.selector) {
           throw new Error(`el paso ${step.type} no contiene selector`);

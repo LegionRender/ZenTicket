@@ -1,0 +1,43 @@
+name: Audit production portal-map waits
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      AUDIT_OUTPUT: ${{ runner.temp }}/portal-map-wait-audit.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install audit dependencies
+        run: npm ci
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Audit production portal maps (read-only)
+        run: node scripts/ci/auditPortalMapWaits.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-portal-map-wait-audit
+          path: ${{ runner.temp }}/portal-map-wait-audit.json
+          if-no-files-found: error

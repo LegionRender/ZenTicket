@@ -33,6 +33,10 @@ declarativo verificable: URL HTTPS explÃ­cita, selectores estables y una
 postcondiciÃ³n obligatoria por clic. El runner no se desplegarÃ¡ con este bloqueo
 hasta auditar y migrar los portal maps remotos que aÃºn usen `wait_for_timeout`.
 
+La auditorÃ­a de sÃ³lo lectura se ejecuta remotamente con
+[`audit-portal-map-waits.yml`](../../.github/workflows/audit-portal-map-waits.yml)
+y publica un artefacto de inventario; no modifica Firestore ni despliega servicios.
+
 ## Criterio de salida
 
 Cada familia de portal debe tener una prueba remota con una pÃ¡gina controlada o
