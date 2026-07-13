@@ -74,6 +74,57 @@ function resolveCanonicalKey(field: ObservedField): string {
   return "custom_" + (field.name || field.id || "field");
 }
 
+async function extractFieldsWithGemini(
+  imageBase64: string,
+  fields: any[],
+  merchantName: string,
+  apiKey: string
+): Promise<Record<string, string>> {
+  if (!apiKey || !imageBase64) return {};
+
+  try {
+    const rawImage = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
+    const mimeTypeMatch = imageBase64.match(/^data:([^;]+);base64,/i);
+    const mimeType = mimeTypeMatch?.[1] || "image/jpeg";
+
+    let prompt = `Analiza la imagen del ticket de compra comercial del comercio: ${merchantName}.\n`;
+    prompt += `Extrae únicamente los siguientes campos requeridos por el portal de facturación oficial:\n`;
+    for (const f of fields) {
+      prompt += `- Campo: ${f.label} (clave: ${f.canonicalKey})\n`;
+    }
+    prompt += `\nDevuelve un objeto JSON con las claves exactas provistas y sus respectivos valores encontrados en el ticket. Si un campo no está presente, devuelve null o una cadena vacía.`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              { inlineData: { data: rawImage, mimeType } }
+            ]
+          }
+        ],
+        generationConfig: { responseMimeType: "application/json" }
+      })
+    });
+
+    if (!response.ok) {
+      console.warn(`[JIT-OCR] Gemini API failed: ${response.statusText}`);
+      return {};
+    }
+
+    const result = await response.json();
+    const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    return JSON.parse(text);
+  } catch (err: any) {
+    console.warn("[JIT-OCR] Failed to parse Gemini response:", err?.message || err);
+    return {};
+  }
+}
+
 export async function processConnectorDiscovery(discoveryId: string) {
   const discoveryRef = db.collection("connector_discovery_jobs").doc(discoveryId);
   const proposalRef = db.collection("connector_patch_proposals").doc(`discovery-${discoveryId}`);
@@ -273,6 +324,25 @@ export async function processConnectorDiscovery(discoveryId: string) {
       ticketData = ticketSnap.exists ? ticketSnap.data() : null;
     }
 
+    const geminiApiKey = process.env.GEMINI_API_KEY || "";
+    let extractedPortalFields: Record<string, string> = {};
+    if (ticketData && ticketData.imageUrl && geminiApiKey) {
+      console.info("[JIT-OCR] Running targeted OCR extraction in hot path...");
+      extractedPortalFields = await extractFieldsWithGemini(
+        ticketData.imageUrl,
+        contractFields,
+        discovery.merchantName || "Comercio",
+        geminiApiKey
+      );
+      console.info("[JIT-OCR] Hot extraction result:", JSON.stringify(extractedPortalFields));
+      if (ticketRef) {
+        await ticketRef.update({
+          portalFields: extractedPortalFields,
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }
+
     const profileSnap = await db.collection("fiscalProfiles").doc(discovery.userId).get();
     const profile = profileSnap.exists ? profileSnap.data() : null;
     const requiredFiscalKeys = ["rfc", "razonSocial", "regimenFiscal", "codigoPostal", "usoCFDI"];
@@ -288,6 +358,7 @@ export async function processConnectorDiscovery(discoveryId: string) {
           status: "waiting_fiscal_profile",
           connectorId: connectorId,
           portalMapId: `map-${connectorId}`,
+          portalFields: extractedPortalFields,
           updatedAt: new Date().toISOString()
         }, { merge: true });
       }
@@ -305,7 +376,7 @@ export async function processConnectorDiscovery(discoveryId: string) {
         rawOcrText: ticketData?.rawOcrText || ""
       };
       
-      const ticketPortalFields = ticketData?.portalFields || {};
+      const ticketPortalFields = { ...ticketData?.portalFields, ...extractedPortalFields };
       const fieldsSnapshot: any = {};
       contractFields.forEach(f => {
         fieldsSnapshot[f.canonicalKey] = ticketPortalFields[f.canonicalKey] || ticketPortalFields[f.key] || "";
@@ -380,6 +451,7 @@ export async function processConnectorDiscovery(discoveryId: string) {
             status: "queued_for_runner",
             connectorId,
             portalMapId: `map-${connectorId}`,
+            portalFields: extractedPortalFields,
             jobId,
             updatedAt: nowStr
           });
