@@ -66,6 +66,9 @@ export async function processConnectorDiscovery(discoveryId: string) {
     const snapshot = await transaction.get(discoveryRef);
     if (!snapshot.exists) throw new Error("CONNECTOR_DISCOVERY_NOT_FOUND");
     const data = snapshot.data()!;
+    // Historical test evidence is retained, but is never eligible for a
+    // future JIT/discovery run even if governance is later reopened.
+    if (data.archival?.excludedFromJit === true) return null;
     if (["completed", "running"].includes(String(data.status))) return null;
     transaction.update(discoveryRef, {
       status: "running",
