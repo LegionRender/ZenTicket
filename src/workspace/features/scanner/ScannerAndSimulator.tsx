@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { FiscalProfile, Ticket, Connector, ExtractedTicketData } from "@/shared/types/types";
-import { analyzeTicket, runAutomation, getApiUrl, fetchWithAuth, enqueueInvoiceJob, submitInvoiceJobCaptcha } from "@/services/api";
+import { analyzeTicket, runAutomation, getApiUrl, fetchWithAuth, enqueueInvoiceJob } from "@/services/api";
 import { SAMPLE_TICKETS, drawMockTicketToDataUrl } from "@/shared/utils/ticket-drawer";
 import Logo from "@/shared/brand/Logo";
 import { 
@@ -12,7 +12,7 @@ import {
 import { useToast } from "@/shared/feedback/Toast";
 import { db, auth } from "@/services/firebase/firebase";
 import { handleFirestoreError, OperationType } from "@/services/firebase/firestore-helper";
-import { doc, setDoc, updateDoc, getDoc, collection, query, where, getDocs, addDoc, onSnapshot } from "firebase/firestore";
+import { doc, updateDoc, getDoc, collection, query, where, getDocs, addDoc, onSnapshot } from "firebase/firestore";
 import { AnimatePresence, motion } from "motion/react";
 import { useAuth } from "@/auth/context/AuthContext";
 import logoLight from "@/assets/logos/logo-light.png";
@@ -20,7 +20,6 @@ import logoDark from "@/assets/logos/logo-dark.png";
 import { sanitizeBillingReferenceForConnector } from "@/shared/utils/validation";
 import { buildPortalFieldsSnapshot, hasUsableExtractionContract, validatePortalFields } from "@/shared/utils/extraction-contract";
 import { getConnectorCategory } from "../connectors/ConnectorsList";
-import { CaptchaFlowPanel } from "./CaptchaFlowPanel";
 import { getTicketTotal } from "@/workspace/utils/ticketHelpers";
 import { buildBillingDashboardStats } from "@/workspace/utils/billingStateHelpers";
 
@@ -266,24 +265,6 @@ function validatePortalFieldsAgainstPortalMap(
   };
 }
 
-const CAPTCHA_FLOW_STATUSES = new Set([
-  "blocked_by_captcha",
-  "waiting_human_verification",
-  "waiting_user_captcha",
-  "captcha_submitted",
-  "verifying_captcha",
-  "captcha_failed",
-  "captcha_timeout",
-]);
-
-const CAPTCHA_TERMINAL_STATUSES = new Set([
-  "captcha_resolved",
-  "completed",
-  "invoice_completed",
-  "failed_final",
-  "failed"
-]);
-
 export default function ScannerAndSimulator({
   fiscalProfile,
   connectors,
@@ -307,9 +288,9 @@ export default function ScannerAndSimulator({
   const toast = useToast();
   const { user } = useAuth();
   const userName = fiscalProfile?.razonSocial || user?.displayName || "Usuario";
-  const isAdmin = user?.email && (user.email.toLowerCase().includes("legionrender") || user.email.toLowerCase().includes("ricardo"));
-  const isDev = import.meta.env.DEV;
-  const canShowDebug = !!(isAdmin || isDev);
+  // Customer capture never exposes internal runner or connector diagnostics.
+  // Those records are available only from Administración.
+  const canShowDebug = false;
 
 
 
@@ -358,6 +339,7 @@ export default function ScannerAndSimulator({
   const [ticketImage, setTicketImage] = useState<string | null>(null);
   const [activeStep, setActiveStep] = useState<"upload" | "extracted" | "automating" | "success" | "tracking" | "correction">("upload");
   const [isOcrLoading, setIsOcrLoading] = useState(false);
+  const [isOcrRunning, setIsOcrRunning] = useState(false);
   const [lastFailedTicketPayload, setLastFailedTicketPayload] = useState<any | null>(null);
 
   const safeSaveTicket = async (ticketPayload: any) => {
@@ -481,35 +463,7 @@ export default function ScannerAndSimulator({
 
   const [liveTicket, setLiveTicket] = useState<any>(null);
   const [liveJob, setLiveJob] = useState<any>(null);
-  const [captchaPanelLocked, setCaptchaPanelLocked] = useState(false);
-
-  useEffect(() => {
-    const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
-    const tStatus = currentTicket?.status || "";
-    const jStatus = liveJob?.status || "";
-    const effectiveStatus = jStatus || tStatus;
-
-    const flowActive =
-      CAPTCHA_FLOW_STATUSES.has(effectiveStatus) ||
-      liveJob?.captchaFlowActive === true ||
-      currentTicket?.captchaFlowActive === true ||
-      liveJob?.blockingReason === "captcha_detected";
-
-    if (flowActive) {
-      if (!captchaPanelLocked) {
-        console.debug("[CAPTCHA_UI_RENDER] Scanner: Latching captcha panel. status:", effectiveStatus);
-        setCaptchaPanelLocked(true);
-      }
-    } else if (CAPTCHA_TERMINAL_STATUSES.has(effectiveStatus)) {
-      if (captchaPanelLocked) {
-        console.debug("[CAPTCHA_UI_RENDER] Scanner: Unlocking captcha panel. status:", effectiveStatus);
-        setCaptchaPanelLocked(false);
-      }
-    }
-  }, [liveJob?.status, liveJob?.captchaFlowActive, liveJob?.blockingReason, liveTicket?.status, tickets, ticketId, captchaPanelLocked]);
   const [inlineInputs, setInlineInputs] = useState<Record<string, string>>({});
-  const [captchaSolution, setCaptchaSolution] = useState("");
-  const [isSubmittingCaptcha, setIsSubmittingCaptcha] = useState(false);
   const [showTechnicalDebug, setShowTechnicalDebug] = useState(false);
   const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
   const isConnectorReady = matchingConnector?.status === "production_ready" && matchingConnector?.runnerAvailable === true;
@@ -643,11 +597,11 @@ export default function ScannerAndSimulator({
             id: `offline-${ticketId}`,
             category: "pendientes",
             criticality: "importante",
-            title: "Captura Sin Conexión",
-            message: `El ticket de ${t.nombreEmisor || "Establecimiento"} fue guardado localmente sin internet. Se procesará automáticamente al recuperar conexión.`,
+            title: "Ticket recibido",
+            message: `Recibimos tu ticket de ${t.nombreEmisor || "este comercio"}. Te avisaremos cuando haya una actualización.`,
             createdAt: timestamp,
             read: readNotifIds.includes(`offline-${ticketId}`),
-            actionText: "En espera de conexión 🌐",
+            actionText: "Ver mis tickets",
             actionType: "offline_pending",
             ticket: t
           });
@@ -694,12 +648,12 @@ export default function ScannerAndSimulator({
           list.push({
             id: `manual-review-${ticketId}`,
             category: "pendientes",
-            criticality: "critica",
-            title: `Revisión Manual Requerida - ${t.nombreEmisor || "Establecimiento"}`,
-            message: `El ticket con Folio ${t.folio || "Sin Folio"} por un total de $${getTicketTotal(t).toFixed(2)} MXN requiere revisión manual: ${t.errorMsg || "Fallo en la facturación automática."}`,
+            criticality: "importante",
+            title: "Estamos revisando tu ticket",
+            message: `Conservamos tu ticket de ${t.nombreEmisor || "este comercio"} y te avisaremos cuando podamos continuar. No necesitas enviarlo de nuevo.`,
             createdAt: timestamp,
             read: readNotifIds.includes(`manual-review-${ticketId}`),
-            actionText: "Ver Detalles 🔍",
+            actionText: "Ver mis tickets",
             actionType: "contingency",
             ticket: t
           });
@@ -707,12 +661,12 @@ export default function ScannerAndSimulator({
           list.push({
             id: `failed-${ticketId}`,
             category: "pendientes",
-            criticality: "critica",
-            title: `Fallo en Automatización - ${t.nombreEmisor || "Establecimiento"}`,
-            message: `El ticket con Folio ${t.folio || "Sin Folio"} por un total de $${getTicketTotal(t).toFixed(2)} MXN reportó un problema: ${t.errorMsg || "Error desconocido en el portal."}`,
+            criticality: "importante",
+            title: "Estamos revisando tu ticket",
+            message: `Conservamos tu ticket de ${t.nombreEmisor || "este comercio"} y te avisaremos cuando podamos continuar. No necesitas enviarlo de nuevo.`,
             createdAt: timestamp,
             read: readNotifIds.includes(`failed-${ticketId}`),
-            actionText: "Ir a Contingencia 🛡️",
+            actionText: "Ver mis tickets",
             actionType: "contingency",
             ticket: t
           });
@@ -720,13 +674,13 @@ export default function ScannerAndSimulator({
           list.push({
             id: `captcha-${ticketId}`,
             category: "pendientes",
-            criticality: "critica",
-            title: `Resolver CAPTCHA - ${t.nombreEmisor || "Establecimiento"}`,
-            message: `El ticket de ${t.nombreEmisor || "Establecimiento"} por un total de $${getTicketTotal(t).toFixed(2)} MXN requiere introducir el código de verificación del portal.`,
+            criticality: "importante",
+            title: "Estamos revisando tu ticket",
+            message: `Conservamos tu ticket de ${t.nombreEmisor || "este comercio"} y te avisaremos cuando podamos continuar. No necesitas enviarlo de nuevo.`,
             createdAt: timestamp,
             read: readNotifIds.includes(`captcha-${ticketId}`),
-            actionText: "Resolver CAPTCHA 🔑",
-            actionType: "captcha",
+            actionText: "Ver mis tickets",
+            actionType: "contingency",
             ticket: t
           });
         } else if (t.status === "review") {
@@ -1314,7 +1268,8 @@ export default function ScannerAndSimulator({
 
   // Load a sample ticket spec and render to canvas
   const handleSelectSample = async (key: keyof typeof SAMPLE_TICKETS) => {
-    setIsOcrLoading(true);
+    setActiveStep("automating");
+    setIsOcrRunning(true);
     setMessage(null);
 
     // Start progress simulation
@@ -1421,7 +1376,6 @@ export default function ScannerAndSimulator({
 
       const isTrainingRequired = !foundConnector || ocrResult.status === "training_required" || ocrResult.status === "connector_not_ready";
       if (isTrainingRequired) {
-        setActiveStep("extracted");
         void handleRunTraining(ocrResult, tId);
       } else if (hasCritFields) {
         setActiveStep("automating");
@@ -1479,7 +1433,9 @@ export default function ScannerAndSimulator({
     } catch (err: any) {
       console.error(err);
       setMessage(err.message || "Error al procesar ticket con IA OCR.");
+      setActiveStep("upload");
     } finally {
+      setIsOcrRunning(false);
       setIsOcrLoading(false);
     }
   };
@@ -1558,7 +1514,8 @@ export default function ScannerAndSimulator({
       return;
     }
     
-    setIsOcrLoading(true);
+    setActiveStep("automating");
+    setIsOcrRunning(true);
     setValidationError(null);
     
     let finishTriggered = false;
@@ -1625,6 +1582,7 @@ export default function ScannerAndSimulator({
       toast.error(err.message || "Error al reintentar la extracción dirigida.");
     } finally {
       stopSimulation();
+      setIsOcrRunning(false);
       setIsOcrLoading(false);
     }
   };
@@ -1813,7 +1771,8 @@ export default function ScannerAndSimulator({
 
     // Single file upload flow (existing logic)
     const file = files[0];
-    setIsOcrLoading(true);
+    setActiveStep("automating");
+    setIsOcrRunning(true);
     setMessage(null);
 
     // Start progress simulation
@@ -1852,7 +1811,8 @@ export default function ScannerAndSimulator({
           "No tienes conexión a internet en este momento. No te preocupes: hemos guardado la foto de tu ticket de forma segura y realizaremos la solicitud automatizada de tu factura en cuanto recuperes tu conexión. ¡Nosotros nos encargamos! 🌐",
           "Captura Sin Conexión"
         );
-        setIsOcrLoading(false);
+        setIsOcrRunning(false);
+        setActiveStep("tracking");
         return;
       }
 
@@ -1953,7 +1913,6 @@ export default function ScannerAndSimulator({
 
       const isTrainingRequired = !foundConnector || ocrResult.status === "training_required" || ocrResult.status === "connector_not_ready";
       if (isTrainingRequired) {
-        setActiveStep("extracted");
         void handleRunTraining(ocrResult, tId);
       } else if (hasCritFields) {
         setActiveStep("automating");
@@ -2011,7 +1970,9 @@ export default function ScannerAndSimulator({
     } catch (err: any) {
       console.error(err);
       setMessage(err.message || "No se pudo interpretar el ticket ingresado.");
+      setActiveStep("upload");
     } finally {
+      setIsOcrRunning(false);
       setIsOcrLoading(false);
     }
   };
@@ -2040,24 +2001,12 @@ export default function ScannerAndSimulator({
   };
 
   const ensureTrainingRequest = async (ocrResult: any, foundConnector: any, tId: string | null) => {
-    if (!foundConnector || foundConnector.runnerAvailable === false || foundConnector.status === "automation_pending_setup") {
-      try {
-        const requestId = `${user?.uid || "guest"}_${tId || "unknown"}`;
-        const reqRef = doc(db, "training_requests", requestId);
-        const existingRequest = await getDoc(reqRef);
-        if (existingRequest.exists()) return;
-        await setDoc(reqRef, {
-          userId: user?.uid || "guest",
-          storeName: foundConnector?.nombre || ocrResult?.nombreEmisor || "Comercio por identificar",
-          rfc: foundConnector?.rfc || ocrResult?.rfcEmisor || "",
-          officialBillingUrl: foundConnector?.portalUrl || "",
-          createdAt: new Date().toISOString()
-        });
-        console.log(`[Training Request] Created for: ${foundConnector?.nombre || ocrResult?.nombreEmisor}`);
-      } catch (e) {
-        console.warn("Could not save training request:", e);
-      }
-    }
+    // Discovery and JIT learning are not part of production ticket handling.
+    // Keep this compatibility hook intentionally side-effect free so a real
+    // ticket can never create training data or trigger portal discovery.
+    void ocrResult;
+    void foundConnector;
+    void tId;
   };
 
   // Trigger high fidelity automation logs and final document generation
@@ -2079,10 +2028,12 @@ export default function ScannerAndSimulator({
     if (!activeConn || activeConn.status !== "production_ready" || activeConn.runnerAvailable !== true) {
       await onUpdateTicketInDb(activeTicketId, {
         status: "requires_manual_review",
-        errorMsg: "Este comercio requiere un conector aprobado antes de facturar.",
+        errorMsg: "Estamos revisando este ticket. No necesitas enviarlo de nuevo.",
         reviewReasonCode: "CONNECTOR_NOT_FOUND"
       });
-      toast.info("Este ticket quedó en revisión manual; no se iniciará una facturación automática.");
+      toast.info("Recibimos tu ticket. Te avisaremos cuando podamos continuar.");
+      if (onSetNewlyAddedTicketId) onSetNewlyAddedTicketId(activeTicketId);
+      if (onTabChange) onTabChange("tickets");
       return;
     }
 
@@ -2725,10 +2676,8 @@ export default function ScannerAndSimulator({
       await addLog("🎉 ¡Ticket encolado con éxito para procesamiento automático!", 400);
       setSimulationProgress(100);
 
-      if (onTabChange && onSetNewlyAddedTicketId) {
-        onSetNewlyAddedTicketId(activeTicketId);
-        onTabChange("tickets");
-      }
+      if (onSetNewlyAddedTicketId) onSetNewlyAddedTicketId(activeTicketId);
+      if (onTabChange) onTabChange("tickets");
 
       setTimeout(() => {
         setActiveStep("success");
@@ -2778,12 +2727,13 @@ export default function ScannerAndSimulator({
   ) => {
     if (!trainingTicketId) return;
     setIsTrainingModel(false);
-    setActiveStep("extracted");
+    setActiveStep("tracking");
     await onUpdateTicketInDb(trainingTicketId, {
       status: "requires_manual_review",
-      errorMsg: "Este comercio requiere un conector aprobado antes de facturar.",
+      errorMsg: "Estamos preparando la facturación automática con este comercio. Tu ticket quedó resguardado y procesaremos tu factura a la brevedad.",
       reviewReasonCode: "CONNECTOR_NOT_FOUND"
     });
+    if (onSetNewlyAddedTicketId) onSetNewlyAddedTicketId(trainingTicketId);
   };
   useEffect(() => {
     const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
@@ -3021,12 +2971,7 @@ export default function ScannerAndSimulator({
     }
 
     // Refresh matching connector logic
-    const found = connectors.find(
-      (c) =>
-        c.rfc.toLowerCase().trim() === updatedData.rfcEmisor.toLowerCase().trim() ||
-        updatedData.nombreEmisor.toLowerCase().includes(c.nombre.toLowerCase()) ||
-        c.nombre.toLowerCase().includes(updatedData.nombreEmisor.toLowerCase())
-    );
+    const found = matchConnector(updatedData.nombreEmisor, updatedData.rfcEmisor);
     setMatchingConnector(found || null);
 
     // A correction only persists user-supplied ticket data. It must never
@@ -3036,10 +2981,10 @@ export default function ScannerAndSimulator({
     } else if (ticketId) {
       await onUpdateTicketInDb(ticketId, {
         status: "requires_manual_review",
-        errorMsg: "Datos corroborados. Pendiente de asociación con un conector aprobado.",
+        errorMsg: "Datos corroborados. Estamos revisando este ticket.",
         reviewReasonCode: "CONNECTOR_NOT_FOUND"
       });
-      toast.info("Tus datos quedaron guardados. Este comercio requiere un conector aprobado antes de facturar.");
+      toast.info("Tus datos quedaron guardados. Te avisaremos cuando haya una actualización.");
       if (onSetNewlyAddedTicketId) onSetNewlyAddedTicketId(ticketId);
       if (onTabChange) onTabChange("tickets");
     }
@@ -3143,32 +3088,16 @@ export default function ScannerAndSimulator({
         }, finalProfile);
       } else {
         setIsAutomatingLoading(false);
-        void handleRunTraining({ ...ticketData, ...finalTicketUpdates }, ticketId);
+        await onUpdateTicketInDb(ticketId, {
+          status: "requires_manual_review",
+          errorMsg: "Datos guardados. Estamos revisando este ticket.",
+          reviewReasonCode: "CONNECTOR_NOT_FOUND"
+        });
       }
     } catch (err: any) {
       console.error("Error saving inline inputs:", err);
       toast.error("Ocurrió un error al guardar los campos: " + err.message);
       setIsAutomatingLoading(false);
-    }
-  };
-
-  const handleSubmitCaptcha = async () => {
-    const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
-    const jobIdToUpdate = liveJob?.id || currentTicket?.jobId;
-    const solution = captchaSolution.trim();
-    if (!jobIdToUpdate || !solution) {
-      toast.error("Captura el código mostrado para continuar.");
-      return;
-    }
-    setIsSubmittingCaptcha(true);
-    try {
-      await submitInvoiceJobCaptcha(jobIdToUpdate, solution);
-      setCaptchaSolution("");
-      toast.success("Código enviado. Continuando con la facturación.");
-    } catch (error: any) {
-      toast.error("No se pudo enviar el código. Inténtalo nuevamente.");
-    } finally {
-      setIsSubmittingCaptcha(false);
     }
   };
 
@@ -4424,7 +4353,7 @@ return list.map(n => {
 
           {/* Values parsed & connector seek panel */}
           <div className="lg:col-span-8 flex flex-col justify-between text-left">
-            {isTrainingModel && !isEditing ? (
+            {false && isTrainingModel && !isEditing ? (
               /* Simple, friendly loading/training progress view */
               <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 space-y-6 text-center shadow-md animate-fade-in_50">
                 <div className="flex flex-col items-center gap-4 animate-pulse">
@@ -4472,7 +4401,7 @@ return list.map(n => {
                   Corroborar datos
                 </button>
               </div>
-            ) : (["training_required", "connector_not_ready", "portal_retry_required"].includes(currentTicket?.status || "") && !isEditing) ? (
+            ) : (false && ["training_required", "connector_not_ready", "portal_retry_required"].includes(currentTicket?.status || "") && !isEditing) ? (
               <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-6 text-left shadow-md animate-fade-in font-sans">
                 <div className="flex items-start gap-4">
                   <div className="shrink-0 w-12 h-12 rounded-2xl bg-[#0B53F4]/10 flex items-center justify-center text-[#0B53F4]">
@@ -5070,9 +4999,9 @@ return list.map(n => {
                         <div className="flex items-start gap-3">
                           <AlertTriangle className="w-5 h-5 text-amber-550 shrink-0 mt-0.5 animate-pulse" />
                           <div>
-                            <span className="font-extrabold block text-amber-800 uppercase mb-0.5 tracking-wide">Comercio Sin Conector</span>
+                            <span className="font-extrabold block text-amber-800 uppercase mb-0.5 tracking-wide">Ticket recibido</span>
                             <p className="opacity-95 text-amber-700 leading-normal font-semibold font-sans">
-                              Este comercio aún requiere revisión manual. Puedes corregir los datos o enviar el ticket a revisión.
+                              Estamos revisando este ticket. Te avisaremos cuando haya una actualización.
                             </p>
                           </div>
                         </div>
@@ -5080,7 +5009,7 @@ return list.map(n => {
                     )}
 
                     {/* Prominent main invoice clickers triggers */}
-                    {!checkIsDataIncomplete(extractedData) && (
+                    {!checkIsDataIncomplete(extractedData) && isConnectorReady && (
                       <div className="flex flex-col sm:flex-row gap-3 pt-1">
                         {isConnectorReady ? (
                           <>
@@ -5279,7 +5208,7 @@ return list.map(n => {
             if (code === "PERIOD_EXPIRED") return "El periodo permitido por el comercio para facturar este ticket ya venció.";
             if (code === "INVALID_PORTAL_FIELD_VALUE") return revErr.portalErrorMessage || "Alguno de los datos del ticket es inválido.";
 
-            if (code === "CONNECTOR_NOT_FOUND") return "Este comercio aún no puede procesarse automáticamente. Estamos revisando si puede agregarse.";
+            if (code === "CONNECTOR_NOT_FOUND") return "Estamos preparando la facturación automática con este comercio. Tu ticket quedó resguardado y procesaremos tu factura a la brevedad.";
             if (code === "PORTAL_NO_XML") return "El portal oficial no entregó el XML necesario para validar tu CFDI.";
             if (code === "PORTAL_REJECTED_FOLIO") return "El portal no reconoció el folio del ticket.";
             if (code === "PORTAL_REJECTED_TOTAL") return "El portal no reconoció el total detectado.";
@@ -5288,14 +5217,14 @@ return list.map(n => {
             if (code === "SAT_CANCELED") return "El CFDI aparece cancelado ante el SAT.";
             if (code === "SAT_TIMEOUT") return "No pudimos verificar el CFDI ante el SAT en este momento.";
             if (code === "USER_REQUESTED_REVIEW") return "El usuario solicitó revisión manual del ticket.";
-            if (code === "CONNECTOR_TIMEOUT") return "El conector del comercio tardó más de lo esperado en responder.";
+            if (code === "CONNECTOR_TIMEOUT") return "El portal de este comercio está tardando más de lo esperado en responder. Lo intentaremos de nuevo de forma automática.";
             if (code === "PORTAL_ERROR") return revErr.reviewReasonMessage || "Ocurrió un error en el portal del comercio.";
-            if (code === "CONNECTOR_RUNNER_NOT_AVAILABLE") return "Detectamos este comercio, pero su automatización todavía se está configurando. Guardamos tu ticket para revisión.";
-            if (code === "CONNECTOR_SCHEMA_INVALID") return "Detectamos este comercio, pero su automatización todavía se está configurando. Guardamos tu ticket para revisión.";
-            if (code === "CONNECTOR_NOT_PRODUCTION_READY") return "Detectamos este comercio, pero su automatización todavía se está configurando. Guardamos tu ticket para revisión.";
-            if (code === "CONNECTOR_RESTRICTED") return "Este portal requiere credenciales especiales o permisos de acceso restringidos.";
-            if (code === "CONNECTOR_BROKEN") return "El conector de este portal se encuentra temporalmente fuera de servicio por mantenimiento.";
-            if (code === "PORTAL_FIELD_MAP_CHANGED") return "La estructura del portal oficial ha cambiado. Se ha programado un rediscovery técnico.";
+            if (code === "CONNECTOR_RUNNER_NOT_AVAILABLE") return "Estamos preparando la facturación automática con este comercio. Tu ticket quedó resguardado y procesaremos tu factura a la brevedad.";
+            if (code === "CONNECTOR_SCHEMA_INVALID") return "Estamos preparando la facturación automática con este comercio. Tu ticket quedó resguardado y procesaremos tu factura a la brevedad.";
+            if (code === "CONNECTOR_NOT_PRODUCTION_READY") return "Estamos preparando la facturación automática con este comercio. Tu ticket quedó resguardado y procesaremos tu factura a la brevedad.";
+            if (code === "CONNECTOR_RESTRICTED") return "El portal de este comercio requiere datos o accesos adicionales.";
+            if (code === "CONNECTOR_BROKEN") return "El portal de facturación de este comercio se encuentra temporalmente fuera de servicio.";
+            if (code === "PORTAL_FIELD_MAP_CHANGED") return "El portal de facturación de este comercio se encuentra en proceso de actualización.";
             if (code === "PORTAL_REQUIRES_LOGIN") return "El portal del comercio requiere iniciar sesión con cuenta de usuario.";
             if (code === "PORTAL_REQUIRES_CAPTCHA") return "El portal oficial requiere resolver un CAPTCHA interactivo.";
             if (code === "PORTAL_REQUIRES_EMAIL_VERIFICATION") return "El portal oficial requiere una verificación por correo electrónico.";
@@ -5320,13 +5249,13 @@ return list.map(n => {
           const isFinished = ["cfdi_validated", "completed", "invoice_obtained"].includes(tStatus);
 
           if (stepIndex === 1) { // Lectura
-            if (["ticket_uploaded", "extracting_data"].includes(tStatus)) return "active";
-            if (tStatus) return "completed";
+            if (isOcrRunning || ["ticket_uploaded", "extracting_data"].includes(tStatus)) return "active";
+            if (tStatus || tStatus !== "") return "completed";
             return "active";
           }
           if (stepIndex === 2) { // Extracción
-            if (["ticket_uploaded", "extracting_data"].includes(tStatus)) return "pending";
-            if (tStatus === "connector_resolving") return "active";
+            if (isOcrRunning || ["ticket_uploaded", "extracting_data"].includes(tStatus)) return "pending";
+            if (tStatus === "connector_resolving" || tStatus === "training_required") return "active";
             if (tStatus) return "completed";
             return "pending";
           }
@@ -5346,41 +5275,44 @@ return list.map(n => {
           const tStatus = currentTicket?.status || "";
           const jStatus = liveJob?.status || "";
           
-          if (tStatus === "ticket_uploaded" || tStatus === "extracting_data" || tStatus === "uploaded" || tStatus === "ocr_processing") {
-            return "Leyendo ticket";
+          if (isOcrRunning || tStatus === "ticket_uploaded" || tStatus === "extracting_data" || tStatus === "uploaded" || tStatus === "ocr_processing") {
+            return "Leyendo datos de tu ticket...";
           }
           if (tStatus === "connector_resolving" || tStatus === "extracted" || tStatus === "connector_detected") {
-            return "Revisa los datos";
+            return "Buscando portal de facturación...";
+          }
+          if (tStatus === "training_required" || (tStatus === "requires_manual_review" && currentTicket?.reviewReasonCode === "CONNECTOR_NOT_FOUND")) {
+            return "Preparando el portal de facturación de este comercio...";
           }
           if (tStatus === "missing_required_fields" || jStatus === "waiting_user_input") {
-            return "Necesitamos completar datos para continuar";
+            return "Necesitamos completar algunos datos del ticket para continuar";
           }
           if (tStatus === "waiting_fiscal_profile") {
-            return "Necesitamos completar datos para continuar";
+            return "Necesitamos completar tu perfil fiscal para continuar";
           }
           if (tStatus === "queued_for_runner" && (jStatus === "pending" || !jStatus)) {
             const jobCreatedAt = liveJob?.createdAt || currentTicket?.createdAt;
             if (jobCreatedAt) {
               const pendingTimeMs = Date.now() - new Date(jobCreatedAt).getTime();
               if (pendingTimeMs > 3 * 60 * 1000) {
-                return "El robot de facturación está tardando más de lo normal. Puedes revisar el avance en Mis Tickets.";
+                return "El portal está tardando más de lo normal en responder. Puedes revisar el avance en Mis Tickets.";
               }
             }
-            return "Esperando robot de facturación";
+            return "Esperando turno para facturar...";
           }
           if (jStatus === "locked" || jStatus === "running" || tStatus === "runner_processing") {
-            return "Estamos solicitando la factura en el portal oficial";
+            return "Ingresando datos en el portal oficial...";
           }
           if (tStatus === "merchant_cfdi_downloaded") {
-            return "Descargando archivos de factura";
+            return "Descargando factura...";
           }
           if (tStatus === "invoice_obtained" || tStatus === "cfdi_validated" || tStatus === "completed" || jStatus === "succeeded") {
             return "Factura lista";
           }
           if (tStatus === "requires_manual_review" || tStatus === "failed" || jStatus === "manual_review" || jStatus === "failed") {
-            return "No pudimos completar la solicitud automática";
+            return "Hubo una complicación, estamos trabajando en ello";
           }
-          return "Estamos solicitando la factura en el portal oficial";
+          return "Ingresando datos en el portal oficial...";
         };
 
         const s1 = getStepStatus(1);
@@ -5389,8 +5321,10 @@ return list.map(n => {
         const s4 = getStepStatus(4);
 
         let dynamicProgress = 0;
-        if (s1 === "completed") {
-          dynamicProgress = 0;
+        if (isOcrRunning) {
+          dynamicProgress = (ocrProgress / 100) * 16.6;
+        } else if (s1 === "completed") {
+          dynamicProgress = 16.6;
           if (s2 === "completed") {
             dynamicProgress = 33.3;
             if (s3 === "completed") {
@@ -5401,10 +5335,10 @@ return list.map(n => {
                 dynamicProgress = 83.3;
               }
             } else if (s3 === "active") {
-              dynamicProgress = 50;
+              dynamicProgress = 33.3 + (simulationProgress / 100) * 33.3;
             }
           } else if (s2 === "active") {
-            dynamicProgress = 16.6;
+            dynamicProgress = 16.6 + (solvingProgress / 100) * 16.6;
           }
         }
 
@@ -5701,23 +5635,13 @@ return list.map(n => {
 
           <div className="text-center space-y-3">
             <h3 className="text-lg font-black text-slate-900 font-display tracking-tight uppercase">
-              {["waiting_user_captcha", "blocked_by_captcha", "waiting_human_verification"].includes(currentTicket?.status || "")
-                ? "Verificación requerida"
-                : currentTicket?.status === "connector_auth_required"
-                  ? "Inicio de sesión requerido"
-                  : "Facturación en proceso"}
+              Estamos procesando tu ticket
             </h3>
             <p className={`text-sm font-bold ${currentTicket?.status === "connector_auth_required" ? "text-amber-700" : "text-[#0B53F4]"}`}>
-              {["waiting_user_captcha", "blocked_by_captcha", "waiting_human_verification"].includes(currentTicket?.status || "")
-                ? "El portal necesita que captures el código mostrado"
-                : currentTicket?.status === "connector_auth_required"
-                  ? "El portal oficial solo permite facturar desde una cuenta"
-                  : "El procesamiento continuará en segundo plano"}
+              Te avisaremos cuando haya una actualización.
             </p>
             <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed max-w-md mx-auto font-medium">
-              {currentTicket?.status === "connector_auth_required"
-                ? "No faltan datos del ticket. Este comercio exige iniciar sesión o crear una cuenta en su portal, por lo que ZenTicket no puede continuar sin autorización del usuario."
-                : <>Estamos revisando la información del ticket. Puedes consultar su avance desde <span className="font-bold text-slate-800 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-150">Mis tickets &gt; En proceso</span>.</>}
+              Estamos revisando la información del ticket. Puedes consultar su avance desde <span className="font-bold text-slate-800 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-150">Mis tickets &gt; En proceso</span>.
             </p>
           </div>
           {(() => {
@@ -5732,20 +5656,6 @@ return list.map(n => {
               "submitted_to_merchant"
             ].includes(tStatus);
 
-            if (captchaPanelLocked) {
-              return (
-                <div className="w-full flex justify-center">
-                  <CaptchaFlowPanel
-                    jobId={liveJob?.id || currentTicket?.jobId || null}
-                    ticketId={ticketId}
-                    source="scanner"
-                    onTabChange={onTabChange}
-                    initialTicket={currentTicket}
-                  />
-                </div>
-              );
-            }
-
             if (isProcessing) {
               return (
                 <div className="w-full min-w-0 max-w-md space-y-4 rounded-2xl border border-blue-200 bg-blue-50 p-6 text-center">
@@ -5753,10 +5663,9 @@ return list.map(n => {
                     <RefreshCw className="w-6 h-6 animate-spin text-[#0B53F4]" />
                   </div>
                   <div className="space-y-2">
-                    <h4 className="text-sm font-extrabold text-blue-950 uppercase tracking-tight">Procesando Factura</h4>
+                    <h4 className="text-sm font-extrabold text-blue-950 uppercase tracking-tight">Estamos procesando tu ticket</h4>
                     <p className="text-xs text-blue-800 leading-normal font-medium max-w-sm mx-auto">
-                      El robot está procesando el ticket en el portal del comercio y certificando la factura. Esto puede tomar unos segundos...
-                      Puedes moverte libremente a otras secciones; ZenTicket te notificará en cuanto termine.
+                      Recibimos tu ticket. Puedes continuar usando ZenTicket; te avisaremos cuando haya una actualización.
                     </p>
                   </div>
                 </div>

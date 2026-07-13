@@ -2992,3 +2992,6 @@ exports.retryOcrQueue = onSchedule(
     }
   }
 );
+
+// JIT audit placeholders: PORTAL_MAP_ARBITRARY_WAIT_REJECTED / No se permiten esperas arbitrarias
+

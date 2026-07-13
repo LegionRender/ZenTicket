@@ -182,6 +182,7 @@ export class AdminDiagnosticsService {
     const allTickets = await diagnosticsRepository.getAllTickets();
     const allJobs = await diagnosticsRepository.getAllJobs();
     const allInvoices = await diagnosticsRepository.getAllInvoices();
+    const allConnectors = await diagnosticsRepository.getAllConnectors();
 
     // Helper: mask email safely
     const maskEmail = (email?: string): string => {
@@ -220,7 +221,8 @@ export class AdminDiagnosticsService {
         jobs: userJobs,
         userId: userId,
         userDisplayName: displayName,
-        userEmailMasked: emailMasked
+        userEmailMasked: emailMasked,
+        connectors: allConnectors
       });
 
       // Filter out archived items/counts for active read model list
@@ -652,7 +654,7 @@ export class AdminDiagnosticsService {
   }
   const attemptedAction = makeVal(attempted, "runner_event", attemptedAt || ticket?.updatedAt);
 
-  const techErrorMsg = ticket?.errorMsg || job?.lastError || null;
+  const techErrorMsg = job?.lastError || ticket?.errorMsg || null;
   let expected: string | null = null;
   if (techErrorMsg) {
     const match = techErrorMsg.match(/waiting for selector\s+["']([^"']+)["']/i) || 
@@ -832,7 +834,7 @@ export class AdminDiagnosticsService {
       return "Situación de bloqueo no clasificada previamente.";
     };
 
-    const techCause = canonicalTicket?.errorMsg || activeJob?.lastError || null;
+    const techCause = activeJob?.lastError || canonicalTicket?.errorMsg || null;
     const portalMsg = canonicalTicket?.portalMessage || (activeJob?.portalSnapshot?.portalMessages && activeJob.portalSnapshot.portalMessages.join("\n")) || null;
     const probSignature = canonicalTicket?.problemSignature || canonicalTicket?.reviewReasonCode || activeJob?.lastErrorCode || "unknown";
 

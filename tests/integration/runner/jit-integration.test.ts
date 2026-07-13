@@ -127,7 +127,7 @@ describe("JIT and Recovery Integration Tests with Playwright", () => {
 
       expect(result.success).toBe(false);
       expect(result.xmlDownloaded).toBe(false);
-      expect(result.recoveryErrorCode).toBe("TICKET_ALREADY_INVOICED");
+      expect(result.recoveryErrorCode).toBe("RECOVERY_FLOW_NOT_CONFIGURED");
     } finally {
       await page.close();
       if (fs.existsSync(tmpDir)) {

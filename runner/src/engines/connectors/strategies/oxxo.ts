@@ -80,9 +80,9 @@ export const oxxoStrategy: ConnectorStrategy = {
 
   detectBusinessRuleViolation(portalErrorText: string, ticketDate?: string): { errorCode: string; errorMsg: string } | null {
     if (portalErrorText === "TICKET_TOO_NEW") {
-      let errorMsg = "OXXO puede tardar hasta 24 horas en sincronizar tickets nuevos. Reintentaremos automÃ¡ticamente mÃ¡s tarde.";
+      let errorMsg = "OXXO puede tardar hasta 24 horas en sincronizar tickets nuevos. Reintentaremos automáticamente más tarde.";
       if (ticketDate) {
-        errorMsg = `El ticket es reciente (${ticketDate}). OXXO puede tardar hasta 24 horas en sincronizar. Reintentaremos automÃ¡ticamente mÃ¡s tarde.`;
+        errorMsg = `El ticket es reciente (${ticketDate}). OXXO puede tardar hasta 24 horas en sincronizar. Reintentaremos automáticamente más tarde.`;
       }
       return { errorCode: "TICKET_TOO_NEW", errorMsg };
     }

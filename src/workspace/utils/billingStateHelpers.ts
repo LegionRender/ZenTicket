@@ -311,6 +311,26 @@ export const getBillingCanonicalState = (params: {
     badgeLabel = "BLOQUEADO";
     badgeTone = "zt-badge-error";
     message = "Ticket Bloqueado: " + (t.errorMsg || "no se puede continuar con la automatización.");
+  } else if (["training_required", "training_pending_review", "training_approved_queueing"].includes(t.status || "")) {
+    canonicalStatus = "training";
+    badgeLabel = "PREPARANDO FACTURA";
+    badgeTone = "zt-badge-process";
+    message = getDetailedReasonMsg(t);
+    isActive = true;
+    requiresManualReview = false;
+    shouldAppearInReady = false;
+    shouldAppearInProcess = true;
+    shouldAppearInAttention = false;
+  } else if (t.status === "portal_retry_required") {
+    canonicalStatus = "portal_retry_required";
+    badgeLabel = "NUEVO INTENTO";
+    badgeTone = "zt-badge-attention";
+    message = getDetailedReasonMsg(t);
+    isActive = false;
+    requiresManualReview = false;
+    shouldAppearInReady = false;
+    shouldAppearInProcess = true;
+    shouldAppearInAttention = false;
   } else if (t.status === "requires_manual_review" || t.status === "review") {
     canonicalStatus = "requires_manual_review";
     badgeLabel = "REVISIÓN MANUAL";
@@ -490,42 +510,223 @@ const normalizeKey = (key: any): string => {
   return normalized;
 };
 
-export const isSiblingTicket = (t1: any, t2: any): boolean => {
+interface ConnectorAliasConfig {
+  id: string;
+  names: string[];
+  rfcs: string[];
+  domains: string[];
+}
+
+export const CONNECTOR_REGISTRY: ConnectorAliasConfig[] = [
+  {
+    id: "oxxocadena",
+    names: ["oxxo", "oxxo cadena", "cadena comercial oxxo", "cadena comercial oxxo, s.a. de c.v."],
+    rfcs: ["cco8605231n4"],
+    domains: ["oxxo.com"]
+  },
+  {
+    id: "cinemex",
+    names: ["cinemex"],
+    rfcs: [],
+    domains: ["cinemex.com"]
+  },
+  {
+    id: "uber",
+    names: ["uber"],
+    rfcs: [],
+    domains: ["uber.com"]
+  },
+  {
+    id: "didi",
+    names: ["didi"],
+    rfcs: [],
+    domains: ["didiglobal.com"]
+  },
+  {
+    id: "walmart",
+    names: ["walmart", "bodega aurrera", "sams", "sam's club", "nueva walmart"],
+    rfcs: [],
+    domains: ["walmartmexico.com.mx", "walmart.com.mx"]
+  },
+  {
+    id: "costco",
+    names: ["costco"],
+    rfcs: [],
+    domains: ["costco.com.mx"]
+  },
+  {
+    id: "amazon",
+    names: ["amazon"],
+    rfcs: [],
+    domains: ["amazon.com.mx"]
+  },
+  {
+    id: "mercadolibre",
+    names: ["mercadolibre", "mercado libre"],
+    rfcs: [],
+    domains: ["mercadolibre.com.mx"]
+  }
+];
+
+export const KNOWN_CONNECTOR_IDENTITY_FIELDS: Record<string, string[]> = {
+  "oxxocadena": ["billingReference", "total", "fecha"],
+  "walmart": ["billingReference", "total", "fecha"],
+  "costco": ["billingReference", "total", "fecha"],
+  "uber": ["billingReference", "total", "fecha"],
+  "didi": ["billingReference", "total", "fecha"],
+  "amazon": ["billingReference", "total", "fecha"],
+  "mercadolibre": ["billingReference", "total", "fecha"],
+  "cinemex": ["billingReference", "total", "fecha"]
+};
+
+export const resolveConnectorId = (input: string): string => {
+  const clean = String(input || "").toLowerCase().trim();
+  if (!clean || clean === "s/d" || clean === "unknown") return "";
+
+  const directMatch = CONNECTOR_REGISTRY.find(c => c.id === clean);
+  if (directMatch) return directMatch.id;
+
+  const rfcClean = clean.replace(/[^a-z0-9]/g, "");
+  const rfcMatch = CONNECTOR_REGISTRY.find(c => c.rfcs.some(r => r.replace(/[^a-z0-9]/g, "") === rfcClean));
+  if (rfcMatch) return rfcMatch.id;
+
+  const domainMatch = CONNECTOR_REGISTRY.find(c => c.domains.some(d => clean.includes(d)));
+  if (domainMatch) return domainMatch.id;
+
+  const nameMatch = CONNECTOR_REGISTRY.find(c => c.names.some(n => clean.includes(n)));
+  if (nameMatch) return nameMatch.id;
+
+  return clean.replace(/[^a-z0-9]/g, "");
+};
+
+export const getTicketTotal = (ticket: any): number | null => {
+  if (!ticket) return null;
+  const val = ticket.portalFields?.total ??
+              ticket.expectedTicketTotal ??
+              ticket.total ??
+              null;
+  if (val === null || val === undefined) return null;
+  const parsed = parseFloat(String(val));
+  return isNaN(parsed) ? null : parsed;
+};
+
+export const getTicketDate = (ticket: any): string | null => {
+  if (!ticket) return null;
+  const val = ticket.portalFields?.fecha ??
+              ticket.fechaCompra ??
+              ticket.fecha ??
+              null;
+  if (!val) return null;
+  return String(val).substring(0, 10);
+};
+
+export const getTicketFolio = (ticket: any): string | null => {
+  if (!ticket) return null;
+  const val = ticket.portalFields?.billingReference ??
+              ticket.reference ??
+              ticket.folio ??
+              null;
+  if (!val) return null;
+  return String(val).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+};
+
+export const getTicketCommerce = (ticket: any): string | null => {
+  if (!ticket) return null;
+  return ticket.comercio ??
+         ticket.nombreEmisor ??
+         ticket.rfcEmisor ??
+         null;
+};
+
+export const buildTransactionKey = (params: {
+  connectorId: string | null;
+  portalFields: any;
+  identityFields?: string[];
+}): string | null => {
+  const connId = params.connectorId;
+  const fields = params.portalFields || {};
+  const idFields = params.identityFields || ["billingReference", "total", "fecha"];
+
+  if (!connId) return null;
+
+  const parts: string[] = [connId];
+  for (const field of idFields) {
+    let val = fields[field];
+    if (val === undefined || val === null) {
+      if (field === "billingReference") val = fields.reference || fields.folio;
+      else if (field === "total") val = fields.expectedTicketTotal || fields.totalAmount;
+      else if (field === "fecha") val = fields.fechaCompra || fields.fecha;
+    }
+    
+    if (val === undefined || val === null || String(val).trim().length === 0) {
+      return null;
+    }
+
+    let norm = String(val).trim();
+    if (field === "total") {
+      const parsed = parseFloat(norm);
+      if (isNaN(parsed) || parsed <= 0) return null;
+      norm = parsed.toFixed(2);
+    } else if (field === "fecha") {
+      norm = norm.substring(0, 10);
+      if (norm.length !== 10) return null;
+    } else {
+      norm = norm.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+      if (norm.length === 0) return null;
+    }
+    parts.push(`${field}:${norm}`);
+  }
+
+  return parts.join("|");
+};
+
+export const isSiblingTicket = (t1: any, t2: any, connectorMap?: Record<string, string[]>): boolean => {
   if (!t1 || !t2) return false;
   if (t1.userId !== t2.userId) return false;
 
-  const ref1 = (t1.portalFields?.billingReference || t1.reference || t1.folio || "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
-  const ref2 = (t2.portalFields?.billingReference || t2.reference || t2.folio || "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
-  if (!ref1 || ref1 !== ref2) return false;
+  // Nivel 1 — Relación explícita
+  const srcId1 = t1.sourceTicketId || t1.ticketId;
+  const srcId2 = t2.sourceTicketId || t2.ticketId;
+  if (srcId1 && srcId2 && srcId1 === srcId2) {
+    return true;
+  }
+  if (t1.id && (t2.ticketId === t1.id || t2.sourceTicketId === t1.id)) {
+    return true;
+  }
+  if (t2.id && (t1.ticketId === t2.id || t1.sourceTicketId === t2.id)) {
+    return true;
+  }
 
-  const rfc1 = (t1.rfcEmisor || t1.comercio || t1.nombreEmisor || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const rfc2 = (t2.rfcEmisor || t2.comercio || t2.nombreEmisor || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (!rfc1 || rfc1 !== rfc2) return false;
+  // Nivel 2 — Clave de transacción
+  if (t1.transactionKey && t2.transactionKey && t1.transactionKey === t2.transactionKey) {
+    return true;
+  }
 
-  const date1 = (t1.fechaCompra || t1.fecha || "").substring(0, 10);
-  const date2 = (t2.fechaCompra || t2.fecha || "").substring(0, 10);
-  if (!date1 || date1 !== date2) return false;
+  // Nivel 3 — Compatibilidad heredada estricta
+  const conn1 = resolveConnectorId(t1.connectorId || getTicketCommerce(t1) || "");
+  const conn2 = resolveConnectorId(t2.connectorId || getTicketCommerce(t2) || "");
+  if (!conn1 || conn1 !== conn2) return false;
 
-  const total1 = parseFloat(parseFloat(String(t1.total || t1.expectedTicketTotal || 0)).toFixed(2));
-  const total2 = parseFloat(parseFloat(String(t2.total || t2.expectedTicketTotal || 0)).toFixed(2));
-  if (isNaN(total1) || total1 <= 0 || total1 !== total2) return false;
+  const folio1 = getTicketFolio(t1);
+  const folio2 = getTicketFolio(t2);
+  if (!folio1 || folio1 !== folio2) return false;
+
+  const total1 = getTicketTotal(t1);
+  const total2 = getTicketTotal(t2);
+  if (total1 === null || total2 === null || total1 !== total2) return false;
+
+  const identityFields = connectorMap?.[conn1] || KNOWN_CONNECTOR_IDENTITY_FIELDS[conn1] || ["billingReference", "total", "fecha"];
+  const dateIsRequired = identityFields.includes("fecha");
+
+  if (dateIsRequired) {
+    const date1 = getTicketDate(t1);
+    const date2 = getTicketDate(t2);
+    if (!date1 || !date2 || date1 !== date2) {
+      return false;
+    }
+  }
 
   return true;
-};
-
-export const resolveConnectorId = (commerceName: string): string => {
-  const name = String(commerceName || "").toLowerCase().trim();
-  
-  if (name.includes("oxxo")) return "oxxocadena";
-  if (name.includes("cinemex")) return "cinemex";
-  if (name.includes("uber")) return "uber";
-  if (name.includes("didi")) return "didi";
-  if (name.includes("walmart") || name.includes("bodega aurrera") || name.includes("sams")) return "walmart";
-  if (name.includes("costco")) return "costco";
-  if (name.includes("amazon")) return "amazon";
-  if (name.includes("mercadolibre") || name.includes("mercado libre")) return "mercadolibre";
-  
-  return name.replace(/[^a-z0-9]/g, "");
 };
 
 export const getBillingVisualKey = (params: {
@@ -536,6 +737,18 @@ export const getBillingVisualKey = (params: {
   const t = params.ticket || {};
   const inv = params.invoice || {};
   const j = params.job || {};
+
+  // 0. sourceTicketId / ticketId priority
+  const srcId = t.sourceTicketId || t.ticketId || inv.sourceTicketId || inv.ticketId || j.sourceTicketId || j.ticketId;
+  if (srcId && String(srcId).trim().length > 0 && String(srcId).trim().toUpperCase() !== "S/D") {
+    return normalizeKey(srcId);
+  }
+
+  // 0.5. transactionKey priority
+  const txKey = t.transactionKey || inv.transactionKey || j.transactionKey;
+  if (txKey && String(txKey).trim().length > 0) {
+    return normalizeKey(txKey);
+  }
 
   // 1. Explicit canonicalTicketId priority
   if (t.canonicalTicketId && String(t.canonicalTicketId).trim().length > 0 && String(t.canonicalTicketId).trim().toUpperCase() !== "S/D") {
@@ -548,29 +761,17 @@ export const getBillingVisualKey = (params: {
     return normalizeKey(j.canonicalTicketId);
   }
 
-  // 2. Explicit sourceTicketId / ticketId from job
-  const jobTicketId = j.ticketId || j.sourceTicketId;
-  if (jobTicketId && String(jobTicketId).trim().length > 0 && String(jobTicketId).trim().toUpperCase() !== "S/D") {
-    return normalizeKey(jobTicketId);
-  }
-
-  // 3. Explicit invoice-ticket relation
-  const invoiceTicketId = inv.ticketId || inv.sourceTicketId;
-  if (invoiceTicketId && String(invoiceTicketId).trim().length > 0 && String(invoiceTicketId).trim().toUpperCase() !== "S/D") {
-    return normalizeKey(invoiceTicketId);
-  }
-
   // 4. Fallback legacy compound fingerprint key
   const uId = t.userId || inv.userId || j.userId || "";
-  const commerce = t.comercio || t.nombreEmisor || inv.nombreEmisor || j.comercio || "";
+  const commerce = getTicketCommerce(t) || inv.nombreEmisor || j.comercio || "";
   const ref = t.reference || t.folio || t.portalFields?.billingReference || inv.ticketReference || inv.reference || j.ticketReference || "";
-  const date = t.fechaCompra || t.fecha || "";
-  const total = t.total || t.expectedTicketTotal || inv.total || "";
+  const date = getTicketDate(t) || inv.fecha || "";
+  const total = getTicketTotal(t) || inv.total || "";
 
   if (uId && commerce && ref && date && total) {
-    const cleanCommerce = String(commerce).toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+    const cleanCommerce = resolveConnectorId(commerce);
     const cleanRef = String(ref).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
-    const cleanDate = String(date).substring(0, 10); // YYYY-MM-DD
+    const cleanDate = date;
     const cleanTotal = parseFloat(String(total)).toFixed(2);
     return `legacy_${uId}_${cleanCommerce}_${cleanRef}_${cleanDate}_${cleanTotal}`;
   }
@@ -1091,6 +1292,7 @@ export const buildUserTicketsView = (params: {
   userId?: string;
   userDisplayName?: string;
   userEmailMasked?: string;
+  connectors?: any[];
 }): {
   userId: string;
   userDisplayName: string;
@@ -1109,9 +1311,21 @@ export const buildUserTicketsView = (params: {
   const rawTickets = params.tickets || [];
   const rawInvoices = params.invoices || [];
   const rawJobs = params.jobs || [];
+  const rawConnectors = params.connectors || [];
   const currentUserId = params.userId || params.fiscalProfile?.userId || "";
   const displayName = params.userDisplayName || "Usuario";
   const emailMasked = params.userEmailMasked || "S/D";
+
+  // Build connector map
+  const connectorMap: Record<string, string[]> = {};
+  rawConnectors.forEach(c => {
+    if (c?.id) {
+      const fields = c.identityFields || (c.extractionContract?.requiredPortalFields || []).map((f: any) => f.canonicalKey);
+      if (Array.isArray(fields) && fields.length > 0) {
+        connectorMap[c.id] = fields;
+      }
+    }
+  });
 
   // 1. Filter tickets (active/visible ones, excluding archived/deleted/legacy)
   const activeTickets = rawTickets.filter(t => {
@@ -1154,7 +1368,7 @@ export const buildUserTicketsView = (params: {
   activeTickets.forEach(t => {
     let added = false;
     for (const group of ticketGroups) {
-      if (isSiblingTicket(group[0], t)) {
+      if (isSiblingTicket(group[0], t, connectorMap)) {
         group.push(t);
         added = true;
         break;

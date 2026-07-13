@@ -36,7 +36,8 @@ vi.mock("../../../server/repositories/diagnostics.repository", () => {
       getAllFiscalProfiles: vi.fn().mockResolvedValue([]),
       getAllTickets: vi.fn().mockResolvedValue([]),
       getAllJobs: vi.fn().mockResolvedValue([]),
-      getAllInvoices: vi.fn().mockResolvedValue([])
+      getAllInvoices: vi.fn().mockResolvedValue([]),
+      getAllConnectors: vi.fn().mockResolvedValue([])
     }
   };
 });
@@ -61,6 +62,7 @@ describe("AdminDiagnosticsService - Fallback & Backfill Tests", () => {
     vi.mocked(diagnosticsRepository.getAllTickets).mockResolvedValue([]);
     vi.mocked(diagnosticsRepository.getAllJobs).mockResolvedValue([]);
     vi.mocked(diagnosticsRepository.getAllInvoices).mockResolvedValue([]);
+    vi.mocked(diagnosticsRepository.getAllConnectors).mockResolvedValue([]);
   });
 
   it("listDiagnostics agrupa por usuario y retorna counts adecuados", async () => {

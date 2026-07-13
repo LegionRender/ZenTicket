@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Ticket, Invoice } from "@/shared/types/types";
-import { getConfigStatus, sendEmail, fetchWithAuth, submitInvoiceJobCaptcha } from "@/services/api";
+import { getConfigStatus, sendEmail } from "@/services/api";
 import logoLight from "@/assets/logos/logo-light.png";
 import { 
   ChevronLeft, ChevronRight, Share2, FileText, Check, Download, ArrowLeft, 
@@ -11,10 +11,8 @@ import {
 import { useToast } from "@/shared/feedback/Toast";
 import { db } from "@/services/firebase/firebase";
 import { doc, updateDoc, onSnapshot } from "firebase/firestore";
-import { CaptchaFlowPanel } from "../scanner/CaptchaFlowPanel";
-import { getTicketTotal, getDetailedReasonMsg, getTicketVisualState, getInvoiceVisualState } from "@/workspace/utils/ticketHelpers";
 import { getBillingCanonicalState, getBillingVisualKey, dedupeBillingItems, resolveRelatedBillingDocs, normalizeSatValidationState, getBillingAlertStyle } from "@/workspace/utils/billingStateHelpers";
-import { normalizeBillingAttemptFields } from "@/shared/utils/normalizeFields";
+import { getCustomerBillingState } from "@/workspace/utils/customerBillingState";
 
 interface TicketsListScreenProps {
   tickets: Ticket[];
@@ -33,27 +31,6 @@ interface TicketsListScreenProps {
 // ----------------------------------------------------
 // HIGH FIDELITY BRAND ICONS RESOLVER
 // ----------------------------------------------------
-
-const renderAlertIcon = (iconName: string, className?: string) => {
-  switch (iconName) {
-    case "AlertCircle":
-      return (
-        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
-      );
-    case "CheckCircle":
-      return <ShieldCheck className={className} />;
-    case "Clock":
-      return <Clock className={className} />;
-    default:
-      return (
-        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
-      );
-  }
-};
 
 // Helper to resolve icon style for brands matching the design aesthetics
 const getBrandBrandIcon = (nombre: string) => {
@@ -88,24 +65,6 @@ const getBrandBrandIcon = (nombre: string) => {
   };
 };
 
-const CAPTCHA_FLOW_STATUSES = new Set([
-  "blocked_by_captcha",
-  "waiting_human_verification",
-  "waiting_user_captcha",
-  "captcha_submitted",
-  "verifying_captcha",
-  "captcha_failed",
-  "captcha_timeout",
-]);
-
-const CAPTCHA_TERMINAL_STATUSES = new Set([
-  "captcha_resolved",
-  "completed",
-  "invoice_completed",
-  "failed_final",
-  "failed"
-]);
-
 export default function TicketsListScreen({
   tickets,
   invoices,
@@ -121,17 +80,12 @@ export default function TicketsListScreen({
 }: TicketsListScreenProps) {
   const toast = useToast();
 
-  const renderStatusBadge = (t: any) => {
-    const inv = invoices.find(i => i.ticketId === t.id || i.id === t.invoiceId);
-    const state = getBillingCanonicalState({ ticket: t, invoice: inv });
-    const hasSpinner = state.canonicalStatus === "active_processing" || 
-                       state.canonicalStatus === "waiting_user_captcha" || 
-                       state.canonicalStatus === "verifying_captcha" ||
-                       state.canonicalStatus === "invoice_recovery_pending" ||
-                       state.canonicalStatus === "queued";
+  const renderStatusBadge = (item: any) => {
+    const state = item.customerState || getCustomerBillingState(item);
+    const hasSpinner = state.kind === "processing";
 
     return (
-      <span className={`${state.badgeTone} text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none flex items-center gap-1`}>
+      <span className={`${state.tone === "success" ? "zt-badge-ok" : state.tone === "warning" ? "zt-badge-attention" : "zt-badge-process"} text-[9.5px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider leading-none flex items-center gap-1`}>
         {hasSpinner && <RefreshCw className="w-2.5 h-2.5 animate-spin" />}
         {state.badgeLabel}
       </span>
@@ -164,57 +118,7 @@ export default function TicketsListScreen({
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [selectedBillingItem, setSelectedBillingItem] = useState<any | null>(null);
   const [showXmlCode, setShowXmlCode] = useState(false);
-  const [viewCaptchaSolution, setViewCaptchaSolution] = useState("");
-  const [isSubmittingViewCaptcha, setIsSubmittingViewCaptcha] = useState(false);
   const [activeJob, setActiveJob] = useState<any>(null);
-  const [captchaPanelLocked, setCaptchaPanelLocked] = useState(false);
-  const [isRetryingRecovery, setIsRetryingRecovery] = useState<string | null>(null);
-
-  const handleRetryRecovery = async (ticketId: string) => {
-    setIsRetryingRecovery(ticketId);
-    try {
-      const response = await fetchWithAuth(`/api/tickets/${ticketId}/retry-invoice-recovery`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        }
-      });
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "Fallo al iniciar reintento");
-      }
-      toast.success("Se ha programado el reintento de recuperación de factura.", "RECUPERACIÓN EN COLA");
-    } catch (err: any) {
-      toast.error(err.message || "Error al solicitar reintento.");
-    } finally {
-      setIsRetryingRecovery(null);
-    }
-  };
-  useEffect(() => {
-    const activeInvoiceData = invoices.find(inv => inv.id === selectedInvoiceId);
-    const associatedTicket = tickets.find(t => t.id === selectedInvoiceId || t.jobId === selectedInvoiceId || t.id === activeInvoiceData?.ticketId);
-    const tStatus = associatedTicket?.status || "";
-    const jStatus = activeJob?.status || "";
-    const effectiveStatus = jStatus || tStatus;
-
-    const flowActive =
-      CAPTCHA_FLOW_STATUSES.has(effectiveStatus) ||
-      activeJob?.captchaFlowActive === true ||
-      (associatedTicket as any)?.captchaFlowActive === true ||
-      activeJob?.blockingReason === "captcha_detected";
-
-    if (flowActive) {
-      if (!captchaPanelLocked) {
-        console.debug("[CAPTCHA_UI_RENDER] TicketsList: Latching captcha panel. status:", effectiveStatus);
-        setCaptchaPanelLocked(true);
-      }
-    } else if (CAPTCHA_TERMINAL_STATUSES.has(effectiveStatus)) {
-      if (captchaPanelLocked) {
-        console.debug("[CAPTCHA_UI_RENDER] TicketsList: Unlocking captcha panel. status:", effectiveStatus);
-        setCaptchaPanelLocked(false);
-      }
-    }
-  }, [activeJob?.status, activeJob?.captchaFlowActive, activeJob?.blockingReason, selectedInvoiceId, tickets, invoices, captchaPanelLocked]);
 
   // Real-time listener for the active ticket's job state
   useEffect(() => {
@@ -258,33 +162,13 @@ export default function TicketsListScreen({
       (item.job && item.job.linkedTicketDeleted === true);
 
     if (isDeleted) {
-      toast.error("Error técnico: No se permite visualizar detalles de un ticket eliminado o inactivo.");
+      toast.error("Este ticket ya no está disponible.");
       console.error("Acceso bloqueado a ticket eliminado:", t.id);
       return;
     }
 
     setSelectedBillingItem(item);
     setSelectedInvoiceId(item.invoice?.id || `inv-fallback-${t.id}`);
-  };
-
-  const handleSubmitViewCaptcha = async (associatedTicket: any) => {
-    const jobIdToUpdate = associatedTicket?.jobId;
-    const solution = viewCaptchaSolution.trim();
-    if (!jobIdToUpdate || !solution) {
-      toast.error("Por favor, ingresa el código CAPTCHA para continuar.");
-      return;
-    }
-    setIsSubmittingViewCaptcha(true);
-    try {
-      await submitInvoiceJobCaptcha(jobIdToUpdate, solution, activeJob?.captchaAttemptId || null);
-      setViewCaptchaSolution("");
-      toast.success("Código enviado. Continuando con el proceso de facturación.");
-    } catch (error: any) {
-      console.error("Error submitting captcha:", error);
-      toast.error("No se pudo enviar el código. Inténtalo nuevamente.");
-    } finally {
-      setIsSubmittingViewCaptcha(false);
-    }
   };
 
   // Retrieve SMTP setup status on load
@@ -419,7 +303,8 @@ export default function TicketsListScreen({
   const finalItems = dedupedItems.map(item => {
     const canonicalState = getBillingCanonicalState({ ticket: item.ticket, invoice: item.invoice, job: item.job });
     const visualKey = getBillingVisualKey({ ticket: item.ticket, invoice: item.invoice, job: item.job });
-    return { ...item, canonicalState, visualKey };
+    const customerState = getCustomerBillingState({ ticket: item.ticket, invoice: item.invoice, job: item.job });
+    return { ...item, canonicalState, customerState, visualKey };
   });
 
   finalItems.sort((a, b) => {
@@ -432,12 +317,10 @@ export default function TicketsListScreen({
   });
 
   // Calculate lists:
-  const inProgressList = finalItems.filter(
-    (item) => item.canonicalState.shouldAppearInProcess || item.canonicalState.shouldAppearInAttention
-  );
+  const inProgressList = finalItems.filter((item) => item.customerState.kind !== "ready");
   
   const emittedInvoicesList = finalItems.filter(
-    (item) => item.canonicalState.shouldAppearInReady
+    (item) => item.customerState.kind === "ready"
   );
 
   // Auto-open ticket details when newlyAddedTicketId is set from a notification click
@@ -476,9 +359,9 @@ export default function TicketsListScreen({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
             </div>
-            <h3 className="text-base font-extrabold text-rose-950">Acceso Denegado</h3>
+            <h3 className="text-base font-extrabold text-rose-950">Ticket no disponible</h3>
             <p className="text-xs text-rose-800 leading-normal font-medium font-sans">
-              Error técnico: No se permite visualizar detalles de un ticket eliminado o inactivo.
+              Este ticket ya no está disponible para consulta.
             </p>
           </div>
         </div>
@@ -489,276 +372,61 @@ export default function TicketsListScreen({
     const detailState = getBillingCanonicalState({ ticket: associatedTicket, invoice: activeInvoiceData });
     const canRenderPdf = isMock || detailState.isValidInvoice;
 
+    const customerState = getCustomerBillingState({
+      ticket: associatedTicket,
+      invoice: activeInvoiceData,
+      job: selectedBillingItem.job || activeJob
+    });
+
     if (!canRenderPdf) {
-      const isCaptcha = detailState.canonicalStatus === "waiting_user_captcha";
-      const isTraining = detailState.canonicalStatus === "training" || ["training_required", "training_pending_review", "training_approved_queueing"].includes(String(associatedTicket?.status || ""));
-      const isProcessing = (detailState.isActive && !isTraining) || detailState.canonicalStatus === "invoice_recovery_pending";
-      
-      const displayMsg = detailState.message || "No fue posible completar la solicitud en el portal del comercio. Revisa los datos del ticket o solicita revisión manual.";
+      const total = customerState.canonical.displayTotal;
+      const receiptImage = associatedTicket.imageUrl || associatedTicket.imageDataUrl || null;
+      const goBack = () => {
+        setSelectedInvoiceId(null);
+        setSelectedBillingItem(null);
+        setShowXmlCode(false);
+      };
+
       return (
-        <div className="max-w-xl mx-auto py-12 px-6 text-center animate-fade-in">
-          <div className="flex items-center gap-3 mb-8">
-            <button
-               type="button"
-              onClick={() => {
-                setSelectedInvoiceId(null);
-                setSelectedBillingItem(null);
-                setShowXmlCode(false);
-              }}
-              className="p-2 bg-[#ebf1ff] hover:bg-[#ebf1ff]/80 text-[#0B53F4] rounded-full cursor-pointer transition"
-            >
-              <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
-            </button>
-            <span className="text-sm font-black text-slate-800">Volver</span>
+        <div className="max-w-2xl mx-auto space-y-6 py-6 px-4 sm:px-6 text-left animate-fade-in font-sans">
+          <button
+            type="button"
+            onClick={goBack}
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-bold text-slate-700 transition hover:text-[#0B53F4]"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            Volver a mis tickets
+          </button>
+
+          <section className={`rounded-3xl border p-6 sm:p-8 ${customerState.tone === "warning" ? "border-amber-200 bg-amber-50" : "border-blue-100 bg-blue-50"}`}>
+            <div className="flex items-start gap-4">
+              <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${customerState.tone === "warning" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-[#0B53F4]"}`}>
+                {customerState.kind === "processing" ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Clock className="w-6 h-6" />}
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{customerState.badgeLabel}</p>
+                <h2 className="mt-1 text-xl font-black tracking-tight text-slate-900">{customerState.title}</h2>
+                <p className="mt-3 max-w-prose text-sm leading-relaxed text-slate-700">{customerState.message}</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">
+            <div className="grid gap-5 sm:grid-cols-[160px_1fr] sm:items-start">
+              {receiptImage && <img src={receiptImage} alt="Ticket original" className="max-h-56 w-full rounded-2xl border border-slate-100 bg-slate-50 object-contain" />}
+              <dl className="grid grid-cols-2 gap-x-5 gap-y-4 text-sm">
+                <div><dt className="text-xs font-bold text-slate-500">Comercio</dt><dd className="mt-1 font-bold text-slate-900">{associatedTicket.nombreEmisor || "No detectado"}</dd></div>
+                <div><dt className="text-xs font-bold text-slate-500">Total</dt><dd className="mt-1 font-bold text-slate-900">${total.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN</dd></div>
+                <div><dt className="text-xs font-bold text-slate-500">Fecha</dt><dd className="mt-1 font-medium text-slate-900">{associatedTicket.fechaCompra || "No detectada"}</dd></div>
+                <div><dt className="text-xs font-bold text-slate-500">Folio</dt><dd className="mt-1 font-medium text-slate-900">{associatedTicket.folio || associatedTicket.portalFields?.billingReference || "No detectado"}</dd></div>
+              </dl>
+            </div>
+          </section>
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button type="button" onClick={goBack} className="min-h-11 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50">Listo</button>
+            {customerState.canEdit && <button type="button" onClick={() => onTriggerSimulationInline(associatedTicket)} className="min-h-11 rounded-xl bg-[#0B53F4] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#0941C4]">Corregir datos</button>}
           </div>
-          {captchaPanelLocked ? (
-            <div className="w-full flex justify-center">
-              <CaptchaFlowPanel
-                jobId={activeJob?.id || associatedTicket?.jobId || null}
-                ticketId={associatedTicket?.id || null}
-                source="tickets"
-                initialTicket={associatedTicket}
-              />
-            </div>
-          ) : isProcessing ? (
-            <div className="bg-blue-50 border border-blue-100 rounded-3xl p-8 text-center space-y-6">
-              <div className="w-12 h-12 bg-blue-100 text-[#0B53F4] rounded-full flex items-center justify-center mx-auto">
-                <RefreshCw className="w-6 h-6 animate-spin" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-base font-extrabold text-blue-950">Facturación en Proceso</h3>
-                <p className="text-xs text-blue-800 leading-normal font-medium max-w-sm mx-auto">
-                  El robot está enviando los datos y resolviendo el CAPTCHA en el portal del comercio. El procesamiento continuará en segundo plano, por favor espera un momento...
-                </p>
-              </div>
-            </div>
-          ) : detailState.canonicalStatus === "already_invoiced_unverified" ? (() => {
-            const alertStyle = getBillingAlertStyle(detailState);
-            const iconBg = alertStyle.tone === "red" ? "zt-badge-error text-[var(--zt-error-text)]" :
-                           alertStyle.tone === "green" ? "zt-badge-ok text-[var(--zt-ok-text)]" :
-                           alertStyle.tone === "blue" ? "zt-badge-queue text-[var(--zt-queue-text)]" :
-                           "zt-badge-alert text-[var(--zt-alert-text)]";
-            const borderTopClass = alertStyle.tone === "red" ? "border-[var(--zt-error-border)]" :
-                                   alertStyle.tone === "green" ? "border-[var(--zt-ok-border)]" :
-                                   alertStyle.tone === "blue" ? "border-[var(--zt-queue-border)]" :
-                                   "border-[var(--zt-alert-border)]";
-            const gridBgBorder = alertStyle.tone === "red" ? "zt-card-error" :
-                                 alertStyle.tone === "green" ? "zt-card-ok" :
-                                 alertStyle.tone === "blue" ? "zt-card-queue" :
-                                 "zt-card-alert";
-            return (
-              <div className={`border rounded-3xl p-8 text-left space-y-6 animate-fade-in shadow-2xs font-sans ${alertStyle.bgClass} ${alertStyle.textClass}`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${iconBg}`}>
-                    {renderAlertIcon(alertStyle.icon, "w-6 h-6")}
-                  </div>
-                  <div>
-                    <h3 className={`text-base font-extrabold font-display ${alertStyle.labelClass}`}>{detailState.badgeLabel}</h3>
-                    <span className={`text-[10px] font-bold uppercase tracking-wider ${alertStyle.textClass}`}>Sin Comprobante Fiscal Recuperado</span>
-                  </div>
-                </div>
-
-                <div className={`space-y-4 pt-2 border-t ${borderTopClass}`}>
-                  <div>
-                    <h4 className={`text-xs font-black uppercase tracking-wider mb-1 font-sans ${alertStyle.labelClass}`}>Respuesta del Portal</h4>
-                    <p className="text-xs leading-relaxed font-sans">{displayMsg}</p>
-                  </div>
-
-                  <div className={`grid grid-cols-2 gap-4 p-4 rounded-2xl border ${gridBgBorder}`}>
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Folio de venta</span>
-                      <span className="text-xs font-bold text-slate-800 font-mono">{normalizeBillingAttemptFields(associatedTicket as any, activeInvoiceData, fiscalProfile).folio || "S/D"}</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 block uppercase">ITU / ID Venta</span>
-                      <span className="text-xs font-bold text-slate-800 font-mono">{normalizeBillingAttemptFields(associatedTicket as any, activeInvoiceData, fiscalProfile).itu || "S/D"}</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Total del Ticket</span>
-                      <span className="text-xs font-bold text-slate-800 font-mono">${(normalizeBillingAttemptFields(associatedTicket as any, activeInvoiceData, fiscalProfile).total || detailState.displayTotal).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Fecha de compra</span>
-                      <span className="text-xs font-bold text-slate-800 font-mono">{normalizeBillingAttemptFields(associatedTicket as any, activeInvoiceData, fiscalProfile).fechaCompra || "S/D"}</span>
-                    </div>
-                    <div className="col-span-2">
-                      <span className="text-[10px] font-bold text-slate-400 block uppercase">RFC Receptor</span>
-                      <span className="text-xs font-bold text-slate-800 font-mono">{normalizeBillingAttemptFields(associatedTicket as any, activeInvoiceData, fiscalProfile).rfcReceptor || "S/D"}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className={`flex justify-between text-xs font-medium ${alertStyle.textClass}`}>
-                      <span>Intentos de recuperación realizados:</span>
-                      <span className="font-extrabold font-mono">{(associatedTicket as any)?.recoveryAttemptCount || 0} / {(associatedTicket as any)?.maxRecoveryAttempts || 3}</span>
-                    </div>
-                    <div className={`flex justify-between text-xs font-medium ${alertStyle.textClass}`}>
-                      <span>Rutas de recuperación intentadas:</span>
-                      <span className="font-extrabold font-mono">{(associatedTicket as any)?.recoveryPathsTried?.join(", ") || "Ninguna"}</span>
-                    </div>
-                    {(associatedTicket as any)?.lastRecoveryError && (
-                      <div className="text-[11px] text-rose-700 bg-rose-50/50 p-2.5 rounded-xl border border-rose-100 font-mono leading-relaxed">
-                        <strong>Último error:</strong> {(associatedTicket as any).lastRecoveryError}
-                      </div>
-                    )}
-                    <div className={`text-xs leading-relaxed ${alertStyle.textClass}`}>
-                      <strong>Próximo paso sugerido:</strong> {(associatedTicket as any)?.nextRecommendedAction || "El portal indica que ya existe una factura, pero no se encontró ruta de descarga XML. Reintentar recuperación o revisar manualmente en el portal del comercio."}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => handleRetryRecovery(associatedTicket?.id || "")}
-                    disabled={isRetryingRecovery === associatedTicket?.id}
-                    className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 font-extrabold text-[10.5px] uppercase tracking-wider rounded-xl bg-amber-500 hover:bg-amber-600 text-white cursor-pointer shadow-3xs transition disabled:opacity-50"
-                  >
-                    {isRetryingRecovery === associatedTicket?.id ? (
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="w-4 h-4" />
-                    )}
-                    {isRetryingRecovery === associatedTicket?.id ? "Reintentando..." : "Reintentar recuperación"}
-                  </button>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const url = associatedTicket?.portalFields?.portalUrl || "https://www.google.com";
-                        window.open(url, "_blank");
-                      }}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center gap-1.5 py-2 px-3 font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      Buscar en portal
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        toast.info("Por favor, edita los campos del ticket en el listado para corregir cualquier dato incorrecto.");
-                      }}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center gap-1.5 py-2 px-3 font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none"
-                    >
-                      Corregir campos
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        alert(JSON.stringify(associatedTicket || {}, null, 2));
-                      }}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center gap-1.5 py-2 px-3 font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none"
-                    >
-                      Detalles técnicos
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (onUpdateTicketInDb && associatedTicket?.id) {
-                          await onUpdateTicketInDb(associatedTicket.id, {
-                            status: "requires_manual_review",
-                            reviewReasonCode: "MANUAL_REVIEW_REQUESTED",
-                            errorMsg: "El usuario solicitó revisión manual para este ticket."
-                          });
-                          toast.success("Ticket marcado para revisión manual.");
-                          setSelectedInvoiceId(null);
-                          setSelectedBillingItem(null);
-                        }
-                      }}
-                      className="bg-rose-100 hover:bg-rose-200 text-rose-700 flex items-center justify-center gap-1.5 py-2 px-3 font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none"
-                    >
-                      Revisión manual
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })() : (() => {
-            const ticketData = associatedTicket || {};
-            const jitResolution = ticketData.jitResolution && typeof ticketData.jitResolution === "object" ? ticketData.jitResolution : null;
-            const extracted = ticketData.portalFields && typeof ticketData.portalFields === "object" ? ticketData.portalFields : {};
-            const receiptImage = ticketData.imageUrl || ticketData.imageDataUrl || null;
-            const portalUrl = String(ticketData.portalUrl || extracted.portalUrl || "").trim();
-            const verifiedPortalUrl = portalUrl && (
-              ticketData.portalUrlVerifiedAt ||
-              ["verified", "verified_observed_dom"].includes(ticketData.portalUrlVerification)
-            );
-            const visibleFields = Object.entries(extracted)
-              .filter(([key, value]) => key !== "portalUrl" && value !== null && value !== undefined && String(value).trim())
-              .slice(0, 6);
-
-            return (
-              <div className="max-w-4xl mx-auto space-y-6 text-left animate-fade-in font-sans">
-                <section className="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-6 sm:p-8">
-                  <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 shrink-0 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                      {renderAlertIcon("AlertCircle", "w-6 h-6")}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">Seguimiento de facturación</p>
-                      <h3 className="mt-1 text-xl font-black tracking-tight text-white">{jitResolution?.title || "Necesitamos un nuevo intento"}</h3>
-                      <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300">{jitResolution?.description || displayMsg}</p>
-                    </div>
-                  </div>
-                </section>
-
-                <div className="grid gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-                  <section className="rounded-3xl border border-slate-800 bg-[#0b0d19] p-4 shadow-2xs">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h4 className="text-sm font-black text-white">Foto del ticket</h4>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Evidencia original</span>
-                    </div>
-                    {receiptImage ? (
-                      <img src={receiptImage} alt="Ticket original" className="max-h-[420px] w-full rounded-2xl border border-slate-100 bg-slate-50 object-contain" />
-                    ) : (
-                      <div className="flex min-h-52 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm text-slate-500">La imagen original del ticket no está disponible en este detalle.</div>
-                    )}
-                  </section>
-
-                  <div className="space-y-6">
-                    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-2xs">
-                      <h4 className="text-sm font-black text-slate-900">Datos extraídos</h4>
-                      <p className="mt-1 text-xs leading-relaxed text-slate-500">Revisa estos datos antes de solicitar otro intento. No se completa ningún valor que no aparezca en el ticket.</p>
-                      <dl className="mt-5 grid grid-cols-2 gap-x-5 gap-y-4 text-sm">
-                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Comercio</dt><dd className="mt-1 font-bold text-slate-900">{ticketData.nombreEmisor || "No detectado"}</dd></div>
-                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total</dt><dd className="mt-1 font-bold text-slate-900">${getTicketTotal(ticketData).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
-                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Fecha</dt><dd className="mt-1 font-mono text-slate-900">{ticketData.fechaCompra || "No detectada"}</dd></div>
-                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Folio</dt><dd className="mt-1 font-mono text-slate-900">{ticketData.folio || ticketData.billingReference || "No detectado"}</dd></div>
-                        <div className="col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">RFC emisor</dt><dd className="mt-1 font-mono text-slate-900">{ticketData.rfcEmisor || "No detectado"}</dd></div>
-                      </dl>
-                      {visibleFields.length > 0 && <div className="mt-5 border-t border-slate-100 pt-4"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Campos del portal detectados</p><div className="mt-3 flex flex-wrap gap-2">{visibleFields.map(([key, value]) => <span key={key} className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs text-slate-700"><strong>{key}:</strong> {String(value)}</span>)}</div></div>}
-                    </section>
-
-                    {jitResolution && <section className="rounded-3xl border border-slate-800 bg-[#0b0d19] p-6 shadow-2xs">
-                      <h4 className="text-sm font-black text-white">Resolución del intento</h4>
-                      <dl className="mt-4 space-y-3 text-sm">
-                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Etapa</dt><dd className="mt-1 font-mono text-slate-200">{jitResolution.stage || "No disponible"}</dd></div>
-                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Causa probable</dt><dd className="mt-1 text-slate-200">{jitResolution.probableCause || "Aún no clasificada"}</dd></div>
-                        <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Siguiente acción</dt><dd className="mt-1 text-slate-200">{jitResolution.recommendedAction || "Conservar la evidencia para revisión."}</dd></div>
-                        {jitResolution.evidence?.finalUrl && <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">URL observada</dt><dd className="mt-1 break-all font-mono text-xs text-slate-300">{jitResolution.evidence.finalUrl}</dd></div>}
-                      </dl>
-                    </section>}
-
-                    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-2xs">
-                      <h4 className="text-sm font-black text-slate-900">Portal de facturación</h4>
-                      {verifiedPortalUrl ? <a href={portalUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex break-all text-sm font-bold text-[#0B53F4] hover:underline">{portalUrl}</a> : <p className="mt-2 text-sm leading-relaxed text-slate-600">Aún no hay una dirección oficial validada. ZenTicket seguirá investigando solo con evidencia del ticket y resultados del sitio del comercio.</p>}
-                    </section>
-                  </div>
-                </div>
-
-                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                  <button type="button" onClick={() => onTriggerSimulationInline(ticketData)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-xs font-black uppercase tracking-wider text-slate-700 transition hover:bg-slate-50">Corregir datos</button>
-                  <button type="button" onClick={() => onTriggerSimulationInline(ticketData)} className="rounded-xl bg-[#0B53F4] px-5 py-3 text-xs font-black uppercase tracking-wider text-white shadow-md shadow-blue-500/20 transition hover:bg-[#0941C4]">Facturar</button>
-                </div>
-              </div>
-            );
-          })()}
         </div>
       );
     }
@@ -1902,29 +1570,26 @@ export default function TicketsListScreen({
           </div>
         )}
 
-        {/* CONECTOR REAL EN PRODUCCIÓN EXPLANATORY ACCORDION */}
+        {/* Customer-facing verification summary */}
         <div className="bg-slate-50 border border-slate-200 p-5 rounded-3xl space-y-3">
           <div className="flex items-center gap-2.5 text-left select-none">
             <Sparkles className="w-5 h-5 text-[#0B53F4] shrink-0" />
             <div className="leading-tight">
-              <span className="font-extrabold text-slate-800 text-xs block">Conector Real en Producción</span>
-              <span className="text-[10px] text-slate-400 block mt-0.5">Cómo se procesa y verifica la extracción del portal</span>
+              <span className="font-extrabold text-slate-800 text-xs block">Factura validada</span>
+              <span className="text-[10px] text-slate-400 block mt-0.5">Información disponible para ti</span>
             </div>
           </div>
           
           <div className="text-slate-640 text-[11.5px] sm:text-xs text-left space-y-2 leading-relaxed">
             <p>
-              ZenTicket realiza el <strong>procesamiento automático y la validación en tiempo real</strong> de los tickets comerciales, consultando el portal oficial de facturación del comercio y verificando los CFDIs.
-            </p>
-            <p>
-              <strong>¿Cómo opera en producción?</strong>
+              Tu comprobante fue obtenido y validado antes de habilitar sus archivos.
             </p>
             <ul className="list-decimal pl-4.5 space-y-2 text-[11px] sm:text-[11.5px] font-semibold text-slate-700">
               <li>
-                <strong className="text-slate-800">Conexión Segura con Portales:</strong> El conector accede directamente al portal oficial de facturación del comercio para solicitar la descarga de tus comprobantes en formato XML y PDF.
+                <strong className="text-slate-800">Archivos disponibles:</strong> Puedes consultar tu PDF y descargar el XML.
               </li>
               <li>
-                <strong className="text-slate-800">Validación SAT:</strong> Una vez obtenidos, se verifica la autenticidad estructural del comprobante de forma directa ante los servidores oficiales del SAT.
+                <strong className="text-slate-800">Validación fiscal:</strong> La información fue revisada antes de mostrarse aquí.
               </li>
             </ul>
           </div>
@@ -2061,12 +1726,9 @@ export default function TicketsListScreen({
             ) : (
               inProgressList.map((item) => {
                 const t = item.ticket || {};
-                const state = item.canonicalState;
-                const isFailed = state.canonicalStatus === "failed_blocking" || state.canonicalStatus.startsWith("cfdi_");
-                const isProcessing = state.isActive;
+                const state = item.customerState;
                 const brand = getBrandBrandIcon(t.nombreEmisor || item.invoice?.nombreEmisor || "");
                 const isNewlyAdded = newlyAddedTicketId && t.id === newlyAddedTicketId;
-                const isTicketCaptcha = state.canonicalStatus === "waiting_user_captcha";
 
                 return (
                   <div 
@@ -2096,7 +1758,7 @@ export default function TicketsListScreen({
                                 RECIÉN AGREGADO
                               </span>
                             )}
-                            {renderStatusBadge(t)}
+                            {renderStatusBadge(item)}
                           </div>
                         </div>
                       </div>
@@ -2109,7 +1771,7 @@ export default function TicketsListScreen({
                             RECIÉN AGREGADO
                           </span>
                         )}
-                         {renderStatusBadge(t)}
+                          {renderStatusBadge(item)}
                       </div>
                     </div>
 
@@ -2120,20 +1782,12 @@ export default function TicketsListScreen({
                       </span>
                     </div>
 
-                    {/* Escalation/Failure Reason Card Block */}
-                    {(() => {
-                      if (!state.shouldAppearInAttention) return null;
-
-                      const alertStyle = getBillingAlertStyle(state);
-                      return (
-                        <div className={`text-[11px] p-3.5 rounded-2xl leading-relaxed font-sans border ${alertStyle.bgClass} ${alertStyle.textClass}`}>
-                          <span className={`font-bold block uppercase text-[9px] mb-1 tracking-wider ${alertStyle.labelClass}`}>
-                            {state.badgeLabel}:
-                          </span>
-                          {state.message}
-                        </div>
-                      );
-                    })()}
+                    <div className={`text-[11px] p-3.5 rounded-2xl leading-relaxed font-sans border ${state.tone === "warning" ? "zt-card-alert text-[var(--zt-alert-text)]" : "zt-card-queue text-[var(--zt-queue-text)]"}`}>
+                      <span className="font-bold block uppercase text-[9px] mb-1 tracking-wider">
+                        {state.title}
+                      </span>
+                      {state.message}
+                    </div>
 
                     {/* Divider line Inside Card */}
                     <div className="border-t border-slate-100 my-0.5" />
@@ -2141,7 +1795,7 @@ export default function TicketsListScreen({
                     {/* Lower cash amount indicator + interactive detail link */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 select-none pt-0.5">
                       <span className="text-lg font-black text-slate-800 font-mono text-left">
-                        ${state.displayTotal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${state.canonical.displayTotal.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
 
                       <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
@@ -2180,52 +1834,14 @@ export default function TicketsListScreen({
                           )
                         )}
 
-                        {(state.canonicalStatus === "already_invoiced_unverified" ||
-                          state.canonicalStatus === "invoice_recovery_pending" ||
-                          t.errorCode === "TICKET_ALREADY_INVOICED" ||
-                          t.reviewReasonCode === "ALREADY_INVOICED_XML_NOT_RECOVERED") && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRetryRecovery(t.id);
-                              }}
-                              disabled={isRetryingRecovery === t.id}
-                              className="flex items-center gap-1 py-1.5 px-3 font-extrabold text-[10px] uppercase tracking-wider rounded-xl bg-amber-500 hover:bg-amber-600 text-white cursor-pointer shadow-3xs transition"
-                            >
-                              {isRetryingRecovery === t.id ? (
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <RefreshCw className="w-3.5 h-3.5" />
-                              )}
-                              Reintentar recuperación
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toast.info("Por favor, edita los campos del ticket en el listado para corregir cualquier dato incorrecto.");
-                              }}
-                              className="bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center gap-1 py-1.5 px-3 font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border-none"
-                            >
-                              Corregir campos
-                            </button>
-                          </>
-                        )}
-
                         <button
                           type="button"
                           onClick={() => {
                             onViewDetails(item);
                           }}
-                          className={`group flex items-center justify-between gap-1.5 py-1.5 px-3 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none shrink-0 ${
-                            isTicketCaptcha
-                              ? "bg-amber-600 hover:bg-amber-700 text-white shadow-amber-200/50"
-                              : "zt-btn-secondary-blue"
-                          }`}
+                          className="group flex items-center justify-between gap-1.5 py-1.5 px-3 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all duration-150 cursor-pointer shadow-3xs select-none shrink-0 zt-btn-secondary-blue"
                         >
-                          <span>{isTicketCaptcha ? "Resolver CAPTCHA" : "Ver detalles"}</span>
+                          <span>Ver detalles</span>
                           <ChevronRight className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-all duration-150 transform group-hover:translate-x-0.5" />
                         </button>
                       </div>

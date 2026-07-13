@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { getTicketTotal, getDetailedReasonMsg, getTicketVisualState, getInvoiceVisualState } from "../../../src/workspace/utils/ticketHelpers";
 import { getBillingCanonicalState, getBillingVisualKey, dedupeBillingItems, resolveRelatedBillingDocs, normalizeSatValidationState, buildBillingDashboardStats } from "../../../src/workspace/utils/billingStateHelpers";
+import { getCustomerBillingState } from "../../../src/workspace/utils/customerBillingState";
 
 describe("Frontend Ticket Display and Logic Helpers", () => {
   describe("getTicketTotal helper", () => {
@@ -1051,5 +1052,57 @@ describe("Frontend Ticket Display and Logic Helpers", () => {
       expect(stats.cycleUsed).toBe(1);
       expect(stats.cycleRemaining).toBe(9);
     });
+  });
+});
+
+describe("Customer billing state", () => {
+  it("hides connector and portal causes behind a single review message", () => {
+    const state = getCustomerBillingState({
+      ticket: {
+        status: "requires_manual_review",
+        reviewReasonCode: "CONNECTOR_NOT_FOUND",
+        errorMsg: "Este comercio requiere un conector aprobado antes de facturar."
+      }
+    });
+
+    expect(state.kind).toBe("unavailable");
+    expect(state.badgeLabel).toBe("EN REVISIÓN");
+    expect(state.message.toLowerCase()).not.toContain("conector");
+    expect(state.message.toLowerCase()).not.toContain("portal");
+    expect(state.message.toLowerCase()).not.toContain("reintento");
+  });
+
+  it("shows a correction action only for ticket fields that genuinely need correction", () => {
+    const state = getCustomerBillingState({
+      ticket: {
+        status: "requires_user_correction",
+        reviewReasonCode: "MISSING_REQUIRED_FIELDS"
+      }
+    });
+
+    expect(state.kind).toBe("needs_correction");
+    expect(state.canEdit).toBe(true);
+    expect(state.title).toBe("Necesitamos confirmar un dato");
+  });
+
+  it("keeps active work in a neutral processing state", () => {
+    const state = getCustomerBillingState({
+      ticket: { status: "runner_processing", total: 47 }
+    });
+
+    expect(state.kind).toBe("processing");
+    expect(state.badgeLabel).toBe("EN PROCESO");
+    expect(state.message.toLowerCase()).not.toContain("robot");
+    expect(state.message.toLowerCase()).not.toContain("playwright");
+  });
+
+  it("does not ask customers to resolve CAPTCHA challenges", () => {
+    const state = getCustomerBillingState({
+      ticket: { status: "waiting_user_captcha", captchaFlowActive: true }
+    });
+
+    expect(state.kind).toBe("unavailable");
+    expect(state.requiresCaptcha).toBe(false);
+    expect(state.badgeLabel).toBe("EN REVISIÓN");
   });
 });

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild server/routes/adminDiagnostics.routes.ts --bundle --platform=node --format=cjs --packages=external --outfile=firebase/functions/adminDiagnosticsBundle.js",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "deploy:prod": "npm run build --prefix runner && npm run build && npx firebase-tools deploy --only functions,hosting,firestore:rules",

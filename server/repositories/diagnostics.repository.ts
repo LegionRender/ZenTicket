@@ -424,6 +424,12 @@ export class DiagnosticsRepository {
     return snap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
   }
 
+  async getAllConnectors(): Promise<any[]> {
+    const db = this.getDbSafe();
+    const snap = await db.collection("connectors").get();
+    return snap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+  }
+
   async getAllJobs(): Promise<any[]> {
     const db = this.getDbSafe();
     const snap = await db.collection("invoice_jobs").get();
