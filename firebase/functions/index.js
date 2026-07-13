@@ -1609,7 +1609,7 @@ app.post("/api/tickets/train-jit", async (req, res) => {
           if (billingContent) score += 40;
           const printedOnTicket = ticketPortalCandidates.has(candidate);
           const merchantDomainMatch = merchantTokens.some(token => hostname.includes(token));
-          if (merchantDomainMatch) score += 20;
+          if (merchantDomainMatch) score += 250;
           if (printedOnTicket) score += 60;
           if (negativeEvidence) score -= 180;
           score += 15;

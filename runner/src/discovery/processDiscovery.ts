@@ -62,9 +62,10 @@ function classifyDiscoveryFailure(message: string) {
 function resolveCanonicalKey(field: ObservedField): string {
   const text = `${field.id} ${field.name} ${field.label} ${field.placeholder}`.toLowerCase();
   if (/rfc|taxid/i.test(text)) return "rfcEmisor";
-  if (/folio|ticket|referencia|billing|ref/i.test(text)) return "billingReference";
+  if (/folio|ticket|referencia|billing|ref|rastreo|webid|transaccion|operacion|compra/i.test(text)) return "billingReference";
   if (/fecha|date/i.test(text)) return "fechaCompra";
   if (/total|monto|amount|pago/i.test(text)) return "total";
+  if (/sucursal|tienda|store|branch/i.test(text)) return "sucursal";
   if (/rfc.*receptor/i.test(text)) return "rfc";
   if (/razon|nombre.*receptor|social/i.test(text)) return "razonSocial";
   if (/regimen/i.test(text)) return "regimenFiscal";
