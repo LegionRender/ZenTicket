@@ -1512,130 +1512,154 @@ app.post("/api/tickets/train-jit", async (req, res) => {
         console.warn("Could not extract a billing URL directly from the ticket image:", ticketUrlError.message);
       }
     }
-    await updateProgress(
-      15,
-      ticketPortalCandidates.size > 0
-        ? "Verificando primero la dirección de facturación impresa en el ticket..."
-        : "El ticket no mostró una URL verificable. Buscando el portal oficial en internet..."
-    );
-    try {
-      const keyToUse = customKey || optionalSecret(geminiPrimaryKey) || optionalSecret(geminiApiKey) || "";
-      const ai = new GoogleGenAI({ apiKey: keyToUse });
-      const searchPrompt = `Encuentra URLs reales y actualmente accesibles para facturar tickets de la empresa mexicana '${nombreEmisor}' (RFC: ${rfcEmisor}).
-      Devuelve hasta 5 URLs candidatas: primero el portal directo y después páginas oficiales de la empresa que enlacen a facturación.
-      No inventes subdominios. Incluye únicamente URLs encontradas mediante Google Search, una por línea.`;
-      
-      // Step A: Google Search Grounding to get the URL (plain text - no JSON schema with grounding)
-      const searchResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: searchPrompt,
-        config: {
-          tools: [{ googleSearch: {} }]
-        }
-      });
-      const searchText = searchResponse.text || "";
-      
-      for (const match of searchText.matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
-        addPortalCandidate(match[0]);
-      }
-      const groundingChunks = searchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-      for (const chunk of groundingChunks) addPortalCandidate(chunk?.web?.uri);
-      const officialResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `Encuentra exclusivamente la página oficial de la empresa mexicana "${nombreEmisor}" que explique o permita facturar tickets. Prioriza el dominio corporativo oficial, aunque requiera iniciar sesión. No incluyas blogs, videos, directorios ni páginas de terceros.`,
-        config: { tools: [{ googleSearch: {} }] }
-      });
-      for (const match of String(officialResponse.text || "").matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
-        addPortalCandidate(match[0]);
-      }
-      const officialChunks = officialResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-      for (const chunk of officialChunks) addPortalCandidate(chunk?.web?.uri);
-
-      // Step C: If regex didn't find a URL, use a second AI call to extract it cleanly
-      if (portalCandidates.length === 0 && searchText.length > 10) {
-        const extractResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: `Del siguiente texto, extrae ÚNICAMENTE la URL del portal de facturación mencionado. Responde solo con la URL:\n${searchText}`,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "OBJECT",
-              properties: { portalUrl: { type: "STRING" } },
-              required: ["portalUrl"]
-            }
-          }
-        });
-        const parsed = JSON.parse(extractResponse.text || "{}");
-        addPortalCandidate(parsed.portalUrl);
-      }
-    } catch (err) {
-      console.warn("Google Search Grounding failed, using keyword fallback:", err.message);
-    }
-    
     const suspiciousHosts = /(?:bit\.ly|tinyurl\.com|goo\.gl|t\.co|shorturl|cutt\.ly)$/i;
     const merchantTokens = nombreEmisor.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
       .split(/[^a-z0-9]+/).filter(token => token.length >= 4);
     const scoredCandidates = [];
-    for (const candidate of portalCandidates) {
-      try {
-        const parsedUrl = new URL(candidate);
-        const suspicious = suspiciousHosts.test(parsedUrl.hostname) ||
-          /^\d{1,3}(?:\.\d{1,3}){3}$/.test(parsedUrl.hostname) ||
-          /^(?:localhost|.+\.local)$/i.test(parsedUrl.hostname) ||
-          /\.(?:ru|cn|tk)$/i.test(parsedUrl.hostname);
-        if (suspicious) {
-          scoredCandidates.push({ url: candidate, reachable: false, score: -50, reason: "suspicious_domain" });
-          continue;
-        }
-        const response = await fetch(candidate, {
-          method: "GET",
-          redirect: "follow",
-          signal: AbortSignal.timeout(12000),
-          headers: { "User-Agent": "Mozilla/5.0 ZenTicket-PortalDiscovery/1.0" }
-        });
-        if (response.ok || [401, 403].includes(response.status)) {
-          const finalUrl = response.url || candidate;
-          const finalParsed = new URL(finalUrl);
-          const hostname = finalParsed.hostname.toLowerCase();
-          const html = await response.text().catch(() => "");
-          const evidenceText = `${finalUrl} ${html.slice(0, 60000)}`.toLowerCase();
-          const negativeEvidence = /miopinion|encuesta|survey|descarga mi app|app store|play store|\/blocked(?:\?|\/)|\/blog\/|boxfactura|facturartickets|recuperafacturas|youtube\.com|sites\.google\.com|domain.{0,30}for sale|buy this domain|godaddy/i.test(evidenceText);
-          const billingHost = /(factur|cfdi|autofactura)/i.test(hostname);
-          const billingPath = /(factur|cfdi|autofactura)/i.test(finalParsed.pathname);
-          const billingContent = /obtener factura|emitir (?:tu )?factura|servicio de facturacio|datos para facturar|ticket de carga/i.test(html);
-          let score = finalUrl.startsWith("https://") ? 30 : 0;
-          if (billingPath) score += 30;
-          if (billingHost) score += 100;
-          if (billingContent) score += 40;
-          const printedOnTicket = ticketPortalCandidates.has(candidate);
-          const merchantDomainMatch = merchantTokens.some(token => hostname.includes(token));
-          if (merchantDomainMatch) score += 250;
-          if (printedOnTicket) score += 60;
-          if (negativeEvidence) score -= 180;
-          score += 15;
-          score += 10;
-          const verifiedBillingPortal = !negativeEvidence &&
-            (merchantDomainMatch || billingHost || (billingPath && billingContent) || (printedOnTicket && billingContent));
-          scoredCandidates.push({
-            url: finalUrl, reachable: true, score,
-            officialDomainMatch: verifiedBillingPortal,
-            source: printedOnTicket ? "ticket" : "search",
-            reason: response.ok ? "verified_http" : `protected_http_${response.status}`
-          });
-          for (const hrefMatch of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
-            try {
-              const linkedUrl = new URL(hrefMatch[1], finalUrl);
-              if (merchantTokens.some(token => linkedUrl.hostname.toLowerCase().includes(token))) {
-                addPortalCandidate(linkedUrl.href);
-              }
-            } catch (_linkError) {}
+
+    async function verifyCandidateList(candidatesToVerify, sourceName) {
+      for (const candidate of candidatesToVerify) {
+        if (scoredCandidates.some(c => c.url === candidate)) continue;
+        try {
+          const parsedUrl = new URL(candidate);
+          const suspicious = suspiciousHosts.test(parsedUrl.hostname) ||
+            /^\d{1,3}(?:\.\d{1,3}){3}$/.test(parsedUrl.hostname) ||
+            /^(?:localhost|.+\.local)$/i.test(parsedUrl.hostname) ||
+            /\.(?:ru|cn|tk)$/i.test(parsedUrl.hostname);
+          if (suspicious) {
+            scoredCandidates.push({ url: candidate, reachable: false, score: -50, reason: "suspicious_domain" });
+            continue;
           }
+          const response = await fetch(candidate, {
+            method: "GET",
+            redirect: "follow",
+            signal: AbortSignal.timeout(12000),
+            headers: { "User-Agent": "Mozilla/5.0 ZenTicket-PortalDiscovery/1.0" }
+          });
+          if (response.ok || [401, 403].includes(response.status)) {
+            const finalUrl = response.url || candidate;
+            const finalParsed = new URL(finalUrl);
+            const hostname = finalParsed.hostname.toLowerCase();
+            const html = await response.text().catch(() => "");
+            const evidenceText = `${finalUrl} ${html.slice(0, 60000)}`.toLowerCase();
+            const negativeEvidence = /miopinion|encuesta|survey|descarga mi app|app store|play store|\/blocked(?:\?|\/)|\/blog\/|boxfactura|facturartickets|recuperafacturas|youtube\.com|sites\.google\.com|domain.{0,30}for sale|buy this domain|godaddy/i.test(evidenceText);
+            const billingHost = /(factur|cfdi|autofactura)/i.test(hostname);
+            const billingPath = /(factur|cfdi|autofactura)/i.test(finalParsed.pathname);
+            const billingContent = /obtener factura|emitir (?:tu )?factura|servicio de facturacio|datos para facturar|ticket de carga/i.test(html);
+            let score = finalUrl.startsWith("https://") ? 30 : 0;
+            if (billingPath) score += 30;
+            if (billingHost) score += 100;
+            if (billingContent) score += 40;
+            const printedOnTicket = ticketPortalCandidates.has(candidate) || sourceName === "ticket";
+            const merchantDomainMatch = merchantTokens.some(token => hostname.includes(token));
+            if (merchantDomainMatch) score += 250;
+            if (printedOnTicket) score += 60;
+            if (negativeEvidence) score -= 180;
+            score += 15;
+            score += 10;
+            const verifiedBillingPortal = !negativeEvidence &&
+              (merchantDomainMatch || billingHost || (billingPath && billingContent) || (printedOnTicket && billingContent));
+            scoredCandidates.push({
+              url: finalUrl, reachable: true, score,
+              officialDomainMatch: verifiedBillingPortal,
+              source: printedOnTicket ? "ticket" : "search",
+              reason: response.ok ? "verified_http" : `protected_http_${response.status}`
+            });
+            for (const hrefMatch of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
+              try {
+                const linkedUrl = new URL(hrefMatch[1], finalUrl);
+                if (merchantTokens.some(token => linkedUrl.hostname.toLowerCase().includes(token))) {
+                  addPortalCandidate(linkedUrl.href, sourceName);
+                }
+              } catch (_linkError) {}
+            }
+          }
+        } catch (candidateError) {
+          scoredCandidates.push({ url: candidate, reachable: false, score: 0, reason: candidateError.message });
+          console.info(`[JIT] Portal candidate rejected: ${candidate} (${candidateError.message})`);
         }
-      } catch (candidateError) {
-        scoredCandidates.push({ url: candidate, reachable: false, score: 0, reason: candidateError.message });
-        console.info(`[JIT] Portal candidate rejected: ${candidate} (${candidateError.message})`);
       }
     }
+
+    // A. Verify candidates printed on the ticket first
+    if (portalCandidates.length > 0) {
+      await updateProgress(15, "Verificando primero la dirección de facturación impresa en el ticket...");
+      await verifyCandidateList([...portalCandidates], "ticket");
+    }
+
+    // B. Fallback to Google Search grounding if no official portal matches were found on the ticket
+    const ticketMatch = scoredCandidates.find(c => c.reachable && c.officialDomainMatch);
+    if (!ticketMatch) {
+      await updateProgress(20, "El ticket no mostró una URL verificable. Buscando el portal oficial en internet...");
+      const searchCandidates = [];
+      const addSearchCandidate = (candidate) => {
+        let clean = String(candidate || "").trim()
+          .replace(/^[`"'[(<\s]+/, "")
+          .replace(/[`"')\]>\s.,;:!?]+$/, "");
+        if (!/^https?:\/\//i.test(clean) && /^(?:www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?$/i.test(clean)) {
+          clean = `https://${clean}`;
+        }
+        if (!/^https?:\/\//i.test(clean)) return;
+        if (!portalCandidates.includes(clean) && !searchCandidates.includes(clean) && searchCandidates.length < 20) {
+          searchCandidates.push(clean);
+        }
+      };
+
+      try {
+        const keyToUse = customKey || optionalSecret(geminiPrimaryKey) || optionalSecret(geminiApiKey) || "";
+        const ai = new GoogleGenAI({ apiKey: keyToUse });
+        const searchPrompt = `Encuentra URLs reales y actualmente accesibles para facturar tickets de la empresa mexicana '${nombreEmisor}' (RFC: ${rfcEmisor}).
+        Devuelve hasta 5 URLs candidatas: primero el portal directo y después páginas oficiales de la empresa que enlacen a facturación.
+        No inventes subdominios. Incluye únicamente URLs encontradas mediante Google Search, una por línea.`;
+        
+        const searchResponse = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: searchPrompt,
+          config: { tools: [{ googleSearch: {} }] }
+        });
+        const searchText = searchResponse.text || "";
+        for (const match of searchText.matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
+          addSearchCandidate(match[0]);
+        }
+        const groundingChunks = searchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+        for (const chunk of groundingChunks) addSearchCandidate(chunk?.web?.uri);
+
+        const officialResponse = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `Encuentra exclusivamente la página oficial de la empresa mexicana "${nombreEmisor}" que explique o permita facturar tickets. Prioriza el dominio corporativo oficial, aunque requiera iniciar sesión. No incluyas blogs, videos, directorios ni páginas de terceros.`,
+          config: { tools: [{ googleSearch: {} }] }
+        });
+        for (const match of String(officialResponse.text || "").matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
+          addSearchCandidate(match[0]);
+        }
+        const officialChunks = officialResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+        for (const chunk of officialChunks) addSearchCandidate(chunk?.web?.uri);
+
+        if (searchCandidates.length === 0 && searchText.length > 10) {
+          const extractResponse = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: `Del siguiente texto, extrae ÚNICAMENTE la URL del portal de facturación mencionado. Responde solo con la URL:\n${searchText}`,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "OBJECT",
+                properties: { portalUrl: { type: "STRING" } },
+                required: ["portalUrl"]
+              }
+            }
+          });
+          const parsed = JSON.parse(extractResponse.text || "{}");
+          addSearchCandidate(parsed.portalUrl);
+        }
+
+        if (searchCandidates.length > 0) {
+          await verifyCandidateList(searchCandidates, "search");
+        }
+      } catch (err) {
+        console.warn("Google Search Grounding failed, using keyword fallback:", err.message);
+      }
+    }
+
     scoredCandidates.sort((a, b) => b.score - a.score);
     portalUrl = scoredCandidates.find(candidate => candidate.reachable && candidate.officialDomainMatch)?.url || "";
     await db.collection("automation_trainings").doc(trainingId).set({ portalCandidates: scoredCandidates }, { merge: true });
