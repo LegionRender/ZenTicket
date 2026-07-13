@@ -2768,6 +2768,17 @@ export default function ScannerAndSimulator({
       console.warn("JIT training skipped because the ticket data is incomplete.");
       return;
     }
+    // JIT is intentionally disabled in production. Ticket data is captured
+    // from the real receipt and remains pending until an approved connector is
+    // associated by the backend; the client must not help train a connector.
+    setIsTrainingModel(false);
+    setActiveStep("extracted");
+    await onUpdateTicketInDb(trainingTicketId, {
+      status: "requires_manual_review",
+      errorMsg: "Este comercio requiere un conector aprobado antes de facturar.",
+      reviewReasonCode: "CONNECTOR_NOT_FOUND"
+    });
+    return;
     if (trainingStartedTicketIds.current.has(trainingTicketId)) return;
     trainingStartedTicketIds.current.add(trainingTicketId);
     const attempt = (trainingAttemptCounts.current.get(trainingTicketId) || 0) + 1;
@@ -3122,11 +3133,17 @@ export default function ScannerAndSimulator({
     );
     setMatchingConnector(found || null);
 
-    // Immediately trigger automation (Guardar y continuar behavior)
+    // A correction only persists user-supplied ticket data. It must never
+    // create or assist a JIT flow for an unapproved connector.
     if (found && found.runnerAvailable) {
       await handleTriggerAutomation(found, ticketId, updatedData, finalProfileToUse);
     } else if (ticketId) {
-      void handleRunTraining(updatedData, ticketId);
+      await onUpdateTicketInDb(ticketId, {
+        status: "requires_manual_review",
+        errorMsg: "Datos corroborados. Pendiente de asociación con un conector aprobado.",
+        reviewReasonCode: "CONNECTOR_NOT_FOUND"
+      });
+      toast.info("Tus datos quedaron guardados. Este comercio requiere un conector aprobado antes de facturar.");
     }
   };
 

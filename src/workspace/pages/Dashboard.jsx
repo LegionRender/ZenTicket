@@ -397,18 +397,10 @@ export const Dashboard = () => {
       });
       list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       setInvoices(list);
-      localStorage.setItem("local_invoices_" + user.uid, JSON.stringify(list));
     }, (err) => {
       console.error("Error watching invoices:", err);
       if (err?.message?.includes("Quota") || err?.message?.includes("quota") || err?.code?.includes("resource-exhausted")) {
         setIsQuotaExceeded(true);
-      }
-      // Fallback
-      const saved = localStorage.getItem("local_invoices_" + user.uid);
-      if (saved) {
-        try {
-          setInvoices(JSON.parse(saved));
-        } catch (_) {}
       }
     });
     return unsubscribe;
@@ -428,18 +420,10 @@ export const Dashboard = () => {
       });
       list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       setTickets(list);
-      localStorage.setItem("local_tickets_" + user.uid, JSON.stringify(list));
     }, (err) => {
       console.error("Error watching tickets:", err);
       if (err?.message?.includes("Quota") || err?.message?.includes("quota") || err?.code?.includes("resource-exhausted")) {
         setIsQuotaExceeded(true);
-      }
-      // Fallback
-      const saved = localStorage.getItem("local_tickets_" + user.uid);
-      if (saved) {
-        try {
-          setTickets(JSON.parse(saved));
-        } catch (_) {}
       }
     });
     return unsubscribe;
@@ -455,20 +439,15 @@ export const Dashboard = () => {
         list.push({ ...d.data(), id: d.id });
       });
       setConnectors(list);
-      localStorage.setItem("local_connectors", JSON.stringify(list));
     }, (err) => {
       console.error("Error watching connectors:", err);
       if (err?.message?.includes("Quota") || err?.message?.includes("quota") || err?.code?.includes("resource-exhausted")) {
         setIsQuotaExceeded(true);
       }
-      // Fallback
-      const saved = localStorage.getItem("local_connectors");
-      if (saved) {
-        try {
-          setConnectors(JSON.parse(saved));
-        } catch (_) {}
-      } else {
-        // Fallback to static system connectors
+      // The connector catalogue is runtime state from Firestore.  Do not cache
+      // it in the browser, where ticket media can exceed the storage quota.
+      // Fall back only to the deliberately bundled read-only catalogue.
+      {
         setConnectors([
           {
             id: "system-starbucks",
@@ -944,7 +923,6 @@ export const Dashboard = () => {
           return prev;
         }
         const next = [tkt, ...prev];
-        localStorage.setItem("local_tickets_" + user.uid, JSON.stringify(next));
         return next;
       });
 
@@ -970,7 +948,6 @@ export const Dashboard = () => {
 
       setTickets(prev => {
         const next = prev.map(t => t.id === ticketId ? { ...t, ...updates } : t);
-        localStorage.setItem("local_tickets_" + user.uid, JSON.stringify(next));
         return next;
       });
     } catch (e) {
@@ -1080,7 +1057,6 @@ export const Dashboard = () => {
               ? { ...t, hiddenFromUser: true, status: "deleted", deletedAt: new Date().toISOString() } 
               : t
           );
-          localStorage.setItem("local_tickets_" + user.uid, JSON.stringify(next));
           return next;
         });
       }
