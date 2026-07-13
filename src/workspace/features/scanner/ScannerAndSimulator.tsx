@@ -2771,18 +2771,12 @@ export default function ScannerAndSimulator({
     }
   };
 
-  // Run real-time high-fidelity live AI training sync'd with Firestore /automation_trainings and backend train-jit route
+  // Legacy callers now resolve to manual review; JIT training is retired.
   const handleRunTraining = async (
-    trainingData: ExtractedTicketData | null = extractedData,
+    _trainingData: ExtractedTicketData | null = extractedData,
     trainingTicketId: string | null = ticketId
   ) => {
-    if (!trainingData || !trainingTicketId) {
-      console.warn("JIT training skipped because the ticket data is incomplete.");
-      return;
-    }
-    // JIT is intentionally disabled in production. Ticket data is captured
-    // from the real receipt and remains pending until an approved connector is
-    // associated by the backend; the client must not help train a connector.
+    if (!trainingTicketId) return;
     setIsTrainingModel(false);
     setActiveStep("extracted");
     await onUpdateTicketInDb(trainingTicketId, {
@@ -2790,117 +2784,7 @@ export default function ScannerAndSimulator({
       errorMsg: "Este comercio requiere un conector aprobado antes de facturar.",
       reviewReasonCode: "CONNECTOR_NOT_FOUND"
     });
-    return;
-    if (trainingStartedTicketIds.current.has(trainingTicketId)) return;
-    trainingStartedTicketIds.current.add(trainingTicketId);
-    const attempt = (trainingAttemptCounts.current.get(trainingTicketId) || 0) + 1;
-    trainingAttemptCounts.current.set(trainingTicketId, attempt);
-
-    setIsTrainingModel(true);
-    setTrainingProgress(5);
-    setTrainingStatus("Buscando el portal oficial del comercio...");
-
-    const userEmail = auth.currentUser?.email || "legionrender@gmail.com";
-    const trainingDocRef = doc(db, "automation_trainings", trainingTicketId);
-
-    // The backend owns automation_trainings. The client may observe progress but
-    // must never create or mutate a JIT training record.
-
-    // Set up a real-time listener to Firestore to update UI progress dynamically from the backend!
-    const unsubscribe = onSnapshot(trainingDocRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data.progress !== undefined) {
-          setTrainingProgress(data.progress);
-        }
-        const progress = Number(data.progress || 0);
-        setTrainingStatus(
-          progress < 20 ? "Buscando el portal oficial del comercio..."
-            : progress < 50 ? "Revisando el sitio de facturación..."
-              : progress < 75 ? "Identificando los datos que solicita..."
-                : progress < 95 ? "Preparando la información del ticket..."
-                  : "Iniciando la solicitud de factura..."
-        );
-      }
-    });
-
-    try {
-      const personalKey = localStorage.getItem("personalGeminiKey") || fiscalProfile?.personalGeminiKey || "";
-      const headers: Record<string, string> = {};
-      if (personalKey) {
-        headers["x-gemini-api-key"] = personalKey;
-      }
-      const response = await fetchWithAuth("/api/tickets/train-jit", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          ticketId: trainingTicketId,
-          nombreEmisor: trainingData.nombreEmisor,
-          rfcEmisor: trainingData.rfcEmisor
-        })
-      });
-
-
-      if (!response.ok) {
-        // Safely parse error — server may return HTML if it crashed
-        let errMsg = `Error del servidor (HTTP ${response.status})`;
-        try {
-          const errData = await response.json();
-          errMsg = errData.code === "PORTAL_AUTH_REQUIRED"
-            ? "El portal oficial de este comercio requiere iniciar sesión o crear una cuenta. No es posible automatizarlo sin autorización del usuario."
-            : (errData.error || errMsg);
-        } catch {
-          // Server returned non-JSON (HTML error page) — show status code only
-          errMsg = `El servidor de entrenamiento no respondió correctamente (HTTP ${response.status}). Verifica la consola del servidor.`;
-        }
-        throw new Error(errMsg);
-      }
-
-      const data = await response.json();
-      
-      // A user JIT result is a pending proposal, not a runnable connector. Do
-      // not retain it as a match or a subsequent click could try to enqueue the
-      // ticket before the administrator has approved observation.
-      setMatchingConnector(data.jobId ? data.connector : null);
-      setExtractedData({
-        ...trainingData,
-        ...data.ocrResult,
-        status: data.jobId ? "extracted" : "training_pending_review"
-      });
-      setIsConnectorNewlyLearned(true);
-      setIsTrainingModel(false);
-      trainingAttemptCounts.current.delete(trainingTicketId);
-
-      unsubscribe();
-
-      // 2. Trigger immediate billing
-      toast.success("El portal quedó preparado. Iniciamos la solicitud de tu factura.");
-      if (data.jobId) {
-        setActiveStep("automating");
-        if (onTabChange && onSetNewlyAddedTicketId) {
-          onSetNewlyAddedTicketId(trainingTicketId);
-          onTabChange("tickets");
-        }
-      } else {
-        setActiveStep("extracted");
-        toast.info("El conector quedó en revisión de seguridad. Conservamos tu ticket y te avisaremos cuando pueda procesarse en observación.");
-      }
-    } catch (err: any) {
-      console.error("Error during real-time JIT training:", err);
-      unsubscribe();
-      if (attempt < 2) {
-        trainingStartedTicketIds.current.delete(trainingTicketId);
-        setTrainingStatus("La conexión se interrumpió. Reintentando automáticamente...");
-        window.setTimeout(() => {
-          void handleRunTraining(trainingData, trainingTicketId);
-        }, 5000);
-        return;
-      }
-      toast.error("No pudimos preparar el portal automáticamente. Guardamos el ticket para revisión.");
-      setIsTrainingModel(false);
-    }
   };
-
   useEffect(() => {
     const currentTicket = liveTicket || (tickets || []).find(t => t.id === ticketId);
     const needsTraining = currentTicket?.status === "training_required" ||
