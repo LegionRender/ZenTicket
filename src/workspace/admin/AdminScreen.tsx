@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Connector, Ticket, Invoice, FiscalProfile } from "@/shared/types/types";
 import { 
@@ -172,6 +172,15 @@ export default function AdminScreen({
     );
     return () => unsubscribe();
   }, []);
+
+  const phase1EvidenceTrainings = useMemo(
+    () => activeTrainings.filter((training) => training.archival?.category === "phase1_test_evidence"),
+    [activeTrainings]
+  );
+  const operationalTrainings = useMemo(
+    () => activeTrainings.filter((training) => training.archival?.category !== "phase1_test_evidence"),
+    [activeTrainings]
+  );
   const [ocrQueue, setOcrQueue] = useState<any[]>([]);
   const [trainingSyncError, setTrainingSyncError] = useState<string | null>(null);
   const [ocrSyncError, setOcrSyncError] = useState<string | null>(null);
@@ -1714,12 +1723,22 @@ export default function AdminScreen({
                       : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
-                  En Progreso ({activeTrainings.filter(t => t.progress < 100).length})
+                  En Progreso ({operationalTrainings.filter(t => t.progress < 100).length})
                 </button>
               </div>
 
+              {phase1EvidenceTrainings.length > 0 && (
+                <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5 text-left">
+                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+                  <div>
+                    <span className="block text-[10px] font-black uppercase tracking-wider text-slate-600">Pruebas Fase 1 archivadas ({phase1EvidenceTrainings.length})</span>
+                    <p className="mt-1 text-[11px] font-medium leading-relaxed text-slate-500">Evidencia histórica en sólo lectura. No cuenta como entrenamiento, conector ni tarea pendiente y está excluida de JIT.</p>
+                  </div>
+                </div>
+              )}
+
               {trackerTab === "activos" ? (
-                activeTrainings.length === 0 ? (
+                operationalTrainings.length === 0 ? (
                   <div className="flex flex-col items-center justify-center text-center p-8 bg-slate-50 border border-dashed border-slate-200 rounded-2xl min-h-[220px]">
                     <Brain className="w-8 h-8 text-slate-300 animate-pulse mb-3" />
                     <h5 className="text-xs font-black text-slate-700 uppercase tracking-widest font-mono">Sin Entrenamientos Activos</h5>
@@ -1732,11 +1751,11 @@ export default function AdminScreen({
                     {/* Metrics header */}
                     <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-widest py-1 border-b border-slate-100 font-mono">
                       <span>Procesos en curso</span>
-                      <span className="text-[#0B53F4] font-black">{activeTrainings.length} activos</span>
+                      <span className="text-[#0B53F4] font-black">{operationalTrainings.length} activos</span>
                     </div>
                     
                     <div className="space-y-3.5 max-h-[350px] overflow-y-auto scrollbar-none pr-1">
-                      {activeTrainings.slice(0, 3).map((train) => (
+                      {operationalTrainings.slice(0, 3).map((train) => (
                         <div 
                           key={train.id || train.company}
                           className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5 hover:border-slate-300 transition-all text-left"
@@ -1775,13 +1794,13 @@ export default function AdminScreen({
                           </div>
                         </div>
                       ))}
-                      {activeTrainings.length > 3 && (
+                      {operationalTrainings.length > 3 && (
                         <button
                           type="button"
                           onClick={() => setIsTrackerActivosModalOpen(true)}
                           className="group mt-2 w-full py-3 px-4.5 bg-slate-50 hover:bg-[#0B53F4]/5 active:bg-[#0B53F4]/10 border border-slate-200 text-[#0B53F4] font-extrabold text-[10px] uppercase tracking-wider rounded-xl flex items-center justify-between transition-all duration-150 cursor-pointer shadow-3xs select-none"
                         >
-                          <span>Ver Todo ({activeTrainings.length} resultados)</span>
+                          <span>Ver Todo ({operationalTrainings.length} resultados)</span>
                           <ChevronRight className="w-4 h-4 text-[#0B53F4]/70 group-hover:text-[#0B53F4] transition-transform duration-150 transform group-hover:translate-x-1" />
                         </button>
                       )}
@@ -2668,7 +2687,7 @@ export default function AdminScreen({
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-[#0B53F4] animate-pulse" />
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider font-sans">
-                    Entrenamientos en Curso ({activeTrainings.length})
+                    Entrenamientos en Curso ({operationalTrainings.length})
                   </h3>
                 </div>
                 <button
@@ -2681,7 +2700,7 @@ export default function AdminScreen({
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-4 py-4 scrollbar-none pr-1 text-left">
-                {activeTrainings.map((train) => (
+                {operationalTrainings.map((train) => (
                   <div 
                     key={train.id || train.company}
                     className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5 hover:border-slate-300 transition-all text-left"
