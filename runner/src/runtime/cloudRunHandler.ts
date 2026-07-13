@@ -51,6 +51,14 @@ export function createCloudRunHandler(dependencies: CloudRunHandlerDependencies)
       return;
     }
 
+    // A previously queued discovery task is acknowledged without opening a
+    // browser. This prevents retries while preserving its outbox record for
+    // governance review.
+    if (isDiscoveryTask) {
+      sendJson(response, 202, { status: "jit_governance_frozen" });
+      return;
+    }
+
     const idField = isProcessTask ? "jobId" : "discoveryId";
     const invalidCode = isProcessTask ? "INVALID_JOB_ID" : "INVALID_DISCOVERY_ID";
     const failedCode = isProcessTask ? "RUNNER_TASK_FAILED" : "CONNECTOR_DISCOVERY_FAILED";

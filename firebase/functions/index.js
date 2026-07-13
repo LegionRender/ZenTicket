@@ -1380,6 +1380,14 @@ app.post("/api/tickets/analyze", async (req, res) => {
 });
 
 app.post("/api/tickets/train-jit", async (req, res) => {
+  // Fase 6: no ticket or administrator action may start discovery while JIT
+  // governance is frozen. Existing proposals remain read-only evidence.
+  res.status(410).json({
+    code: "JIT_GOVERNANCE_FROZEN",
+    error: "El descubrimiento JIT está congelado. Los conectores sólo se administran mediante el proceso aprobado."
+  });
+  return;
+
   const {
     ticketId, nombreEmisor: bodyNombre, rfcEmisor: bodyRfc,
     adminMode = false, merchantName, trainingId: requestedTrainingId
@@ -4036,6 +4044,11 @@ exports.dispatchConnectorDiscoveryJobs = onSchedule(
     secrets: [runnerTaskTokenParam]
   },
   async () => {
+    // Fase 6: preserve the outbox for audit, but never dispatch discovery
+    // tasks while JIT governance is frozen.
+    console.info("[Connector discovery dispatch] JIT governance is frozen; no discovery tasks will be dispatched.");
+    return;
+
     let config;
     try {
       config = runnerDispatchConfig();

@@ -361,6 +361,9 @@ export default function AdminScreen({
 
 
   const handleStartDiscovery = async () => {
+    toast.info("El discovery JIT está congelado. Las propuestas existentes permanecen sólo para consulta.");
+    return;
+
     const merchantName = trainingMerchantName.trim();
     if (!merchantName) {
       toast.error("Escribe el nombre de la empresa que deseas entrenar.", "Empresa Requerida");
@@ -431,6 +434,9 @@ export default function AdminScreen({
   };
 
   const handleSaveDiscovery = async () => {
+    toast.info("El discovery JIT está congelado. No se pueden crear ni actualizar conectores desde esta pantalla.");
+    return;
+
     if (!selectedConnId) {
       toast.error("Selecciona un conector/comercio para guardar el mapeo.", "Conector Requerido");
       return;
@@ -1574,7 +1580,7 @@ export default function AdminScreen({
               </div>
               <div className="text-left leading-tight">
                 <h3 className="text-base font-black text-slate-9 tracking-tight">Entrenamiento de Portales</h3>
-                <p className="text-xs text-slate-450 mt-1">Investiga, inspecciona y prepara conectores JIT sin necesidad de un ticket</p>
+                <p className="text-xs text-slate-450 mt-1">Discovery JIT congelado: las propuestas existentes se conservan sólo para consulta</p>
               </div>
             </div>
 
@@ -1595,7 +1601,7 @@ export default function AdminScreen({
               <div>
                 <button
                   type="button"
-                  disabled={discoveryLoading || !trainingMerchantName.trim()}
+                  disabled={true}
                   onClick={handleStartDiscovery}
                   className="w-full bg-[#0B53F4] hover:bg-[#0747D1] disabled:opacity-55 text-white font-black text-xs py-3.5 rounded-2xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#0B53F4]/15 active:scale-[0.98] select-none border-none outline-none"
                 >
@@ -1607,7 +1613,7 @@ export default function AdminScreen({
                   ) : (
                     <>
                       <Sparkles className="w-3.5 h-3.5 text-white fill-white shrink-0" />
-                      <span>Investigar y entrenar portal</span>
+                      <span>Discovery JIT congelado</span>
                     </>
                   )}
                 </button>

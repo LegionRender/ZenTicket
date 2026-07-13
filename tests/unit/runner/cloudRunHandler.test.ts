@@ -60,4 +60,26 @@ describe("Cloud Run task handler", () => {
     await expect(response.json()).resolves.toMatchObject({ code: "PLAYWRIGHT_BROWSER_LAUNCH_FAILED" });
     expect(processJob).not.toHaveBeenCalled();
   });
+
+  it("acknowledges queued discovery tasks without running JIT", async () => {
+    const processConnectorDiscovery = vi.fn();
+    const runBrowserSmoke = vi.fn();
+    const baseUrl = await withHandler(createCloudRunHandler({
+      taskToken: "task-secret",
+      processJob: vi.fn(),
+      processConnectorDiscovery,
+      runBrowserSmoke
+    }));
+
+    const response = await fetch(`${baseUrl}/tasks/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-runner-task-token": "task-secret" },
+      body: JSON.stringify({ discoveryId: "discovery-1" })
+    });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ status: "jit_governance_frozen" });
+    expect(runBrowserSmoke).not.toHaveBeenCalled();
+    expect(processConnectorDiscovery).not.toHaveBeenCalled();
+  });
 });

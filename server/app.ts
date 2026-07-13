@@ -2351,6 +2351,13 @@ app.post("/api/admin/discover-portal", authenticateFirebaseToken, requireAdmin, 
 });
 
 app.post("/api/tickets/train-jit", authenticateFirebaseToken, async (req: Request, res: Response): Promise<void> => {
+  // Compatibility route: JIT discovery is frozen in every backend surface.
+  res.status(410).json({
+    code: "JIT_GOVERNANCE_FROZEN",
+    error: "El descubrimiento JIT está congelado. Los conectores sólo se administran mediante el proceso aprobado."
+  });
+  return;
+
   const {
     ticketId, nombreEmisor: bodyNombre, rfcEmisor: bodyRfc,
     adminMode = false, merchantName, trainingId: requestedTrainingId
