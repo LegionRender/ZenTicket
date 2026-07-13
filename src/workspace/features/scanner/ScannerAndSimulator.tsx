@@ -4542,6 +4542,13 @@ return list.map(n => {
                 </div>
                 <button
                   onClick={() => {
+                    setEditNombre(extractedData?.nombreEmisor || "");
+                    setEditRfc(extractedData?.rfcEmisor || "");
+                    setEditFecha(extractedData?.fechaCompra || "");
+                    setEditFolio(extractedData?.folio || extractedData?.billingReference || "");
+                    setEditSucursal(extractedData?.sucursal || "");
+                    setEditTotal(extractedData?.total || 0);
+                    setEditPortalFields(extractedData?.portalFields || {});
                     setIsTrainingModel(false);
                     setIsEditing(true);
                   }}
@@ -4598,7 +4605,17 @@ return list.map(n => {
                 <div className="flex flex-col sm:flex-row gap-3 pt-3 border-t border-slate-100">
                   {currentTicket?.status === "training_required" && (
                     <button
-                      onClick={() => setIsEditing(true)}
+                      onClick={() => {
+                        setEditNombre(extractedData?.nombreEmisor || "");
+                        setEditRfc(extractedData?.rfcEmisor || "");
+                        setEditFecha(extractedData?.fechaCompra || "");
+                        setEditFolio(extractedData?.folio || extractedData?.billingReference || "");
+                        setEditSucursal(extractedData?.sucursal || "");
+                        setEditTotal(extractedData?.total || 0);
+                        setEditPortalFields(extractedData?.portalFields || {});
+                        setIsTrainingModel(false);
+                        setIsEditing(true);
+                      }}
                       className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-white bg-[#0B53F4] hover:bg-blue-600 px-6 py-4 rounded-xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-2xs font-sans"
                     >
                       Corroborar datos
