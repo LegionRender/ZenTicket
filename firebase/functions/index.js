@@ -2,10 +2,7 @@ const express = require("express");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const {
-  parseSatQrUrl,
-  validateXmlStructure,
-  parseCfdiInfo,
-  verifyCfdiWithSat
+  parseSatQrUrl
 } = require("./fiscalUtils");
 const { GoogleGenAI } = require("@google/genai");
 const { onRequest } = require("firebase-functions/v2/https");
@@ -2780,40 +2777,10 @@ app.post("/api/admin/diagnostics/proposals/:proposalId/promote-observation", aut
 const adminDiagnosticsRouter = require("./adminDiagnosticsBundle").default;
 app.use("/api/admin/diagnostics", adminDiagnosticsRouter);
 
-app.post("/api/cfdi/verify-sat", async (req, res) => {
-  if (!(await requireAuthenticatedRequest(req, res))) return;
-  const { xmlContent } = req.body;
-  if (!xmlContent) {
-    res.status(400).json({ error: "Missing xmlContent in request body" });
-    return;
-  }
-
-  const isStructuralValid = validateXmlStructure(xmlContent);
-  if (!isStructuralValid) {
-    res.json({
-      status: "invalid_structure",
-      satStatus: "Estructura inválida",
-      error: "El XML no contiene la estructura básica obligatoria o le faltan nodos requeridos (Comprobante, Emisor, Receptor o TimbreFiscalDigital)."
-    });
-    return;
-  }
-
-  const info = parseCfdiInfo(xmlContent);
-  if (!info.uuid || !info.rfcEmisor || !info.rfcReceptor || !info.total) {
-    res.json({
-      status: "invalid_xml",
-      satStatus: "XML incompleto",
-      error: "El XML no contiene toda la información fiscal obligatoria (UUID, RFC Emisor, RFC Receptor o Total)."
-    });
-    return;
-  }
-
-  const verification = await verifyCfdiWithSat(info.rfcEmisor, info.rfcReceptor, info.total, info.uuid);
-  res.json({
-    status: verification.status,
-    satStatus: verification.satStatus,
-    detail: verification.detail,
-    info
+app.post("/api/cfdi/verify-sat", async (_req, res) => {
+  res.status(410).json({
+    code: "SAT_VALIDATION_RUNNER_ONLY",
+    error: "La consulta de vigencia CFDI sólo se ejecuta desde el runner autenticado de Cloud Run después de validar el XML descargado."
   });
 });
 

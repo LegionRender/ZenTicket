@@ -88,26 +88,6 @@ const getBrandBrandIcon = (nombre: string) => {
   };
 };
 
-const validateXmlStructure = (xmlContent: string | null | undefined): boolean => {
-  if (!xmlContent) return false;
-  
-  // Minimal structural validation of downloaded XML:
-  // Must contain cfdi:Comprobante, cfdi:Emisor, cfdi:Receptor, cfdi:Impuestos, cfdi:Conceptos,
-  // cfdi:Concepto, cfdi:Traslados, cfdi:Traslado with TipoFactor="Tasa", TasaOCuota="0.160000",
-  // and tfd:TimbreFiscalDigital with UUID, SelloCFD, SelloSAT, NoCertificadoSAT, FechaTimbrado.
-  const hasComprobante = /<cfdi:Comprobante\b[^>]*\bTotal=/i.test(xmlContent) || /<Comprobante\b[^>]*\bTotal=/i.test(xmlContent);
-  const hasEmisor = /<cfdi:Emisor\b[^>]*\bRfc=/i.test(xmlContent) || /<Emisor\b[^>]*\bRfc=/i.test(xmlContent);
-  const hasReceptor = /<cfdi:Receptor\b[^>]*\bRfc=/i.test(xmlContent) || /<Receptor\b[^>]*\bRfc=/i.test(xmlContent);
-  const hasTimbre = (/<tfd:TimbreFiscalDigital\b/i.test(xmlContent) || /<TimbreFiscalDigital\b/i.test(xmlContent)) &&
-                    /\bUUID=/i.test(xmlContent) &&
-                    /\bFechaTimbrado=/i.test(xmlContent) &&
-                    /\bSelloCFD=/i.test(xmlContent) &&
-                    /\bSelloSAT=/i.test(xmlContent) &&
-                    /\bNoCertificadoSAT=/i.test(xmlContent);
-
-  return !!(hasComprobante && hasEmisor && hasReceptor && hasTimbre);
-};
-
 const CAPTCHA_FLOW_STATUSES = new Set([
   "blocked_by_captcha",
   "waiting_human_verification",
@@ -184,8 +164,6 @@ export default function TicketsListScreen({
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [selectedBillingItem, setSelectedBillingItem] = useState<any | null>(null);
   const [showXmlCode, setShowXmlCode] = useState(false);
-  const [verificationError, setVerificationError] = useState<string | null>(null);
-  const [isValidatingSat, setIsValidatingSat] = useState<boolean>(false);
   const [viewCaptchaSolution, setViewCaptchaSolution] = useState("");
   const [isSubmittingViewCaptcha, setIsSubmittingViewCaptcha] = useState(false);
   const [activeJob, setActiveJob] = useState<any>(null);
@@ -474,68 +452,6 @@ export default function TicketsListScreen({
     }
   }, [newlyAddedTicketId, finalItems]);
 
-  // Trigger SAT verification when detail view is opened
-  useEffect(() => {
-    if (!selectedBillingItem || !selectedBillingItem.invoice || !selectedBillingItem.invoice.xmlContent) {
-      setVerificationError(null);
-      return;
-    }
-
-    const associatedTicket = selectedBillingItem.ticket;
-    const activeInvoiceData = selectedBillingItem.invoice;
-    if (!associatedTicket) return;
-
-    // SAT is disabled. We only perform local structural check.
-    const needsSatCheck = false;
-    if (!needsSatCheck) return;
-
-    const runSatVerification = async () => {
-      setIsValidatingSat(true);
-      setVerificationError(null);
-      try {
-        const isXmlValid = validateXmlStructure(activeInvoiceData.xmlContent);
-        if (!isXmlValid) {
-          throw new Error("El XML obtenido del portal del comercio no contiene la estructura básica obligatoria.");
-        }
-
-        const res = await fetchWithAuth("/api/cfdi/verify-sat", {
-          method: "POST",
-          body: JSON.stringify({
-            xmlContent: activeInvoiceData.xmlContent,
-            ticketId: associatedTicket.id,
-            invoiceId: activeInvoiceData.id
-          })
-        });
-
-        if (!res.ok) {
-          throw new Error("Error al conectar con el servicio de verificación del SAT.");
-        }
-
-        const data = await res.json();
-        if (data.status === "valid") {
-          setVerificationError(null);
-        } else if (data.status === "canceled") {
-          const errMsg = "El XML obtenido se encuentra CANCELADO ante el SAT. Requiere revisión manual.";
-          setVerificationError(errMsg);
-        } else if (data.status === "error" || data.status === "timeout") {
-          const errMsg = "No pudimos verificar el CFDI ante el SAT en este momento. Requiere revisión manual.";
-          setVerificationError(errMsg);
-        } else {
-          const errMsg = "El XML obtenido no fue localizado en los controles del SAT. Requiere revisión manual.";
-          setVerificationError(errMsg);
-        }
-      } catch (err: any) {
-        console.error("SAT Verification failed client side:", err);
-        const errMsg = err.message || "Error al verificar el CFDI con el SAT.";
-        setVerificationError(errMsg);
-      } finally {
-        setIsValidatingSat(false);
-      }
-    };
-
-    runSatVerification();
-  }, [selectedBillingItem]);
-
   // ----------------------------------------------------
   // THIRD VIEW SCREEN: VER PDF - DETALLE DE FACTURA
   // ----------------------------------------------------
@@ -569,21 +485,9 @@ export default function TicketsListScreen({
       );
     }
 
-    const isXmlValid = activeInvoiceData ? validateXmlStructure(activeInvoiceData.xmlContent) : false;
     const isMock = activeInvoiceData ? activeInvoiceData.id?.startsWith("mock-") : false;
     const detailState = getBillingCanonicalState({ ticket: associatedTicket, invoice: activeInvoiceData });
     const canRenderPdf = isMock || detailState.isValidInvoice;
-
-    if (isValidatingSat) {
-      return (
-        <div className="max-w-xl mx-auto py-24 text-center animate-fade-in">
-          <div className="animate-spin rounded-full h-10 w-10 border-[#0B53F4] border-t-transparent mx-auto"></div>
-          <p className="text-slate-550 text-[11px] mt-4 font-mono uppercase tracking-widest">
-            Verificando validez en controles del SAT...
-          </p>
-        </div>
-      );
-    }
 
     if (!canRenderPdf) {
       const isCaptcha = detailState.canonicalStatus === "waiting_user_captcha";

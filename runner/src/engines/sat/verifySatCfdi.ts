@@ -25,7 +25,7 @@ export async function verifySatCfdi(re: string, rr: string, tt: number | string,
    </soapenv:Body>
 </soapenv:Envelope>`;
 
-  console.log(`[SAT Validator] Querying SOAP expression: ${expression}`);
+  console.log("[SAT Validator] Iniciando consulta SOAP de vigencia.");
 
   try {
     // @ts-ignore
@@ -55,11 +55,15 @@ export async function verifySatCfdi(re: string, rr: string, tt: number | string,
     // Parse the <a:Estado> tag using regex
     const statusMatch = xmlText.match(/<a:Estado>(.*?)<\/a:Estado>/i) || xmlText.match(/<Estado>(.*?)<\/Estado>/i);
     if (statusMatch && statusMatch[1]) {
-      const status = statusMatch[1].trim();
-      console.log(`[SAT Validator] CFDI SAT status: ${status}`);
+      const status = statusMatch[1].trim().toLowerCase();
+      console.log(`[SAT Validator] Resultado de consulta: ${status}`);
       return {
-        isValid: status.toLowerCase() === "vigente",
-        status: status
+        isValid: status === "vigente",
+        status: status === "vigente"
+          ? "Vigente"
+          : status === "cancelado"
+            ? "Cancelado"
+            : "No Encontrado"
       };
     }
 

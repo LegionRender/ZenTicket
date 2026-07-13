@@ -159,11 +159,16 @@ export async function processJob(jobId: string) {
     setActiveStage(currentStage);
     currentModule = "contract_validator";
     
-    // Check if ticket is already validated or has an invoice in Firestore
+    // A previous completion is trusted only when Cloud Run recorded SAT Vigente.
     const ticketSnap = await ticketRef.get();
     if (ticketSnap.exists) {
       const ticketData = ticketSnap.data();
-      if (ticketData && (ticketData.status === "cfdi_validated" || ticketData.isCfdiValidated)) {
+      const hasSatVigente = ticketData &&
+        ticketData.status === "cfdi_validated" &&
+        ticketData.isCfdiValidated === true &&
+        ticketData.satValidated === true &&
+        String(ticketData.satStatus || "").toLowerCase() === "vigente";
+      if (hasSatVigente) {
         await jobRef.update({
           status: "succeeded",
           lastError: null,
@@ -330,14 +335,23 @@ export async function processJob(jobId: string) {
 
         await invRef.update({
           status: "cfdi_validated",
-          validationStatus: "validated",
+          validationStatus: "sat_validated",
           isCfdiValidated: true,
+          cfdiValidated: true,
+          satValidated: true,
+          satStatus: "vigente",
+          estadoCfdi: "Vigente",
+          synthetic: false,
           updatedAt: new Date().toISOString()
         });
 
         await ticketRef.update({
           status: "cfdi_validated",
           invoiceId,
+          isCfdiValidated: true,
+          cfdiValidated: true,
+          satValidated: true,
+          validationStatus: "sat_validated",
           updatedAt: new Date().toISOString()
         });
 
