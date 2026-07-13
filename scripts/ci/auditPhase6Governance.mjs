@@ -27,19 +27,26 @@ const audit = {
 
 for (const name of collections) {
   const snapshot = await db.collection(name).select("status", "state", "mode", "type").get();
-  const byStatus = {};
+  const byLifecycle = {};
   const byMode = {};
   const byType = {};
   for (const doc of snapshot.docs) {
     const value = doc.data();
-    const status = String(value.status || value.state || "unspecified");
+    // Training records historically use `status` for free-form messages. Their
+    // lifecycle is represented only by `state`; all other collections use the
+    // normalized `status` field. Never export the free-form message.
+    const lifecycle = String(
+      name === "automation_trainings"
+        ? value.state || "unclassified"
+        : value.status || "unclassified"
+    );
     const mode = String(value.mode || "unspecified");
     const type = String(value.type || "unspecified");
-    byStatus[status] = (byStatus[status] || 0) + 1;
+    byLifecycle[lifecycle] = (byLifecycle[lifecycle] || 0) + 1;
     byMode[mode] = (byMode[mode] || 0) + 1;
     byType[type] = (byType[type] || 0) + 1;
   }
-  audit.collections[name] = { total: snapshot.size, byStatus, byMode, byType };
+  audit.collections[name] = { total: snapshot.size, byLifecycle, byMode, byType };
 }
 
 fs.writeFileSync("phase6-governance-audit.json", `${JSON.stringify(audit, null, 2)}\n`);
