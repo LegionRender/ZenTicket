@@ -2074,6 +2074,18 @@ export default function ScannerAndSimulator({
 
     if (!activeExtractedData || !activeFiscalProfile || !activeTicketId) return;
 
+    // An identified connector is not enough to bill. Only an explicitly
+    // approved production connector may enqueue the runner.
+    if (!activeConn || activeConn.status !== "production_ready" || activeConn.runnerAvailable !== true) {
+      await onUpdateTicketInDb(activeTicketId, {
+        status: "requires_manual_review",
+        errorMsg: "Este comercio requiere un conector aprobado antes de facturar.",
+        reviewReasonCode: "CONNECTOR_NOT_FOUND"
+      });
+      toast.info("Este ticket quedó en revisión manual; no se iniciará una facturación automática.");
+      return;
+    }
+
     // Check if the ticket has already been billed
     const activeFolioValue = activeExtractedData.folio || activeExtractedData.billingReference || activeExtractedData.referenciaFacturacion || "";
     const dupByTicketList = getExistingInvoicedTicket(activeExtractedData.rfcEmisor, activeFolioValue);
@@ -3144,6 +3156,8 @@ export default function ScannerAndSimulator({
         reviewReasonCode: "CONNECTOR_NOT_FOUND"
       });
       toast.info("Tus datos quedaron guardados. Este comercio requiere un conector aprobado antes de facturar.");
+      if (onSetNewlyAddedTicketId) onSetNewlyAddedTicketId(ticketId);
+      if (onTabChange) onTabChange("tickets");
     }
   };
 
@@ -5158,7 +5172,7 @@ return list.map(n => {
                           )}
                         </div>
                       </div>
-                    ) : matchingConnector ? (
+                    ) : isConnectorReady ? (
                       <div className="p-3.5 bg-blue-50 border border-blue-150 text-blue-900 rounded-xl flex items-start gap-2.5 text-xs text-left animate-fade-in_50 font-sans">
                         <CheckCircle className="w-4.5 h-4.5 text-[#0B53F4] shrink-0 mt-0.5" />
                         <div>
@@ -5184,7 +5198,7 @@ return list.map(n => {
                     {/* Prominent main invoice clickers triggers */}
                     {!checkIsDataIncomplete(extractedData) && (
                       <div className="flex flex-col sm:flex-row gap-3 pt-1">
-                        {matchingConnector ? (
+                        {isConnectorReady ? (
                           <>
                             <button
                               onClick={handleTriggerAutomation}
@@ -5212,10 +5226,6 @@ return list.map(n => {
                             <button
                               onClick={async () => {
                                 if (ticketId) {
-                                  if (!matchingConnector) {
-                                    void handleRunTraining(extractedData, ticketId);
-                                    return;
-                                  }
                                   const reviewErr: ReviewError = {
                                     reviewReasonCode: "PORTAL_ERROR",
                                     reviewReasonMessage: "El usuario solicitó revisión manual.",
@@ -5236,7 +5246,7 @@ return list.map(n => {
                               }}
                               className="text-[10.5px] font-black uppercase tracking-widest flex items-center justify-center gap-2 text-slate-700 bg-slate-100 hover:bg-slate-205 px-6 py-4 rounded-2xl transition active:scale-[0.98] select-none cursor-pointer border-none shadow-2xs font-sans"
                             >
-                              {matchingConnector ? "Enviar a revisión" : "Preparar facturación"}
+                              Enviar a revisión
                             </button>
                           </>
                         )}
