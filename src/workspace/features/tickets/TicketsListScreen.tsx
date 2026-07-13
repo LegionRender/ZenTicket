@@ -421,29 +421,37 @@ export default function TicketsListScreen({
                 <div><dt className="text-xs font-bold text-slate-500">Folio</dt><dd className="mt-1 font-medium text-slate-900">{associatedTicket.folio || associatedTicket.portalFields?.billingReference || "No detectado"}</dd></div>
               </dl>
             </div>
-            {associatedTicket.portalFields && Object.keys(associatedTicket.portalFields).length > 0 && (
+            {((associatedTicket.portalFields && Object.keys(associatedTicket.portalFields).length > 0) || associatedTicket.portalUrl) && (
               <div className="mt-6 pt-6 border-t border-slate-100">
                 <h4 className="text-xs font-black uppercase tracking-wider text-[#0B53F4]">Datos para el portal de facturación</h4>
-                <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-4 text-sm">
-                  {Object.entries(associatedTicket.portalFields).map(([key, val]) => {
-                    if (!val) return null;
-                    let label = key;
-                    if (key === "billingReference") label = "Folio / Referencia";
-                    else if (key === "fechaCompra") label = "Fecha de Compra";
-                    else if (key === "total") label = "Monto Total";
-                    else if (key === "rfcEmisor") label = "RFC del Emisor";
-                    else if (key === "sucursal") label = "Sucursal / Tienda";
-                    else if (key.startsWith("custom_")) label = key.replace("custom_", "");
-                    
-                    label = label.charAt(0).toUpperCase() + label.slice(1);
-                    return (
-                      <div key={key}>
-                        <dt className="text-xs font-bold text-slate-500">{label}</dt>
-                        <dd className="mt-1 font-medium text-slate-900">{String(val)}</dd>
-                      </div>
-                    );
-                  })}
-                </dl>
+                {associatedTicket.portalUrl && (
+                  <div className="mt-3 mb-4 text-xs font-medium text-slate-600 flex flex-wrap items-center gap-1.5 bg-slate-50 border border-slate-100 rounded-xl p-3">
+                    <span className="font-bold text-slate-800">Portal de facturación:</span>
+                    <a href={associatedTicket.portalUrl} target="_blank" rel="noopener noreferrer" className="text-[#0B53F4] hover:underline break-all">{associatedTicket.portalUrl}</a>
+                  </div>
+                )}
+                {associatedTicket.portalFields && Object.keys(associatedTicket.portalFields).length > 0 && (
+                  <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-4 text-sm">
+                    {Object.entries(associatedTicket.portalFields).map(([key, val]) => {
+                      if (!val) return null;
+                      let label = key;
+                      if (key === "billingReference") label = "Folio / Referencia";
+                      else if (key === "fechaCompra") label = "Fecha de Compra";
+                      else if (key === "total") label = "Monto Total";
+                      else if (key === "rfcEmisor") label = "RFC del Emisor";
+                      else if (key === "sucursal") label = "Sucursal / Tienda";
+                      else if (key.startsWith("custom_")) label = key.replace("custom_", "");
+                      
+                      label = label.charAt(0).toUpperCase() + label.slice(1);
+                      return (
+                        <div key={key}>
+                          <dt className="text-xs font-bold text-slate-500">{label}</dt>
+                          <dd className="mt-1 font-medium text-slate-900">{String(val)}</dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
+                )}
               </div>
             )}
           </section>
