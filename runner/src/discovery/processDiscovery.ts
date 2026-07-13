@@ -328,13 +328,20 @@ export async function processConnectorDiscovery(discoveryId: string) {
     let extractedPortalFields: Record<string, string> = {};
     if (ticketData && ticketData.imageUrl && geminiApiKey) {
       console.info("[JIT-OCR] Running targeted OCR extraction in hot path...");
-      extractedPortalFields = await extractFieldsWithGemini(
+      const rawExtracted = await extractFieldsWithGemini(
         ticketData.imageUrl,
         contractFields,
         discovery.merchantName || "Comercio",
         geminiApiKey
       );
-      console.info("[JIT-OCR] Hot extraction result:", JSON.stringify(extractedPortalFields));
+      console.info("[JIT-OCR] Raw hot extraction result:", JSON.stringify(rawExtracted));
+      
+      contractFields.forEach(f => {
+        const val = rawExtracted[f.canonicalKey] || rawExtracted[f.key] || "";
+        if (f.canonicalKey) extractedPortalFields[f.canonicalKey] = val;
+        if (f.key) extractedPortalFields[f.key] = val;
+      });
+
       if (ticketRef) {
         await ticketRef.update({
           portalFields: extractedPortalFields,
@@ -379,7 +386,9 @@ export async function processConnectorDiscovery(discoveryId: string) {
       const ticketPortalFields = { ...ticketData?.portalFields, ...extractedPortalFields };
       const fieldsSnapshot: any = {};
       contractFields.forEach(f => {
-        fieldsSnapshot[f.canonicalKey] = ticketPortalFields[f.canonicalKey] || ticketPortalFields[f.key] || "";
+        const val = ticketPortalFields[f.canonicalKey] || ticketPortalFields[f.key] || "";
+        if (f.canonicalKey) fieldsSnapshot[f.canonicalKey] = val;
+        if (f.key) fieldsSnapshot[f.key] = val;
       });
       ticketSnapshot.portalFields = fieldsSnapshot;
 
