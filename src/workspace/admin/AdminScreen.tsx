@@ -636,7 +636,7 @@ export default function AdminScreen({
       time: "08:00:03 AM",
       tag: "AI_GATEWAY",
       tagColor: "text-sky-400 font-bold",
-      text: "Canal de entrenamiento heurístico activo en /api/connectors/learn"
+      text: "Canal de aprendizaje heurístico congelado por gobernanza de Fase 6"
     });
 
     if (tickets.length > 0) {

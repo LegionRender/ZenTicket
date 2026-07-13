@@ -1962,6 +1962,13 @@ function getLocalConnectorFallback(nombreEmisor: string, rfcEmisor: string) {
 
 // API endpoint: Use Search Grounding to learn portal specs when no connector exists
 app.post("/api/connectors/learn", authenticateFirebaseToken, async (req: Request, res: Response): Promise<void> => {
+  // Compatibility route: heuristic/JIT connector learning is retired.
+  res.status(410).json({
+    code: "JIT_GOVERNANCE_FROZEN",
+    error: "El aprendizaje heurístico de conectores está congelado."
+  });
+  return;
+
   const { nombreEmisor, rfcEmisor, learnedFrom, tokenSaver } = req.body;
   const customKey = req.headers["x-gemini-api-key"] as string | undefined;
 
@@ -2194,6 +2201,14 @@ app.post("/api/connectors/learn", authenticateFirebaseToken, async (req: Request
 });
 
 app.post("/api/admin/discover-portal", authenticateFirebaseToken, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  // Compatibility route: no administrative discovery may launch a browser
+  // while JIT governance is frozen.
+  res.status(410).json({
+    code: "JIT_GOVERNANCE_FROZEN",
+    error: "El discovery administrativo de portales está congelado."
+  });
+  return;
+
   const { officialBillingUrl } = req.body;
   const customKey = req.headers["x-gemini-api-key"] as string | undefined;
 
