@@ -418,7 +418,6 @@ export default function TicketsListScreen({
                 <div><dt className="text-xs font-bold text-slate-500">Comercio</dt><dd className="mt-1 font-bold text-slate-900">{associatedTicket.nombreEmisor || "No detectado"}</dd></div>
                 <div><dt className="text-xs font-bold text-slate-500">Total</dt><dd className="mt-1 font-bold text-slate-900">${total.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN</dd></div>
                 <div><dt className="text-xs font-bold text-slate-500">Fecha</dt><dd className="mt-1 font-medium text-slate-900">{associatedTicket.fechaCompra || "No detectada"}</dd></div>
-                <div><dt className="text-xs font-bold text-slate-500">Folio</dt><dd className="mt-1 font-medium text-slate-900">{associatedTicket.folio || associatedTicket.portalFields?.billingReference || "No detectado"}</dd></div>
               </dl>
             </div>
             {((associatedTicket.portalFields && Object.keys(associatedTicket.portalFields).length > 0) || associatedTicket.portalUrl) && (

@@ -61,17 +61,17 @@ function classifyDiscoveryFailure(message: string) {
 
 function resolveCanonicalKey(field: ObservedField): string {
   const text = `${field.id} ${field.name} ${field.label} ${field.placeholder}`.toLowerCase();
-  if (/rfc|taxid/i.test(text)) return "rfcEmisor";
+  if (/rfc.*receptor|rfc.*cliente/i.test(text)) return "rfc";
+  if (/rfc|taxid/i.test(text)) return "rfc"; // Default receiver rfc on forms
+  if (/razon|nombre.*receptor|social|cliente|company|business/i.test(text)) return "razonSocial";
+  if (/regimen/i.test(text)) return "regimenFiscal";
+  if (/cp|postal|zip/i.test(text)) return "codigoPostal";
+  if (/uso/i.test(text)) return "usoCFDI";
+  if (/mail|correo/i.test(text)) return "correoElectronico";
   if (/folio|ticket|referencia|billing|ref|rastreo|webid|transaccion|operacion|compra/i.test(text)) return "billingReference";
   if (/fecha|date/i.test(text)) return "fechaCompra";
   if (/total|monto|amount|pago/i.test(text)) return "total";
   if (/sucursal|tienda|store|branch/i.test(text)) return "sucursal";
-  if (/rfc.*receptor/i.test(text)) return "rfc";
-  if (/razon|nombre.*receptor|social/i.test(text)) return "razonSocial";
-  if (/regimen/i.test(text)) return "regimenFiscal";
-  if (/cp|postal/i.test(text)) return "codigoPostal";
-  if (/uso/i.test(text)) return "usoCFDI";
-  if (/mail|correo/i.test(text)) return "correoElectronico";
   return "custom_" + (field.name || field.id || "field");
 }
 
@@ -245,16 +245,43 @@ export async function processConnectorDiscovery(discoveryId: string) {
 
     // 1. Auto-approve and save the new connector & portalMap
     const connectorId = `conn-${discovery.rfcEmisor || "unknown"}-${Date.now().toString(36)}`;
-    const contractFields = fields.map(f => {
+    
+    const contractFields: any[] = [];
+    const steps: any[] = [{ type: "goto", url: finalUrl }];
+    const FISCAL_KEYS = ["rfc", "razonSocial", "regimenFiscal", "codigoPostal", "usoCFDI", "correoElectronico"];
+
+    fields.forEach(f => {
       const canonicalKey = resolveCanonicalKey(f);
-      return {
-        key: f.name || f.id || "field",
-        canonicalKey,
-        label: f.label || f.placeholder || f.name || f.id || "Campo",
-        type: f.tag === "select" ? "select" : "text",
-        required: f.required !== undefined ? f.required : true,
-        userEditable: true
-      };
+      const isFiscal = FISCAL_KEYS.includes(canonicalKey);
+      
+      const keyName = f.name || f.id || "field";
+      const selector = f.id ? `#${f.id}` : (f.name ? `[name='${f.name}']` : "");
+      if (!selector) return;
+
+      if (isFiscal) {
+        // Customer fiscal profile field - filled from fiscalProfile snapshot
+        steps.push({
+          type: "fill",
+          selector,
+          source: `fiscalProfile.${canonicalKey}`
+        });
+      } else {
+        // Ticket-specific field - requires extraction from ticket.portalFields
+        contractFields.push({
+          key: keyName,
+          canonicalKey,
+          label: f.label || f.placeholder || f.name || f.id || "Campo",
+          type: f.tag === "select" ? "select" : "text",
+          required: f.required !== undefined ? f.required : true,
+          userEditable: true
+        });
+
+        steps.push({
+          type: "fill",
+          selector,
+          source: `ticket.portalFields.${canonicalKey}`
+        });
+      }
     });
 
     const newConnector = {
@@ -275,10 +302,10 @@ export async function processConnectorDiscovery(discoveryId: string) {
         ]
       },
       fieldsJson: JSON.stringify(contractFields),
-      flowJson: JSON.stringify(contractFields.map(f => ({
+      flowJson: JSON.stringify(steps.slice(1).map(s => ({
         type: "fill",
-        selector: f.key ? `[name='${f.key}']` : `#${f.key}`,
-        value: `ticket.portalFields.${f.canonicalKey}`
+        selector: s.selector,
+        value: s.source
       }))),
       learnedFrom: "automatizacion_ticket",
       trainingId: discoveryId,
@@ -296,14 +323,7 @@ export async function processConnectorDiscovery(discoveryId: string) {
       connectorId: connectorId,
       isApproved: true,
       status: "approved",
-      stepsJson: JSON.stringify([
-        { type: "goto", url: finalUrl },
-        ...contractFields.map(f => ({
-          type: "fill",
-          selector: f.key ? `[name='${f.key}']` : `#${f.key}`,
-          source: `ticket.portalFields.${f.canonicalKey}`
-        }))
-      ]),
+      stepsJson: JSON.stringify(steps),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
