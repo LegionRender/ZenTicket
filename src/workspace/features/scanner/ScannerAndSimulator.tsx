@@ -4509,7 +4509,7 @@ return list.map(n => {
 
           {/* Values parsed & connector seek panel */}
           <div className="lg:col-span-8 flex flex-col justify-between text-left">
-            {isTrainingModel ? (
+            {isTrainingModel && !isEditing ? (
               /* Simple, friendly loading/training progress view */
               <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 space-y-6 text-center shadow-md animate-fade-in_50">
                 <div className="flex flex-col items-center gap-4 animate-pulse">
@@ -4540,6 +4540,15 @@ return list.map(n => {
                     <span className="text-[#0B53F4] font-black">{trainingProgress}%</span>
                   </div>
                 </div>
+                <button
+                  onClick={() => {
+                    setIsTrainingModel(false);
+                    setIsEditing(true);
+                  }}
+                  className="mx-auto text-[10.5px] font-black uppercase tracking-widest text-[#0B53F4] bg-[#ebf1ff] hover:bg-blue-100 px-5 py-3 rounded-xl transition cursor-pointer border-none font-sans"
+                >
+                  Corroborar datos
+                </button>
               </div>
             ) : (["training_required", "connector_not_ready", "portal_retry_required"].includes(currentTicket?.status || "") && !isEditing) ? (
               <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-6 text-left shadow-md animate-fade-in font-sans">
