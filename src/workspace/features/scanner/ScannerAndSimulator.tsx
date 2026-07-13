@@ -2001,12 +2001,9 @@ export default function ScannerAndSimulator({
   };
 
   const ensureTrainingRequest = async (ocrResult: any, foundConnector: any, tId: string | null) => {
-    // Discovery and JIT learning are not part of production ticket handling.
-    // Keep this compatibility hook intentionally side-effect free so a real
-    // ticket can never create training data or trigger portal discovery.
-    void ocrResult;
-    void foundConnector;
-    void tId;
+    if (!foundConnector && tId) {
+      void handleRunTraining(ocrResult, tId);
+    }
   };
 
   // Trigger high fidelity automation logs and final document generation
@@ -2720,19 +2717,47 @@ export default function ScannerAndSimulator({
     }
   };
 
-  // Legacy callers now resolve to manual review; JIT training is retired.
+  // Call train-jit API to start portal discovery and JIT training.
   const handleRunTraining = async (
     _trainingData: ExtractedTicketData | null = extractedData,
     trainingTicketId: string | null = ticketId
   ) => {
     if (!trainingTicketId) return;
-    setIsTrainingModel(false);
-    setActiveStep("tracking");
-    await onUpdateTicketInDb(trainingTicketId, {
-      status: "requires_manual_review",
-      errorMsg: "Estamos preparando la facturación automática con este comercio. Tu ticket quedó resguardado y procesaremos tu factura a la brevedad.",
-      reviewReasonCode: "CONNECTOR_NOT_FOUND"
-    });
+    try {
+      setIsTrainingModel(true);
+      setTrainingProgress(25);
+      setTrainingStatus("Buscando portal de facturación...");
+
+      const response = await fetchWithAuth("/api/tickets/train-jit", {
+        method: "POST",
+        body: JSON.stringify({
+          ticketId: trainingTicketId,
+          nombreEmisor: _trainingData?.nombreEmisor || "",
+          rfcEmisor: _trainingData?.rfcEmisor || ""
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("El servicio de entrenamiento retornó un error.");
+      }
+
+      await onUpdateTicketInDb(trainingTicketId, {
+        status: "training_required",
+        updatedAt: new Date().toISOString()
+      });
+      
+      setTrainingProgress(50);
+      setTrainingStatus("Verificando portal oficial con el runner...");
+    } catch (err: any) {
+      console.error("JIT training trigger failed:", err);
+      setIsTrainingModel(false);
+      await onUpdateTicketInDb(trainingTicketId, {
+        status: "requires_manual_review",
+        errorMsg: "El comercio de este ticket no cuenta con automatización y requiere revisión manual.",
+        reviewReasonCode: "CONNECTOR_NOT_FOUND",
+        updatedAt: new Date().toISOString()
+      });
+    }
     if (onSetNewlyAddedTicketId) onSetNewlyAddedTicketId(trainingTicketId);
   };
   useEffect(() => {
