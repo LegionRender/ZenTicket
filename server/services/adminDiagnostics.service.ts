@@ -855,6 +855,7 @@ export class AdminDiagnosticsService {
     const summary = {
       id: ticketId,
       ticketId: ticketId,
+      diagnosticStatus: (canonicalTicket?.diagnosticStatus || "pending") as string,
       ticketReference: canonicalTicket?.folio || canonicalTicket?.portalFields?.billingReference || invoice?.ticketReference || "S/D",
       userId: userId || invoice?.userId,
       affectedPortal: canonicalTicket?.nombreEmisor || invoice?.nombreEmisor || "OXXO CADENA",
