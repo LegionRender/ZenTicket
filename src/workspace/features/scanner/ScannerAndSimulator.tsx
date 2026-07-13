@@ -2968,14 +2968,28 @@ export default function ScannerAndSimulator({
     if (ticketId) {
       try {
         const basePortalFields = updatedData.portalFields ? { ...updatedData.portalFields } : {};
-        finalPortalFields = {
-          ...basePortalFields,
-          billingReference: updatedData.folio || basePortalFields.billingReference || "",
-          total: updatedData.total || basePortalFields.total || 0,
-          date: updatedData.fechaCompra || basePortalFields.date || "",
-          fecha: updatedData.fechaCompra || basePortalFields.fecha || "",
-          ticketNumber: updatedData.folio || basePortalFields.ticketNumber || ""
-        };
+        const activeConn = matchingConnector || matchConnector(updatedData.nombreEmisor || "", updatedData.rfcEmisor || "");
+        if (activeConn && activeConn.extractionContract?.requiredPortalFields) {
+          const reqFields = activeConn.extractionContract.requiredPortalFields;
+          finalPortalFields = { ...basePortalFields };
+          reqFields.forEach((f: any) => {
+            const key = String(f.canonicalKey || f.key || "").replace(/^portalFields\./, "").trim();
+            if (!key) return;
+            if (key === "billingReference" || key === "ticketNumber" || key === "folio") {
+              finalPortalFields[key] = updatedData.folio || basePortalFields[key] || "";
+            } else if (key === "total" || key === "totalAmount") {
+              finalPortalFields[key] = updatedData.total || basePortalFields[key] || 0;
+            } else if (key === "fechaCompra" || key === "date" || key === "fecha") {
+              finalPortalFields[key] = updatedData.fechaCompra || basePortalFields[key] || "";
+            } else {
+              if (finalPortalFields[key] === undefined) {
+                finalPortalFields[key] = "";
+              }
+            }
+          });
+        } else {
+          finalPortalFields = {};
+        }
 
         // Sync local object properties so immediate automation run uses new fields
         updatedData.portalFields = finalPortalFields;
@@ -3066,18 +3080,14 @@ export default function ScannerAndSimulator({
           profileUpdates[mappedKey] = val;
         } else if (key.startsWith("portalFields.")) {
           const k = key.replace("portalFields.", "");
-          if (k === "billingReference") {
+          newPortalFields[k] = val;
+          if (k === "billingReference" || k === "ticketNumber" || k === "folio") {
             ticketUpdates.folio = val;
-            newPortalFields.billingReference = val;
-            newPortalFields.ticketNumber = val;
-          } else if (k === "total") {
+          } else if (k === "total" || k === "totalAmount") {
             const num = parseFloat(val);
             ticketUpdates.total = isNaN(num) ? 0 : num;
-            newPortalFields.total = isNaN(num) ? 0 : num;
-          } else if (k === "date") {
+          } else if (k === "date" || k === "fechaCompra" || k === "fecha") {
             ticketUpdates.fechaCompra = val;
-            newPortalFields.date = val;
-            newPortalFields.fecha = val;
           }
         }
       }
