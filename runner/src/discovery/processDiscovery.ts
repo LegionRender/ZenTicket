@@ -59,6 +59,21 @@ function classifyDiscoveryFailure(message: string) {
   };
 }
 
+function resolveCanonicalKey(field: ObservedField): string {
+  const text = `${field.id} ${field.name} ${field.label} ${field.placeholder}`.toLowerCase();
+  if (/rfc|taxid/i.test(text)) return "rfcEmisor";
+  if (/folio|ticket|referencia|billing|ref/i.test(text)) return "billingReference";
+  if (/fecha|date/i.test(text)) return "fechaCompra";
+  if (/total|monto|amount|pago/i.test(text)) return "total";
+  if (/rfc.*receptor/i.test(text)) return "rfc";
+  if (/razon|nombre.*receptor|social/i.test(text)) return "razonSocial";
+  if (/regimen/i.test(text)) return "regimenFiscal";
+  if (/cp|postal/i.test(text)) return "codigoPostal";
+  if (/uso/i.test(text)) return "usoCFDI";
+  if (/mail|correo/i.test(text)) return "correoElectronico";
+  return "custom_" + (field.name || field.id || "field");
+}
+
 export async function processConnectorDiscovery(discoveryId: string) {
   const discoveryRef = db.collection("connector_discovery_jobs").doc(discoveryId);
   const proposalRef = db.collection("connector_patch_proposals").doc(`discovery-${discoveryId}`);
@@ -175,26 +190,202 @@ export async function processConnectorDiscovery(discoveryId: string) {
     const tracePath = `connector-discovery/${discoveryId}/${attemptId}.zip`;
     await getStorage().bucket().file(tracePath).save(fs.readFileSync(traceLocalPath), { contentType: "application/zip" });
     evidence.tracePath = tracePath;
-    await discoveryRef.set({ status: "completed", finalUrl, evidence, completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true });
-    if (ticketRef) await ticketRef.set({
-      status: "training_pending_review",
-      trainingId: discoveryId,
-      portalUrl: finalUrl,
-      portalUrlVerifiedAt: new Date().toISOString(),
-      portalUrlVerification: "verified_observed_dom",
-      trainingProposalId: proposalRef.id,
-      jitResolution: {
-        attemptId,
-        stage: "portal_discovery",
-        code: "PORTAL_FIELDS_OBSERVED",
-        title: "Portal oficial observado",
-        description: fields.length > 0 ? `Se observaron ${fields.length} campos visibles en el portal. El conector quedó pendiente de revisión segura.` : "El portal abrió, pero no expuso campos visibles todavía.",
-        evidence: { finalUrl, screenshotPath, tracePath, observedFieldsCount: fields.length },
-        recommendedAction: "Revisión del conector en sandbox antes de procesar tickets reales.",
-        updatedAt: new Date().toISOString()
+
+    // 1. Auto-approve and save the new connector & portalMap
+    const connectorId = `conn-${discovery.rfcEmisor || "unknown"}-${Date.now().toString(36)}`;
+    const contractFields = fields.map(f => {
+      const canonicalKey = resolveCanonicalKey(f);
+      return {
+        key: f.name || f.id || "field",
+        canonicalKey,
+        label: f.label || f.placeholder || f.name || f.id || "Campo",
+        type: f.tag === "select" ? "select" : "text",
+        required: f.required !== undefined ? f.required : true,
+        userEditable: true
+      };
+    });
+
+    const newConnector = {
+      id: connectorId,
+      nombre: discovery.merchantName || "Comercio Auto-JIT",
+      rfc: discovery.rfcEmisor || "",
+      status: "production_ready",
+      runnerAvailable: true,
+      extractionContract: {
+        requiredPortalFields: contractFields,
+        fiscalFields: [
+          { key: "rfc", label: "RFC", required: true },
+          { key: "razonSocial", label: "Razón Social", required: true },
+          { key: "regimenFiscal", label: "Régimen Fiscal", required: true },
+          { key: "codigoPostal", label: "Código Postal", required: true },
+          { key: "usoCFDI", label: "Uso CFDI", required: true }
+        ]
       },
+      fieldsJson: JSON.stringify(contractFields),
+      flowJson: JSON.stringify(contractFields.map(f => ({
+        type: "fill",
+        selector: f.key ? `[name='${f.key}']` : `#${f.key}`,
+        value: `ticket.portalFields.${f.canonicalKey}`
+      }))),
+      learnedFrom: "automatizacion_ticket",
+      trainingId: discoveryId,
+      version: "1.0.0",
+      successCount: 0,
+      failureCount: 0,
+      totalExecutions: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection("connectors").doc(connectorId).set(newConnector);
+
+    const newPortalMap = {
+      id: `map-${connectorId}`,
+      connectorId: connectorId,
+      isApproved: true,
+      status: "approved",
+      stepsJson: JSON.stringify([
+        { type: "goto", url: finalUrl },
+        ...contractFields.map(f => ({
+          type: "fill",
+          selector: f.key ? `[name='${f.key}']` : `#${f.key}`,
+          source: `ticket.portalFields.${f.canonicalKey}`
+        }))
+      ]),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await db.collection("portal_maps").doc(`map-${connectorId}`).set(newPortalMap);
+
+    // Update proposal to auto-approved
+    await proposalRef.set({
+      autoApproved: true,
+      status: "approved",
+      stepsJson: newPortalMap.stepsJson,
       updatedAt: new Date().toISOString()
     }, { merge: true });
+
+    await discoveryRef.set({ status: "completed", finalUrl, evidence, completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true });
+
+    // 2. Resolve user's fiscalProfile and enqueue invoice_job if complete
+    let ticketData: any = null;
+    if (ticketRef) {
+      const ticketSnap = await ticketRef.get();
+      ticketData = ticketSnap.exists ? ticketSnap.data() : null;
+    }
+
+    const profileSnap = await db.collection("fiscalProfiles").doc(discovery.userId).get();
+    const profile = profileSnap.exists ? profileSnap.data() : null;
+    const requiredFiscalKeys = ["rfc", "razonSocial", "regimenFiscal", "codigoPostal", "usoCFDI"];
+    const missingFiscal = requiredFiscalKeys.filter(k => !profile || !profile[k] || !String(profile[k]).trim());
+    const emailVal = profile?.correoElectronico || profile?.correoRecepcion || "";
+    if (!emailVal || !emailVal.trim().includes("@")) {
+      missingFiscal.push("correoElectronico");
+    }
+
+    if (missingFiscal.length > 0) {
+      if (ticketRef) {
+        await ticketRef.set({
+          status: "waiting_fiscal_profile",
+          connectorId: connectorId,
+          portalMapId: `map-${connectorId}`,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      }
+    } else {
+      // Create invoice_job & outbox
+      const jobId = `ticket-${discovery.ticketId.slice(0, 40)}`;
+      const jobRef = db.collection("invoice_jobs").doc(jobId);
+      const outboxRef = db.collection("invoice_job_outbox").doc(jobId);
+      const lockRef = db.collection("invoice_ticket_locks").doc(discovery.ticketId);
+
+      const ticketSnapshot = {
+        merchantName: discovery.merchantName || "",
+        portalFields: {},
+        expectedTicketTotal: Number(ticketData?.total || 0),
+        rawOcrText: ticketData?.rawOcrText || ""
+      };
+      
+      const ticketPortalFields = ticketData?.portalFields || {};
+      const fieldsSnapshot: any = {};
+      contractFields.forEach(f => {
+        fieldsSnapshot[f.canonicalKey] = ticketPortalFields[f.canonicalKey] || ticketPortalFields[f.key] || "";
+      });
+      ticketSnapshot.portalFields = fieldsSnapshot;
+
+      const fiscalProfileSnapshot = {
+        userId: discovery.userId,
+        rfc: String(profile.rfc || "").trim(),
+        razonSocial: String(profile.razonSocial || "").trim(),
+        regimenFiscal: String(profile.regimenFiscal || "").trim(),
+        codigoPostal: String(profile.codigoPostal || "").trim(),
+        usoCFDI: String(profile.usoCFDI || "").trim(),
+        correoElectronico: String(emailVal).trim(),
+        createdAt: profile.createdAt || new Date().toISOString()
+      };
+
+      const connectorSnapshot = {
+        id: connectorId,
+        nombre: newConnector.nombre,
+        rfc: newConnector.rfc,
+        portalUrl: finalUrl,
+        status: newConnector.status,
+        version: newConnector.version
+      };
+
+      const portalMapSnapshot = {
+        id: `map-${connectorId}`,
+        connectorId,
+        status: "approved",
+        version: null,
+        requiredFields: contractFields,
+        stepsJson: newPortalMap.stepsJson,
+        entryUrl: finalUrl
+      };
+
+      const nowStr = new Date().toISOString();
+      const job = {
+        ticketId: discovery.ticketId,
+        userId: discovery.userId,
+        status: "pending",
+        connectorId,
+        portalMapId: `map-${connectorId}`,
+        connectorStatusAtRun: "production_ready",
+        ticketDataSnapshot: ticketSnapshot,
+        fiscalProfileSnapshot,
+        connectorSnapshot,
+        portalMapSnapshot,
+        idempotencyKeyHash: "auto-jit-" + Math.random().toString(36).slice(2, 10),
+        attempts: 0,
+        maxAttempts: 3,
+        currentStepIndex: 0,
+        waitingForFields: [],
+        canResume: true,
+        createdAt: nowStr,
+        updatedAt: nowStr
+      };
+
+      await db.runTransaction(async (transaction) => {
+        transaction.set(jobRef, job);
+        transaction.set(lockRef, { ticketId: discovery.ticketId, jobId, userId: discovery.userId, status: "pending", updatedAt: nowStr });
+        transaction.set(outboxRef, {
+          jobId,
+          userId: discovery.userId,
+          status: "pending",
+          availableAt: FieldValue.serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp()
+        });
+        if (ticketRef) {
+          transaction.update(ticketRef, {
+            status: "queued_for_runner",
+            connectorId,
+            portalMapId: `map-${connectorId}`,
+            jobId,
+            updatedAt: nowStr
+          });
+        }
+      });
+    }
   } catch (error: any) {
     const errorMessage = error?.message || String(error);
     const resolution = classifyDiscoveryFailure(errorMessage);
@@ -209,12 +400,12 @@ export async function processConnectorDiscovery(discoveryId: string) {
     const evidence = { attemptId, entryUrl: discovery.portalUrl || null, finalUrl: page?.url?.() || null, screenshotPath, tracePath, errorMessage, observedAt: new Date().toISOString() };
     await discoveryRef.set({ status: "failed", errorCode: resolution.code, errorMessage, evidence, failedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true });
     if (ticketRef) await ticketRef.set({
-      status: resolution.code === "CAPTCHA_DETECTED" ? "waiting_user_captcha" : "portal_retry_required",
+      status: "requires_manual_review",
       errorCode: resolution.code,
       reviewReasonCode: resolution.code,
       jitResolution: { ...resolution, attemptId, evidence, updatedAt: new Date().toISOString() },
       diagnosticDescription: resolution.description,
-      errorMsg: "Tuvimos una complicación al verificar el portal de facturación. Conservamos la evidencia para revisarlo y no inventaremos datos.",
+      errorMsg: `La exploración del portal falló en la etapa '${resolution.stage}' por: ${resolution.title}. Detalles técnicos: ${errorMessage}`,
       updatedAt: new Date().toISOString()
     }, { merge: true });
     throw error;

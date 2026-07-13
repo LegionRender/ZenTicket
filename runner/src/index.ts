@@ -1453,9 +1453,15 @@ export async function processJob(jobId: string) {
       errorCode: finalReviewReasonCode,
       updatedAt: new Date().toISOString()
     });
+    const connDoc = await db.collection("connectors").doc(lockedJob.connectorId).get();
+    const connData = connDoc.exists ? connDoc.data() || {} : {};
+    const successCount = connData.successCount || 0;
+    const isNewJit = connData.learnedFrom === "automatizacion_ticket";
+
     await db.collection("connectors").doc(lockedJob.connectorId).set({
       totalExecutions: FieldValue.increment(1),
       failureCount: FieldValue.increment(1),
+      ...(isNewJit && successCount === 0 ? { status: "automation_pending_setup" } : {}),
       updatedAt: new Date().toISOString()
     }, { merge: true });
 

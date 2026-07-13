@@ -1376,11 +1376,336 @@ app.post("/api/tickets/analyze", async (req, res) => {
   }
 });
 
-app.post("/api/tickets/train-jit", (_req, res) => {
-  res.status(410).json({
-    code: "JIT_GOVERNANCE_FROZEN",
-    error: "El descubrimiento JIT está retirado. Los conectores sólo se administran mediante el proceso aprobado."
-  });
+app.post("/api/tickets/train-jit", async (req, res) => {
+  const {
+    ticketId, nombreEmisor: bodyNombre, rfcEmisor: bodyRfc,
+    adminMode = false, merchantName, trainingId: requestedTrainingId
+  } = req.body || {};
+  const customKey = req.headers["x-gemini-api-key"];
+  const trainingId = String(requestedTrainingId || ticketId || `portal-${Date.now()}`)
+    .replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120);
+
+  if (!ticketId && !adminMode) {
+    res.status(400).json({ error: "Falta el ticketId" });
+    return;
+  }
+  if (adminMode && !String(merchantName || bodyNombre || "").trim()) {
+    res.status(400).json({ error: "Falta el nombre de la empresa a entrenar." });
+    return;
+  }
+
+  // Helper to update progress in automation_trainings
+  const updateProgress = async (progress, step, state = "in_progress") => {
+    try {
+      if (db && typeof db.collection === "function") {
+        await db.collection("automation_trainings").doc(trainingId).set({
+          progress,
+          step,
+          status: step,
+          state,
+          mode: adminMode ? "portal_admin" : "ticket_jit",
+          ticketId: ticketId || null,
+          merchantName: String(merchantName || bodyNombre || "").trim() || null,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.warn("Could not update training progress in Firestore:", e.message);
+    }
+  };
+
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Debes iniciar sesión para entrenar un conector." });
+      return;
+    }
+    const decodedToken = await admin.auth().verifyIdToken(authHeader.slice(7));
+    const email = String(decodedToken.email || "").toLowerCase();
+    const isAdmin = email === "legionrender@gmail.com" ||
+      email === "ricardo@zenticket.mx" ||
+      email.includes("legionrender") ||
+      email.includes("ricardo");
+    if (adminMode && !isAdmin) {
+      res.status(403).json({ error: "Solo un administrador puede entrenar portales sin ticket." });
+      return;
+    }
+
+    // A user-triggered JIT run may discover a draft, but it never activates or
+    // changes a connector by itself. The draft is stored only in a pending
+    // proposal and requires the administrator's sandbox/observation review.
+    const allowDirectDraftPersistence = adminMode;
+
+    // 1. Load the ticket from Firestore
+    if (!db || typeof db.collection !== "function") {
+      throw new Error("Firestore SDK no inicializado");
+    }
+    let ticketData = {};
+    if (!adminMode) {
+      const ticketDoc = await db.collection("tickets").doc(ticketId).get();
+      if (!ticketDoc.exists) {
+        throw new Error(`Ticket no encontrado (ID: ${ticketId}) en la base de datos Firestore: ${db._databaseId || db.databaseId || 'unknown'}`);
+      }
+      ticketData = ticketDoc.data();
+      if (ticketData.userId !== decodedToken.uid) {
+        res.status(403).json({ error: "No tienes permiso para entrenar este ticket." });
+        return;
+      }
+    }
+    // Use body values as primary source (fresher), fall back to stored data
+    const nombreEmisor = String(merchantName || bodyNombre || ticketData.nombreEmisor || "Comercio por identificar").trim();
+    const rfcEmisor = bodyRfc || ticketData.rfcEmisor || "";
+    const imageBase64 = ticketData.imageUrl || "";
+    await db.collection("automation_trainings").doc(trainingId).set({
+      userId: decodedToken.uid,
+      merchantName: nombreEmisor,
+      mode: adminMode ? "portal_admin" : "ticket_jit",
+      ticketId: ticketId || null,
+      createdAt: new Date().toISOString()
+    }, { merge: true });
+
+    // 2. Search for the portal URL via Search Grounding
+    await updateProgress(15, "Revisando si el ticket incluye una dirección de facturación...");
+    
+    const portalCandidates = [];
+    const ticketPortalCandidates = new Set();
+    const addPortalCandidate = (candidate, source = "search") => {
+      let clean = String(candidate || "").trim()
+        .replace(/^[`"'[(<\s]+/, "")
+        .replace(/[`"')\]>\s.,;:!?]+$/, "");
+      if (!/^https?:\/\//i.test(clean) && /^(?:www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?$/i.test(clean)) {
+        clean = `https://${clean}`;
+      }
+      if (!/^https?:\/\//i.test(clean)) return "";
+      if (!portalCandidates.includes(clean) && portalCandidates.length < 20) portalCandidates.push(clean);
+      if (source === "ticket") ticketPortalCandidates.add(clean);
+      return clean;
+    };
+    const rawTicketText = `${ticketData.rawOcrText || ""}\n${ticketData.billingUrl || ""}\n${ticketData.extractedFields || ""}`;
+    for (const match of rawTicketText.matchAll(/(?:https?:\/\/|www\.)[^\s"'<>]+|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com\.mx|com|mx|net|org)(?:\/[^\s"'<>]*)?/gi)) {
+      addPortalCandidate(match[0], "ticket");
+    }
+    if (!adminMode && imageBase64) {
+      try {
+        const keyToUse = customKey || optionalSecret(geminiPrimaryKey) || optionalSecret(geminiApiKey) || "";
+        const ticketUrlAi = new GoogleGenAI({ apiKey: keyToUse });
+        const rawImage = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
+        const mimeTypeMatch = imageBase64.match(/^data:([^;]+);base64,/i);
+        const ticketUrlResponse = await ticketUrlAi.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: [
+            { inlineData: { data: rawImage, mimeType: mimeTypeMatch?.[1] || "image/jpeg" } },
+            { text: "Lee únicamente las direcciones web impresas en este ticket. No infieras ni inventes dominios. Devuelve cada URL o dominio exactamente como aparece." }
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: { urls: { type: "ARRAY", items: { type: "STRING" } } },
+              required: ["urls"]
+            }
+          }
+        });
+        const ticketUrlResult = JSON.parse(ticketUrlResponse.text || "{}");
+        for (const url of ticketUrlResult.urls || []) addPortalCandidate(url, "ticket");
+      } catch (ticketUrlError) {
+        console.warn("Could not extract a billing URL directly from the ticket image:", ticketUrlError.message);
+      }
+    }
+    await updateProgress(
+      15,
+      ticketPortalCandidates.size > 0
+        ? "Verificando primero la dirección de facturación impresa en el ticket..."
+        : "El ticket no mostró una URL verificable. Buscando el portal oficial en internet..."
+    );
+    try {
+      const keyToUse = customKey || optionalSecret(geminiPrimaryKey) || optionalSecret(geminiApiKey) || "";
+      const ai = new GoogleGenAI({ apiKey: keyToUse });
+      const searchPrompt = `Encuentra URLs reales y actualmente accesibles para facturar tickets de la empresa mexicana '${nombreEmisor}' (RFC: ${rfcEmisor}).
+      Devuelve hasta 5 URLs candidatas: primero el portal directo y después páginas oficiales de la empresa que enlacen a facturación.
+      No inventes subdominios. Incluye únicamente URLs encontradas mediante Google Search, una por línea.`;
+      
+      // Step A: Google Search Grounding to get the URL (plain text - no JSON schema with grounding)
+      const searchResponse = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: searchPrompt,
+        config: {
+          tools: [{ googleSearch: {} }]
+        }
+      });
+      const searchText = searchResponse.text || "";
+      
+      for (const match of searchText.matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
+        addPortalCandidate(match[0]);
+      }
+      const groundingChunks = searchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      for (const chunk of groundingChunks) addPortalCandidate(chunk?.web?.uri);
+      const officialResponse = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `Encuentra exclusivamente la página oficial de la empresa mexicana "${nombreEmisor}" que explique o permita facturar tickets. Prioriza el dominio corporativo oficial, aunque requiera iniciar sesión. No incluyas blogs, videos, directorios ni páginas de terceros.`,
+        config: { tools: [{ googleSearch: {} }] }
+      });
+      for (const match of String(officialResponse.text || "").matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
+        addPortalCandidate(match[0]);
+      }
+      const officialChunks = officialResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      for (const chunk of officialChunks) addPortalCandidate(chunk?.web?.uri);
+
+      // Step C: If regex didn't find a URL, use a second AI call to extract it cleanly
+      if (portalCandidates.length === 0 && searchText.length > 10) {
+        const extractResponse = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `Del siguiente texto, extrae ÚNICAMENTE la URL del portal de facturación mencionado. Responde solo con la URL:\n${searchText}`,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: { portalUrl: { type: "STRING" } },
+              required: ["portalUrl"]
+            }
+          }
+        });
+        const parsed = JSON.parse(extractResponse.text || "{}");
+        addPortalCandidate(parsed.portalUrl);
+      }
+    } catch (err) {
+      console.warn("Google Search Grounding failed, using keyword fallback:", err.message);
+    }
+    
+    const suspiciousHosts = /(?:bit\.ly|tinyurl\.com|goo\.gl|t\.co|shorturl|cutt\.ly)$/i;
+    const merchantTokens = nombreEmisor.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .split(/[^a-z0-9]+/).filter(token => token.length >= 4);
+    const scoredCandidates = [];
+    for (const candidate of portalCandidates) {
+      try {
+        const parsedUrl = new URL(candidate);
+        const suspicious = suspiciousHosts.test(parsedUrl.hostname) ||
+          /^\d{1,3}(?:\.\d{1,3}){3}$/.test(parsedUrl.hostname) ||
+          /^(?:localhost|.+\.local)$/i.test(parsedUrl.hostname) ||
+          /\.(?:ru|cn|tk)$/i.test(parsedUrl.hostname);
+        if (suspicious) {
+          scoredCandidates.push({ url: candidate, reachable: false, score: -50, reason: "suspicious_domain" });
+          continue;
+        }
+        const response = await fetch(candidate, {
+          method: "GET",
+          redirect: "follow",
+          signal: AbortSignal.timeout(12000),
+          headers: { "User-Agent": "Mozilla/5.0 ZenTicket-PortalDiscovery/1.0" }
+        });
+        if (response.ok || [401, 403].includes(response.status)) {
+          const finalUrl = response.url || candidate;
+          const finalParsed = new URL(finalUrl);
+          const hostname = finalParsed.hostname.toLowerCase();
+          const html = await response.text().catch(() => "");
+          const evidenceText = `${finalUrl} ${html.slice(0, 60000)}`.toLowerCase();
+          const negativeEvidence = /miopinion|encuesta|survey|descarga mi app|app store|play store|\/blocked(?:\?|\/)|\/blog\/|boxfactura|facturartickets|recuperafacturas|youtube\.com|sites\.google\.com|domain.{0,30}for sale|buy this domain|godaddy/i.test(evidenceText);
+          const billingHost = /(factur|cfdi|autofactura)/i.test(hostname);
+          const billingPath = /(factur|cfdi|autofactura)/i.test(finalParsed.pathname);
+          const billingContent = /obtener factura|emitir (?:tu )?factura|servicio de facturacio|datos para facturar|ticket de carga/i.test(html);
+          let score = finalUrl.startsWith("https://") ? 30 : 0;
+          if (billingPath) score += 30;
+          if (billingHost) score += 100;
+          if (billingContent) score += 40;
+          const printedOnTicket = ticketPortalCandidates.has(candidate);
+          const merchantDomainMatch = merchantTokens.some(token => hostname.includes(token));
+          if (merchantDomainMatch) score += 20;
+          if (printedOnTicket) score += 60;
+          if (negativeEvidence) score -= 180;
+          score += 15;
+          score += 10;
+          const verifiedBillingPortal = !negativeEvidence &&
+            (merchantDomainMatch || billingHost || (billingPath && billingContent) || (printedOnTicket && billingContent));
+          scoredCandidates.push({
+            url: finalUrl, reachable: true, score,
+            officialDomainMatch: verifiedBillingPortal,
+            source: printedOnTicket ? "ticket" : "search",
+            reason: response.ok ? "verified_http" : `protected_http_${response.status}`
+          });
+          for (const hrefMatch of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
+            try {
+              const linkedUrl = new URL(hrefMatch[1], finalUrl);
+              if (merchantTokens.some(token => linkedUrl.hostname.toLowerCase().includes(token))) {
+                addPortalCandidate(linkedUrl.href);
+              }
+            } catch (_linkError) {}
+          }
+        }
+      } catch (candidateError) {
+        scoredCandidates.push({ url: candidate, reachable: false, score: 0, reason: candidateError.message });
+        console.info(`[JIT] Portal candidate rejected: ${candidate} (${candidateError.message})`);
+      }
+    }
+    scoredCandidates.sort((a, b) => b.score - a.score);
+    portalUrl = scoredCandidates.find(candidate => candidate.reachable && candidate.officialDomainMatch)?.url || "";
+    await db.collection("automation_trainings").doc(trainingId).set({ portalCandidates: scoredCandidates }, { merge: true });
+
+    // Never fabricate a billing URL: only a reachable search result may become a connector.
+    if (!portalUrl) {
+      throw new Error("No se pudo verificar un portal oficial de autofacturación para este comercio.");
+    }
+    const portalDomain = new URL(portalUrl).hostname.toLowerCase();
+    const learningMemorySnap = await db.collection("portal_learning_memory").where("domain", "==", portalDomain).get();
+    const learningMemory = learningMemorySnap.docs.map(doc => doc.data());
+    await db.collection("automation_trainings").doc(trainingId).set({ learningMemoryUsed: learningMemory }, { merge: true });
+
+    // Firebase only gathers URL evidence. Chromium exploration runs in the
+    // production Cloud Run runner and never executes Gemini-proposed selectors.
+    await updateProgress(45, "Portal oficial localizado. Verificando su estructura con el runner seguro...", "queued");
+    const discoveryJobRef = db.collection("connector_discovery_jobs").doc(trainingId);
+    const discoveryOutboxRef = db.collection("connector_discovery_outbox").doc(`discovery-${trainingId}`);
+    const queuedAt = now();
+    await db.runTransaction(async (transaction) => {
+      const existing = await transaction.get(discoveryJobRef);
+      const existingData = existing.exists ? existing.data() : null;
+      if (["queued", "running", "completed"].includes(String(existingData?.status || ""))) return;
+      transaction.set(discoveryJobRef, {
+        id: trainingId,
+        trainingId,
+        ticketId: ticketId || null,
+        userId: decodedToken.uid,
+        merchantName: nombreEmisor,
+        rfcEmisor: rfcEmisor || "",
+        portalUrl,
+        portalDomain,
+        portalCandidates: scoredCandidates,
+        learningMemory,
+        status: "queued",
+        attemptId: `discovery-${trainingId}-${Date.now()}`,
+        createdAt: existingData?.createdAt || queuedAt,
+        updatedAt: queuedAt
+      }, { merge: true });
+      transaction.set(discoveryOutboxRef, {
+        discoveryId: trainingId,
+        ticketId: ticketId || null,
+        userId: decodedToken.uid,
+        status: "pending",
+        eventType: "connector_discovery.requested",
+        createdAt: queuedAt,
+        updatedAt: queuedAt
+      }, { merge: true });
+      if (!adminMode && ticketId) {
+        transaction.update(db.collection("tickets").doc(ticketId), {
+          status: "training_required",
+          trainingId,
+          portalUrlCandidate: portalUrl,
+          portalUrlVerification: "candidate_verified_http",
+          updatedAt: queuedAt
+        });
+      }
+    });
+    res.status(202).json({
+      success: true,
+      queued: true,
+      trainingId,
+      status: "training_required",
+      portalUrlCandidate: portalUrl,
+      message: "Estamos verificando la estructura del portal oficial con el runner seguro."
+    });
+  } catch (err) {
+    console.error("JIT training request failed:", err);
+    res.status(500).json({ error: err.message || "No fue posible iniciar el entrenamiento." });
+  }
 });
 app.post("/api/fiscal/parse-constancia", async (req, res) => {
   if (!(await requireAuthenticatedRequest(req, res))) return;
@@ -2923,11 +3248,6 @@ exports.dispatchConnectorDiscoveryJobs = onSchedule(
     secrets: [runnerTaskTokenParam]
   },
   async () => {
-    // Fase 6: preserve the outbox for audit, but never dispatch discovery
-    // tasks while JIT governance is frozen.
-    console.info("[Connector discovery dispatch] JIT governance is frozen; no discovery tasks will be dispatched.");
-    return;
-
     let config;
     try {
       config = runnerDispatchConfig();

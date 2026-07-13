@@ -61,9 +61,9 @@ describe("Cloud Run task handler", () => {
     expect(processJob).not.toHaveBeenCalled();
   });
 
-  it("acknowledges queued discovery tasks without running JIT", async () => {
-    const processConnectorDiscovery = vi.fn();
-    const runBrowserSmoke = vi.fn();
+  it("processes discovery tasks when JIT is active", async () => {
+    const processConnectorDiscovery = vi.fn().mockResolvedValue(undefined);
+    const runBrowserSmoke = vi.fn().mockResolvedValue({ healthy: true });
     const baseUrl = await withHandler(createCloudRunHandler({
       taskToken: "task-secret",
       processJob: vi.fn(),
@@ -78,8 +78,12 @@ describe("Cloud Run task handler", () => {
     });
 
     expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toEqual({ status: "jit_governance_frozen" });
-    expect(runBrowserSmoke).not.toHaveBeenCalled();
-    expect(processConnectorDiscovery).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      discoveryId: "discovery-1",
+      status: "accepted",
+      smoke: { healthy: true }
+    });
+    expect(runBrowserSmoke).toHaveBeenCalled();
+    expect(processConnectorDiscovery).toHaveBeenCalledWith("discovery-1");
   });
 });
