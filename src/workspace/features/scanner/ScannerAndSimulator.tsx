@@ -2492,7 +2492,7 @@ export default function ScannerAndSimulator({
       }
 
       // Enforce strict 7 enqueuing rules
-      const isProductionReady = ["production_ready", "real_validation"].includes(activeConn.status);
+      const isProductionReady = ["production_ready", "real_validation", "pending_validation"].includes(activeConn.status);
       const isRunnerAvailable = activeConn.runnerAvailable === true;
       const isPortalMapValid = pMap && (pMap.isApproved === true || pMap.status === "approved") && pMap.stepsJson;
       const isContractValid = activeConn.extractionContract && Array.isArray(activeConn.extractionContract.requiredPortalFields);

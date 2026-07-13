@@ -787,7 +787,7 @@ app.post("/api/tickets/analyze", authenticateFirebaseToken, async (req: Request,
       }
 
       // Check conector existence and readiness
-      const runnableStatuses = ["production_ready", "automation_available", "real_validation"];
+      const runnableStatuses = ["production_ready", "automation_available", "real_validation", "pending_validation"];
       isReadyConnector = Boolean(
         matchedConnector &&
         runnableStatuses.includes(matchedConnector.status) &&

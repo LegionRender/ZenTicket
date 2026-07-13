@@ -896,7 +896,7 @@ async function processOcrRequest({ req, image, mimeType, userId, retryJobId = nu
         };
       }
 
-      const runnableStatuses = ["production_ready", "automation_available", "real_validation"];
+      const runnableStatuses = ["production_ready", "automation_available", "real_validation", "pending_validation"];
       if (!runnableStatuses.includes(matchedConnector.status) || matchedConnector.runnerAvailable !== true) {
         console.log(`[OCR Pipeline Cloud] Connector matched (${matchedConnector.nombre}) but not ready. Creating training request.`);
         try {

@@ -355,6 +355,15 @@ export async function processJob(jobId: string) {
           updatedAt: new Date().toISOString()
         });
 
+        await db.collection("connectors").doc(lockedJob.connectorId).set({
+          status: "production_ready",
+          isProductionReady: true,
+          totalExecutions: FieldValue.increment(1),
+          successCount: FieldValue.increment(1),
+          lastSuccessAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+
         await createRunnerLog(jobId, ticketId, "INFO", "Validación local y SAT completada con éxito (Vigente). Factura obtenida.");
         printE2EResult(true, ticketId, jobId, connector, xmlResult, satResult, "succeeded", "cfdi_validated", "cfdi_validated", true, true, true, { xml: xmlDest, pdf: lockedJob.pdfHtml ? `users/${lockedJob.userId}/tickets/${ticketId}/cfdi.pdf` : null });
         setActiveJobContext(null, null, null, null);
@@ -878,6 +887,8 @@ export async function processJob(jobId: string) {
       await ticketRef.update(ticketUpdates);
 
       await db.collection("connectors").doc(lockedJob.connectorId).set({
+        status: "production_ready",
+        isProductionReady: true,
         totalExecutions: FieldValue.increment(1),
         successCount: FieldValue.increment(1),
         lastSuccessAt: new Date().toISOString(),

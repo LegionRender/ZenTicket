@@ -261,7 +261,8 @@ export async function processConnectorDiscovery(discoveryId: string) {
       id: connectorId,
       nombre: discovery.merchantName || "Comercio Auto-JIT",
       rfc: discovery.rfcEmisor || "",
-      status: "production_ready",
+      status: "pending_validation",
+      isProductionReady: false,
       runnerAvailable: true,
       extractionContract: {
         requiredPortalFields: contractFields,
@@ -430,7 +431,7 @@ export async function processConnectorDiscovery(discoveryId: string) {
         status: "pending",
         connectorId,
         portalMapId: `map-${connectorId}`,
-        connectorStatusAtRun: "production_ready",
+        connectorStatusAtRun: "pending_validation",
         ticketDataSnapshot: ticketSnapshot,
         fiscalProfileSnapshot,
         connectorSnapshot,
